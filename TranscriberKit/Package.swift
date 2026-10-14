@@ -9,6 +9,7 @@ let package = Package(
         .library(name: "TranscriberCore", targets: ["TranscriberCore"]),
         .library(name: "AudioFeatures", targets: ["AudioFeatures"]),
         .library(name: "SpeechDetection", targets: ["SpeechDetection"]),
+        .library(name: "SubtitleExport", targets: ["SubtitleExport"]),
         .library(name: "SubtitlePostProcessing", targets: ["SubtitlePostProcessing"]),
         .library(name: "TranscriptionPipeline", targets: ["TranscriptionPipeline"]),
         .library(name: "WhisperCpp", targets: ["WhisperCpp"]),
@@ -23,6 +24,10 @@ let package = Package(
         .target(
             name: "SpeechDetection",
             dependencies: ["TranscriberCore", "AudioFeatures"]
+        ),
+        .target(
+            name: "SubtitleExport",
+            dependencies: ["TranscriberCore"]
         ),
         .target(
             name: "SubtitlePostProcessing",
@@ -56,6 +61,11 @@ let package = Package(
         .testTarget(
             name: "SpeechDetectionTests",
             dependencies: ["SpeechDetection"],
+            resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "SubtitleExportTests",
+            dependencies: ["SubtitleExport"],
             resources: [.copy("Fixtures")]
         ),
         .testTarget(

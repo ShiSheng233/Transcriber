@@ -171,6 +171,8 @@ parity-fixtures: | $(CHICKENRICE_SOURCE) $(VAD_ONNX)
 	uv run --script Tools/parity/make_postprocessing_fixture.py $(CHICKENRICE_PACKAGE)/infer.py \
 		$(TEST_FIXTURES)/TranscriptionPipelineTests/Fixtures/chunk-cases.json \
 		$(TEST_FIXTURES)/SubtitlePostProcessingTests/Fixtures/postprocessing-cases.json
+	uv run --script Tools/parity/make_subtitle_fixture.py $(CHICKENRICE_PACKAGE)/infer.py \
+		$(TEST_FIXTURES)/SubtitleExportTests/Fixtures
 
 # TranscriberKit ---------------------------------------------------------------
 
