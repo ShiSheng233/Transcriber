@@ -74,6 +74,11 @@ final class JobQueueViewModel {
         return jobs.isEmpty ? "" : String(localized: "\(jobs.count) files")
     }
 
+    /// A file is being worked on.
+    var isRunning: Bool {
+        jobs.contains { !$0.status.isFinished && $0.status != .queued }
+    }
+
     var canStart: Bool {
         jobs.contains { $0.status == .queued }
     }
@@ -121,6 +126,11 @@ final class JobQueueViewModel {
     func startQueue() {
         let configuration = settingsStore.settings.queueConfiguration(apiKeys: apiKeyStore)
         Task { await queue.start(configuration: configuration) }
+    }
+
+    /// Interrupts the current file (it goes back to waiting) and stops.
+    func stopQueue() {
+        Task { await queue.stop() }
     }
 
     func cancel(jobID: UUID) {

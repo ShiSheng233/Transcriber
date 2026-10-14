@@ -139,6 +139,19 @@ final class MainWindowController: NSWindowController {
         queueViewModel.startQueue()
     }
 
+    @objc func stopQueue(_ sender: Any?) {
+        queueViewModel.stopQueue()
+    }
+
+    /// The toolbar's Start button turns into Stop while files run.
+    @objc func startOrStopQueue(_ sender: Any?) {
+        if queueViewModel.isRunning {
+            queueViewModel.stopQueue()
+        } else {
+            queueViewModel.startQueue()
+        }
+    }
+
     @objc func clearFinished(_ sender: Any?) {
         queueViewModel.clearFinished()
     }
@@ -150,10 +163,17 @@ final class MainWindowController: NSWindowController {
 
 extension MainWindowController: NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        if menuItem.action == #selector(togglePlayer(_:)) {
+        switch menuItem.action {
+        case #selector(togglePlayer(_:)):
             menuItem.title = detailViewModel.showsPlayer ? String(localized: "Hide Player") : String(localized: "Show Player")
+            return true
+        case #selector(startQueue(_:)):
+            return queueViewModel.canStart && !queueViewModel.isRunning
+        case #selector(stopQueue(_:)):
+            return queueViewModel.isRunning
+        default:
+            return true
         }
-        return true
     }
 }
 
@@ -188,7 +208,7 @@ extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
         case ItemID.add:
             configure(item, label: String(localized: "Add Files"), symbol: "plus", action: #selector(addFiles(_:)))
         case ItemID.start:
-            configure(item, label: String(localized: "Start"), symbol: "play.fill", action: #selector(startQueue(_:)))
+            configure(item, label: String(localized: "Start"), symbol: "play.fill", action: #selector(startOrStopQueue(_:)))
         case ItemID.clear:
             configure(item, label: String(localized: "Clear Finished"), symbol: "checklist.checked", action: #selector(clearFinished(_:)))
         case ItemID.player:
@@ -214,8 +234,15 @@ extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
                 accessibilityDescription: label
             )
         }
+        if item.itemIdentifier == ItemID.start {
+            let isRunning = queueViewModel.isRunning
+            let label = isRunning ? String(localized: "Stop") : String(localized: "Start")
+            item.label = label
+            item.toolTip = isRunning ? String(localized: "Stop (⌘.)") : String(localized: "Start (⌘R)")
+            item.image = NSImage(systemSymbolName: isRunning ? "stop.fill" : "play.fill", accessibilityDescription: label)
+        }
         return switch item.itemIdentifier {
-        case ItemID.start: queueViewModel.canStart
+        case ItemID.start: queueViewModel.isRunning || queueViewModel.canStart
         case ItemID.clear: queueViewModel.hasFinishedJobs
         default: true
         }

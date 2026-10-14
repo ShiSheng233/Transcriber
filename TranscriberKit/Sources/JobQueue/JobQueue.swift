@@ -39,6 +39,10 @@ public actor JobQueue {
     private var jobs: [Job] = []
     private var runningTask: Task<Void, Never>?
     private var runningJobID: UUID?
+    /// The running job alone, so cancelling it leaves the queue running.
+    private var currentJobTask: Task<Void, Never>?
+    /// Set by `stop()`: the interrupted job goes back to the queue.
+    private var isStopping = false
     private var observers: [UUID: AsyncStream<[Job]>.Continuation] = [:]
     private static let logCapacity = 5_000
     private var logEntries: [LogEntry] = []
@@ -91,9 +95,13 @@ public actor JobQueue {
         }
     }
 
+    public var isRunning: Bool {
+        runningTask != nil
+    }
+
     public func remove(_ jobID: UUID) {
         if jobID == runningJobID {
-            runningTask?.cancel()
+            currentJobTask?.cancel()
         }
         jobs.removeAll { $0.id == jobID }
         publish()
@@ -104,16 +112,29 @@ public actor JobQueue {
         publish()
     }
 
+    /// Cancels one job; the queue moves on to the next.
     public func cancel(_ jobID: UUID) {
         if jobID == runningJobID {
-            runningTask?.cancel()
+            currentJobTask?.cancel()
         } else {
             update(jobID) { $0.status = .cancelled }
         }
     }
 
+    /// Stops after interrupting the running job, which goes back to waiting;
+    /// queued jobs stay queued for the next `start`.
+    public func stop() {
+        guard let runningTask else {
+            return
+        }
+        isStopping = true
+        currentJobTask?.cancel()
+        runningTask.cancel()
+    }
+
     /// Cancels the running job, waits for it to stop and frees the model.
     public func shutDown() async {
+        currentJobTask?.cancel()
         runningTask?.cancel()
         await runningTask?.value
         await engine.unload()
@@ -128,15 +149,16 @@ public actor JobQueue {
     }
 
     private func processQueuedJobs(configuration: Configuration) async {
-        while let job = jobs.first(where: { $0.status == .queued }) {
+        while !Task.isCancelled, let job = jobs.first(where: { $0.status == .queued }) {
             runningJobID = job.id
-            await process(job, configuration: configuration)
+            let jobTask = Task { await process(job, configuration: configuration) }
+            currentJobTask = jobTask
+            await jobTask.value
+            currentJobTask = nil
             runningJobID = nil
-            if Task.isCancelled {
-                break
-            }
         }
         runningTask = nil
+        isStopping = false
     }
 
     private func process(_ job: Job, configuration: Configuration) async {
@@ -183,11 +205,12 @@ public actor JobQueue {
             }
             log(.info, job.id, "\(fileName): done in \(ActivityFormatting.seconds(ContinuousClock.now - jobStart)), \(segments.count) subtitles")
         } catch is CancellationError {
+            let requeues = isStopping
             update(job.id) {
-                $0.status = .cancelled
+                $0.status = requeues ? .queued : .cancelled
                 $0.segments = []
             }
-            log(.warning, job.id, "\(fileName): cancelled")
+            log(.warning, job.id, requeues ? "\(fileName): stopped, waiting to start again" : "\(fileName): cancelled")
         } catch {
             update(job.id) {
                 $0.status = .failed(message: error.localizedDescription)

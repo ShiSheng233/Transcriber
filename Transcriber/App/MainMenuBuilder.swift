@@ -56,6 +56,7 @@ enum MainMenuBuilder {
         let menu = NSMenu(title: String(localized: "File"))
         menu.addItem(withTitle: String(localized: "Add Files…"), action: #selector(MainWindowController.addFiles(_:)), keyEquivalent: "o")
         menu.addItem(withTitle: String(localized: "Start"), action: #selector(MainWindowController.startQueue(_:)), keyEquivalent: "r")
+        menu.addItem(withTitle: String(localized: "Stop"), action: #selector(MainWindowController.stopQueue(_:)), keyEquivalent: ".")
         menu.addItem(.separator())
         menu.addItem(withTitle: String(localized: "Close Window"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         return menu

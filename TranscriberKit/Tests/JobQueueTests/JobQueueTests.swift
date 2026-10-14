@@ -159,3 +159,62 @@ struct JobQueueTests {
         #expect(!job.segments.contains { $0.text.hasPrefix("EN: ") })
     }
 }
+
+/// Stop and Cancel, with a real model (skipped where Models/ is missing).
+struct JobQueueStopTests {
+    private static let repository = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    private static let models = repository.appendingPathComponent("Models")
+    private static let sample = repository.appendingPathComponent("ParityMedia/tts-long.wav")
+    private static let whisperJa = ModelCatalog.scan(models).model(withID: "whisper-ja-1.5b")
+    private static let isAvailable = whisperJa != nil && FileManager.default.fileExists(atPath: sample.path)
+
+    private func startTwoJobs() async throws -> (JobQueue, [Job]) {
+        let queue = JobQueue()
+        let configuration = JobQueue.Configuration(
+            engine: EngineSettings(modelsDirectory: Self.models, backend: .whisperCpp, concurrentChunkCount: 1),
+            output: OutputSettings(formats: [], directory: FileManager.default.temporaryDirectory)
+        )
+        let copy = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).wav")
+        try FileManager.default.copyItem(at: Self.sample, to: copy)
+        await queue.add([Self.sample, copy], model: try #require(Self.whisperJa))
+        await queue.start(configuration: configuration)
+        // Wait until the first job is transcribing.
+        for await jobs in await queue.snapshots() {
+            if case .transcribing = jobs[0].status {
+                return (queue, jobs)
+            }
+        }
+        throw CancellationError()
+    }
+
+    private func waitUntilIdle(_ queue: JobQueue) async -> [Job] {
+        while await queue.isRunning {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        var latest: [Job] = []
+        for await jobs in await queue.snapshots() {
+            latest = jobs
+            break
+        }
+        return latest
+    }
+
+    @Test(.enabled(if: isAvailable), .timeLimit(.minutes(5)))
+    func stopPutsTheRunningJobBackAndKeepsTheRest() async throws {
+        let (queue, _) = try await startTwoJobs()
+        await queue.stop()
+        let jobs = await waitUntilIdle(queue)
+        await queue.shutDown()
+        #expect(jobs.map(\.status) == [.queued, .queued])
+    }
+
+    @Test(.enabled(if: isAvailable), .timeLimit(.minutes(5)))
+    func cancellingTheRunningJobMovesOnToTheNext() async throws {
+        let (queue, jobs) = try await startTwoJobs()
+        await queue.cancel(jobs[0].id)
+        let finished = await waitUntilIdle(queue)
+        await queue.shutDown()
+        #expect(finished.map(\.status) == [.cancelled, .completed])
+    }
+}
