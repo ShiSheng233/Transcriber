@@ -110,13 +110,15 @@ struct LogitsProcessorTests {
     }
 
     @Test func greedySamplerPicksTheLowestIdOnTies() {
-        #expect(GreedySampler().sample(from: [-1, 0, 0]) == 1)
+        var generator = SystemRandomNumberGenerator()
+        #expect(GreedySampler().sample(from: [-1, 0, 0], using: &generator) == 1)
     }
 
     @Test func temperatureSamplerNeverPicksMaskedTokens() {
-        var sampler = TemperatureSampler(temperature: 1, generator: SystemRandomNumberGenerator())
+        var generator = SystemRandomNumberGenerator()
+        let sampler = TemperatureSampler(temperature: 1)
         for _ in 0..<200 {
-            #expect(sampler.sample(from: [-.infinity, log(0.5), log(0.5)]) != 0)
+            #expect(sampler.sample(from: [-.infinity, log(0.5), log(0.5)], using: &generator) != 0)
         }
     }
 }

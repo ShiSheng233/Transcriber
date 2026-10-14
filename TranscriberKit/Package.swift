@@ -45,7 +45,7 @@ let package = Package(
         ),
         .target(
             name: "WhisperDecoding",
-            dependencies: ["TranscriberCore"]
+            dependencies: ["TranscriberCore", "AudioFeatures"]
         ),
         .target(
             name: "WhisperCpp",
