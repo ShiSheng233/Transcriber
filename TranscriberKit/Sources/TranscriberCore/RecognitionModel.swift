@@ -35,5 +35,7 @@ public struct RecognitionModel: Hashable, Sendable, Identifiable {
     public let vadModelName: String
     public let vad: VADSettings
     public let chunking: ChunkingSettings
+    public let segmentation: SegmentationSettings
     public let merge: MergeSettings
+    public let cleanup: TextCleanupSettings
 }

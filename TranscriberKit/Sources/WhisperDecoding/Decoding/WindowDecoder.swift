@@ -18,8 +18,9 @@ public struct WindowDecodingResult: Sendable, Equatable {
     }
 }
 
-/// Generates tokens for one window: prompt `<|sot|><|lang|><|task|>`, then up
-/// to `maximumGeneratedTokenCount` steps through the logits pipeline.
+/// Generates tokens for one window: prompt `<|sot|><|lang|><|task|>` (plus
+/// `<|notimestamps|>` for text-only models), then up to
+/// `maximumGeneratedTokenCount` steps through the logits pipeline.
 public struct WindowDecoder: Sendable {
     public let tokenizer: WhisperTokenizer
     public let settings: DecodingSettings
@@ -51,8 +52,9 @@ public struct WindowDecoder: Sendable {
 
         let startLogits = try session.logits(appending: [specialTokens.startOfTranscript], afterPrefixOf: 0)
         let noSpeechProbability = Self.probability(of: specialTokens.noSpeech, in: startLogits)
-        let firstStepLogits = try session.logits(appending: [language, task], afterPrefixOf: 1)
-        let promptLength = 3
+        let promptTail = settings.usesTimestamps ? [language, task] : [language, task, specialTokens.noTimestamps]
+        let firstStepLogits = try session.logits(appending: promptTail, afterPrefixOf: 1)
+        let promptLength = 1 + promptTail.count
 
         let sampler: any TokenSampler = temperature > 0 ? TemperatureSampler(temperature: temperature) : GreedySampler()
         let hypothesisCount = temperature > 0 ? settings.bestOf : 1

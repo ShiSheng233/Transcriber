@@ -74,13 +74,7 @@ public actor TranscriptionEngine {
         let decoder = FallbackDecoder(windowDecoder: WindowDecoder(
             tokenizer: tokenizer, settings: model.decoding
         ))
-        let pipelineSettings = TranscriptionPipeline.Settings(
-            vad: model.vad,
-            chunking: model.chunking,
-            merge: model.merge,
-            concurrentChunkCount: settings.concurrentChunkCount,
-            samplingSeed: TranscriptionPipeline.Settings.chickenRice.samplingSeed
-        )
+        let pipelineSettings = TranscriptionPipeline.Settings(model: model, concurrentChunkCount: settings.concurrentChunkCount)
         return TranscriptionPipeline(
             vadModel: try WhisperVADModel(compiledModelAt: vadURL),
             segmentGenerator: SegmentGenerator(backend: backend, decoder: decoder),

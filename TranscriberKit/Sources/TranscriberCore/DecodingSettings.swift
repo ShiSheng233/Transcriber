@@ -19,6 +19,12 @@ public struct DecodingSettings: Hashable, Sendable, Codable {
     public var maximumInitialTimestampSeconds: Double
     /// Tokens generated per window at most (`min(max_length / 2, max_length - prompt)`).
     public var maximumGeneratedTokenCount: Int
+    /// `false`: text only (`without_timestamps`), for models trained without
+    /// timestamp tokens; subtitle times then come from the VAD.
+    public var usesTimestamps: Bool
+    /// Hugging Face's `no_repeat_ngram_size`: no n-gram of this size may occur
+    /// twice in a window's text. 0 turns it off.
+    public var noRepeatNgramSize: Int
 
     public init(
         task: TranscriptionTask,
@@ -31,7 +37,9 @@ public struct DecodingSettings: Hashable, Sendable, Codable {
         repetitionPenalty: Float,
         suppressesBlankStart: Bool,
         maximumInitialTimestampSeconds: Double,
-        maximumGeneratedTokenCount: Int
+        maximumGeneratedTokenCount: Int,
+        usesTimestamps: Bool = true,
+        noRepeatNgramSize: Int = 0
     ) {
         self.task = task
         self.languageCode = languageCode
@@ -44,6 +52,8 @@ public struct DecodingSettings: Hashable, Sendable, Codable {
         self.suppressesBlankStart = suppressesBlankStart
         self.maximumInitialTimestampSeconds = maximumInitialTimestampSeconds
         self.maximumGeneratedTokenCount = maximumGeneratedTokenCount
+        self.usesTimestamps = usesTimestamps
+        self.noRepeatNgramSize = noRepeatNgramSize
     }
 
     /// `int(round(max_initial_timestamp / time_precision))` with 20 ms steps.

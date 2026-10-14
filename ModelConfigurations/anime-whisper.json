@@ -1,0 +1,32 @@
+{
+  "id": "anime-whisper",
+  "name": "anime-whisper",
+  "summary": "Japanese speech → Japanese subtitles (anime and game dialogue)",
+  "source": "https://huggingface.co/litagin/anime-whisper",
+  "license": "MIT; trained on Galgame_Speech_ASR_16kHz, whose terms forbid commercial use of models trained on it",
+  "language": "ja",
+  "task": "transcribe",
+  "llm_mode": "translate",
+  "decoding": {
+    "timestamps": false,
+    "temperatures": [0.0],
+    "best_of": 1,
+    "repetition_penalty": 1.0,
+    "no_repeat_ngram_size": 0,
+    "no_speech_threshold": 1.0,
+    "max_new_tokens": 128
+  },
+  "vad": {
+    "threshold": 0.30,
+    "max_speech_duration_s": 4.0,
+    "speech_pad_ms": 50
+  },
+  "segmentation": {
+    "mode": "vad_groups",
+    "group_gap_ms": 250,
+    "group_max_ms": 2500,
+    "leading_silence_ms": 200
+  },
+  "merge": { "enabled": false },
+  "cleanup": { "drop_ellipsis_only": true, "collapse_repeats": true, "append_period": false }
+}

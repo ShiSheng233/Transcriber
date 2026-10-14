@@ -122,3 +122,22 @@ struct LogitsProcessorTests {
         }
     }
 }
+
+struct NoRepeatNgramTests {
+    private func disabled(after tokens: [Int], size: Int) -> [Int] {
+        var logits = [Float](repeating: 0, count: 10)
+        var mask = TokenMask()
+        NoRepeatNgram(size: size).process(&logits, mask: &mask, step: DecodingStep(index: tokens.count, generatedTokens: tokens))
+        mask.apply(to: &logits)
+        return logits.indices.filter { logits[$0] == -.infinity }
+    }
+
+    @Test func bansTokensThatWouldRepeatAnNgram() {
+        // "1 2 3 1 2": the trigram "1 2 3" was seen, so 3 may not follow "1 2".
+        #expect(disabled(after: [1, 2, 3, 1, 2], size: 3) == [3])
+        // Bigrams: after "2", token 3 was seen.
+        #expect(disabled(after: [1, 2, 3, 1, 2], size: 2) == [3])
+        #expect(disabled(after: [1, 2, 3], size: 3).isEmpty)
+        #expect(disabled(after: [4, 4], size: 1) == [4])
+    }
+}

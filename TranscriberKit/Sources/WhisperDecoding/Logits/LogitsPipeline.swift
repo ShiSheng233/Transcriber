@@ -25,11 +25,18 @@ public struct LogitsPipeline: Sendable {
         if settings.suppressesBlankStart {
             processors.append(SuppressTokensAtBegin(tokens: [spaceToken, specialTokens.endOfText]))
         }
-        processors.append(TimestampRules(
-            specialTokens: specialTokens,
-            vocabularySize: vocabularySize,
-            maximumInitialTimestampIndex: settings.maximumInitialTimestampIndex
-        ))
+        if settings.noRepeatNgramSize > 0 {
+            processors.append(NoRepeatNgram(size: settings.noRepeatNgramSize))
+        }
+        if settings.usesTimestamps {
+            processors.append(TimestampRules(
+                specialTokens: specialTokens,
+                vocabularySize: vocabularySize,
+                maximumInitialTimestampIndex: settings.maximumInitialTimestampIndex
+            ))
+        } else {
+            processors.append(SuppressTimestamps(specialTokens: specialTokens, vocabularySize: vocabularySize))
+        }
         return LogitsPipeline(processors: processors)
     }
 

@@ -67,6 +67,21 @@ struct WindowDecoderTests {
         #expect(result.averageLogProbability == Double(result.sumLogProbability) / 5)
     }
 
+    @Test func textOnlyDecodingAddsNoTimestampsAndNeverPicksATimestamp() throws {
+        var settings = ChickenRiceDefaults.decoding(task: .transcribe)
+        settings.usesTimestamps = false
+        // The model "wants" a timestamp first; it must be masked out.
+        let script = [specials.timestampBegin, 1000, 1001, specials.endOfText]
+        let session = ScriptedSession(vocabularySize: tokenizer.vocabularySize, script: script, noSpeechToken: specials.noSpeech)
+        var generator = SystemRandomNumberGenerator()
+
+        let result = try WindowDecoder(tokenizer: tokenizer, settings: settings).decode(session, temperature: 0, generator: &generator)
+
+        #expect(session.calls[1].tokens == [specials.language("ja")!, specials.transcribe, specials.noTimestamps])
+        #expect(session.calls[2].prefixLength == 4)
+        #expect(!result.tokens.contains { $0 >= specials.noTimestamps })
+    }
+
     @Test func stopsAtTheMaximumTokenCountWithoutEndOfText() throws {
         let timestamp = specials.timestampBegin
         let session = ScriptedSession(vocabularySize: tokenizer.vocabularySize, script: [timestamp] + Array(repeating: 1000, count: 10), noSpeechToken: specials.noSpeech)

@@ -19,6 +19,9 @@ struct ModelConfiguration: Decodable {
         var suppressBlank: Bool?
         var maxInitialTimestamp: Double?
         var maxNewTokens: Int?
+        /// false for models trained without timestamp tokens.
+        var timestamps: Bool?
+        var noRepeatNgramSize: Int?
     }
 
     struct VAD: Decodable {
@@ -37,10 +40,23 @@ struct ModelConfiguration: Decodable {
         var splitWindowFactor: Double?
     }
 
+    struct Segmentation: Decodable {
+        var mode: SegmentationSettings.Mode?
+        var groupGapMs: Int?
+        var groupMaxMs: Int?
+        var leadingSilenceMs: Int?
+    }
+
     struct Merge: Decodable {
         var enabled: Bool?
         var maxGapMs: Int?
         var maxDurationMs: Int?
+    }
+
+    struct Cleanup: Decodable {
+        var dropEllipsisOnly: Bool?
+        var collapseRepeats: Bool?
+        var appendPeriod: Bool?
     }
 
     var id: String
@@ -55,7 +71,9 @@ struct ModelConfiguration: Decodable {
     var decoding: Decoding?
     var vad: VAD?
     var chunking: Chunking?
+    var segmentation: Segmentation?
     var merge: Merge?
+    var cleanup: Cleanup?
 
     func model(in directory: URL) -> RecognitionModel {
         let files = files ?? Files()
@@ -63,6 +81,8 @@ struct ModelConfiguration: Decodable {
         let vadDefaults = ChickenRiceDefaults.vad
         let chunkingDefaults = ChickenRiceDefaults.chunking
         let mergeDefaults = ChickenRiceDefaults.merge
+        let segmentationDefaults = SegmentationSettings.chunks
+        let cleanupDefaults = TextCleanupSettings.none
         let decoding = decoding
 
         return RecognitionModel(
@@ -89,7 +109,9 @@ struct ModelConfiguration: Decodable {
                 repetitionPenalty: decoding?.repetitionPenalty ?? decodingDefaults.repetitionPenalty,
                 suppressesBlankStart: decoding?.suppressBlank ?? decodingDefaults.suppressesBlankStart,
                 maximumInitialTimestampSeconds: decoding?.maxInitialTimestamp ?? decodingDefaults.maximumInitialTimestampSeconds,
-                maximumGeneratedTokenCount: decoding?.maxNewTokens ?? decodingDefaults.maximumGeneratedTokenCount
+                maximumGeneratedTokenCount: decoding?.maxNewTokens ?? decodingDefaults.maximumGeneratedTokenCount,
+                usesTimestamps: decoding?.timestamps ?? decodingDefaults.usesTimestamps,
+                noRepeatNgramSize: decoding?.noRepeatNgramSize ?? decodingDefaults.noRepeatNgramSize
             ),
             vadModelName: vad?.model ?? "whisper-vad-asmr",
             vad: VADSettings(
@@ -105,10 +127,21 @@ struct ModelConfiguration: Decodable {
                 targetChunkDurationSeconds: chunking?.targetChunkDurationS ?? chunkingDefaults.targetChunkDurationSeconds,
                 splitWindowFactor: chunking?.splitWindowFactor ?? chunkingDefaults.splitWindowFactor
             ),
+            segmentation: SegmentationSettings(
+                mode: segmentation?.mode ?? segmentationDefaults.mode,
+                groupGap: segmentation?.groupGapMs.map { AudioTime(milliseconds: $0) } ?? segmentationDefaults.groupGap,
+                groupMaximumDuration: segmentation?.groupMaxMs.map { AudioTime(milliseconds: $0) } ?? segmentationDefaults.groupMaximumDuration,
+                leadingSilence: segmentation?.leadingSilenceMs.map { AudioTime(milliseconds: $0) } ?? segmentationDefaults.leadingSilence
+            ),
             merge: MergeSettings(
                 isEnabled: merge?.enabled ?? mergeDefaults.isEnabled,
                 maximumGap: merge?.maxGapMs.map { AudioTime(milliseconds: $0) } ?? mergeDefaults.maximumGap,
                 maximumSegmentDuration: merge?.maxDurationMs.map { AudioTime(milliseconds: $0) } ?? mergeDefaults.maximumSegmentDuration
+            ),
+            cleanup: TextCleanupSettings(
+                dropsEllipsisOnlyLines: cleanup?.dropEllipsisOnly ?? cleanupDefaults.dropsEllipsisOnlyLines,
+                collapsesRepeats: cleanup?.collapseRepeats ?? cleanupDefaults.collapsesRepeats,
+                appendsPeriod: cleanup?.appendPeriod ?? cleanupDefaults.appendsPeriod
             )
         )
     }

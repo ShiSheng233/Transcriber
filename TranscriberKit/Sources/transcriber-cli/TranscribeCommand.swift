@@ -86,13 +86,7 @@ struct TranscribeCommand: AsyncParsableCommand {
             backend: whisperBackend,
             decoder: FallbackDecoder(windowDecoder: WindowDecoder(tokenizer: tokenizer, settings: recognitionModel.decoding))
         )
-        let settings = TranscriptionPipeline.Settings(
-            vad: recognitionModel.vad,
-            chunking: recognitionModel.chunking,
-            merge: recognitionModel.merge,
-            concurrentChunkCount: concurrency,
-            samplingSeed: TranscriptionPipeline.Settings.chickenRice.samplingSeed
-        )
+        let settings = TranscriptionPipeline.Settings(model: recognitionModel, concurrentChunkCount: concurrency)
         let pipeline = TranscriptionPipeline(vadModel: vadModel, segmentGenerator: segmentGenerator, settings: settings)
 
         for input in inputs {

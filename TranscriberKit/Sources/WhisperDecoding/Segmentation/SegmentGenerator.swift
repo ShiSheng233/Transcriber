@@ -31,6 +31,28 @@ public struct SegmentGenerator: Sendable {
         self.segmenter = TimestampSegmenter(timestampBegin: decoder.windowDecoder.tokenizer.specialTokens.timestampBegin)
     }
 
+    /// Decodes a short signal (at most one window) as a single piece of text,
+    /// for text-only models: `nil` when it is silence or decodes to nothing.
+    public func text(
+        for features: LogMelFeatures,
+        generator: inout some RandomNumberGenerator
+    ) throws -> String? {
+        let settings = decoder.windowDecoder.settings
+        let frameCount = min(LogMelSpectrogram.windowFrameCount, features.frameCount - 1)
+        guard frameCount > 0 else {
+            return nil
+        }
+        let window = features.paddedWindow(startingAt: 0, frameCount: frameCount)
+        let decoding = try decoder.decode(try backend.makeSession(window: window), generator: &generator).decoding
+        let isSilence = Double(decoding.noSpeechProbability) > settings.noSpeechThreshold
+            && !(decoding.averageLogProbability > settings.logProbabilityThreshold)
+        if isSilence {
+            return nil
+        }
+        let text = decoder.windowDecoder.tokenizer.decode(decoding.tokens).pythonStripped
+        return text.isEmpty ? nil : text
+    }
+
     /// - Parameter features: the whole signal in faster-whisper framing (`.wholeSignal`).
     public func segments(
         for features: LogMelFeatures,

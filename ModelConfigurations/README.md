@@ -32,8 +32,19 @@ below. Anything left out takes the original ChickenRice pipeline's value
               "min_speech_duration_ms": 250, "max_speech_duration_s": 30,
               "min_silence_duration_ms": 100, "speech_pad_ms": 30 },
 "chunking": { "enabled": true, "target_chunk_duration_s": 30, "split_window_factor": 0.8 },
-"merge":    { "enabled": true, "max_gap_ms": 500, "max_duration_ms": 2000 }
+"merge":    { "enabled": true, "max_gap_ms": 500, "max_duration_ms": 2000 },
+"segmentation": { "mode": "chunks" },
+"cleanup":  { "drop_ellipsis_only": false, "collapse_repeats": false, "append_period": false }
 ```
+
+Text-only models (trained without timestamp tokens, e.g. anime-whisper) set
+`"decoding": { "timestamps": false }` and `"segmentation": { "mode": "vad_groups" }`:
+neighbouring VAD spans closer than `group_gap_ms` are grouped up to
+`group_max_ms`, each group is decoded alone after `leading_silence_ms` of
+silence, and becomes one subtitle timed by the VAD. `no_repeat_ngram_size`
+blocks repeated n-grams (0 = off). `"no_speech_threshold": 1.0` never treats a
+piece as silence. See `anime-whisper.json`, which follows WhisperJAV's
+ChronosJAV pipeline ("balanced" settings).
 
 The values above are examples of the format; see `ChickenRiceDefaults.swift`
 for the actual defaults.

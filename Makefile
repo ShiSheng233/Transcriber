@@ -191,7 +191,7 @@ MEL_FILTERS           := $(DOWNLOADS_DIR)/mel_filters.npz
 WHISPER_TOOLS_BUILD := $(TOOLS_DIR)/whisper-tools-build
 WHISPER_QUANTIZE    := $(WHISPER_TOOLS_BUILD)/bin/whisper-quantize
 
-WHISPER_MODELS := chickenrice-v0.2 whisper-ja-1.5b
+WHISPER_MODELS := chickenrice-v0.2 whisper-ja-1.5b anime-whisper
 MODEL_CONFIGURATIONS := ModelConfigurations
 
 $(MEL_FILTERS):
@@ -238,6 +238,19 @@ endef
 
 $(eval $(call whisper_model,chickenrice-v0.2,chickenrice0721/whisper-large-v2-translate-zh-v0.2-st,cc6f01704d188c6ed2d1ab84b83734f964c9a45a,0abdde18518f3902913e4e2124145fb7d4635ebba88fd5c035b71819ec328ad0,bf16))
 $(eval $(call whisper_model,whisper-ja-1.5b,efwkjn/whisper-ja-1.5B,72c13fb7b6cc2a831780cdd79cd1a829e77bab02,0bf92cf794ebb2cef2699c24dc71184be6a1ac133cc3c64f228ea08173d0155f,f16))
+# anime-whisper is published in float32; float16 halves it without a measurable loss.
+$(eval $(call whisper_model,anime-whisper,litagin/anime-whisper,22e2008a8182b357da3922a6308d095008f72973,15c672f0bf687b1c67aa14325f9c382c6919f1fce976f990513618b464a3c626,f16))
+
+# anime-whisper ships no tokenizer.json. It was fine-tuned from
+# kotoba-whisper-v2.0, whose tokenizer.json is used after checking that it
+# has exactly anime-whisper's vocabulary.
+KOTOBA_WHISPER_REVISION := 7eb575277d18909a4af8a24e3ae8cce2e99794ae
+
+$(DOWNLOADS_DIR)/anime-whisper/tokenizer.json: Tools/model-conversion/check_tokenizer_vocabulary.py
+	$(MAKE) $(DOWNLOADS_DIR)/anime-whisper/vocab.json $(DOWNLOADS_DIR)/anime-whisper/added_tokens.json
+	$(DOWNLOAD) -o $@.partial $(HUGGING_FACE)/kotoba-tech/kotoba-whisper-v2.0/resolve/$(KOTOBA_WHISPER_REVISION)/tokenizer.json
+	uv run --script $< $@.partial $(DOWNLOADS_DIR)/anime-whisper/vocab.json $(DOWNLOADS_DIR)/anime-whisper/added_tokens.json
+	mv $@.partial $@
 
 MODEL_FILES = $(foreach model,$(WHISPER_MODELS),$(addprefix $(MODELS_DIR)/$(model)/,$(1)))
 
@@ -276,6 +289,7 @@ endef
 
 $(eval $(call mlx_model,chickenrice-v0.2,bfloat16))
 $(eval $(call mlx_model,whisper-ja-1.5b,float16))
+$(eval $(call mlx_model,anime-whisper,float16))
 
 mlx-models: $(call MODEL_FILES,model.json tokenizer.json mlx/model.safetensors)
 
