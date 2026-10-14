@@ -310,13 +310,19 @@ public actor JobQueue {
         let action = if case .polishChinese = refinerJob { "Polishing" } else { "Translating" }
         log(.info, jobID, "\(action) \(segments.count) subtitles with \(llm.settings.model)…")
         let start = ContinuousClock.now
-        let refined = try await withOrderedProgress { (queue, batches: (completed: Int, total: Int)) in
+        let result = try await withOrderedProgress { (queue, batches: (completed: Int, total: Int)) in
             queue.update(jobID) { $0.status = .refining(completedBatches: batches.completed, totalBatches: batches.total) }
             queue.log(.detail, jobID, "LLM batch \(batches.completed)/\(batches.total) done")
         } work: { report in
             try await refiner.refine(segments, job: refinerJob, glossary: llm.settings.glossaryEntries) { report(($0, $1)) }
         }
         log(.info, jobID, "LLM step finished in \(ActivityFormatting.seconds(ContinuousClock.now - start))")
+        if result.failedBatchCount > 0 {
+            let warning = "\(result.failedBatchCount) of \(result.batchCount) LLM batches failed; those lines kept their original text (\(result.firstFailure ?? "unknown error"))"
+            update(jobID) { $0.warning = warning }
+            log(.warning, jobID, warning)
+        }
+        let refined = result.segments
         switch refinerJob {
         case .translate, .translateSubtitles:
             return llm.settings.keepsOriginalLine ? refined.withOriginalLines(from: segments) : refined

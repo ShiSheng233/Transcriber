@@ -1,12 +1,15 @@
 import Foundation
 import TranscriberCore
 
-/// Polishes or translates subtitle text with a language model, batch by batch.
+/// Polishes or translates subtitle text with a language model, a few batches
+/// at a time.
 ///
 /// Times never change: only each line's text is replaced. Every batch is sent
-/// with a few lines of context on both sides; the reply must return exactly
-/// the batch's ids. A reply that does not is retried once, after which lines
-/// the model did not return keep their original text.
+/// with a few original lines of context on both sides; the reply must return
+/// exactly the batch's ids. A reply that does not is retried once, after which
+/// lines the model did not return keep their original text. A batch whose
+/// request fails keeps its original lines and is counted in the result; a
+/// rejected key, no credits, or every batch failing ends the whole run.
 public struct SubtitleRefiner: Sendable {
     public enum Job: Sendable {
         case polishChinese
@@ -19,6 +22,9 @@ public struct SubtitleRefiner: Sendable {
         public var model: String
         public var batchSize = 40
         public var contextLineCount = 8
+        /// Batches in flight at once. Their "before" context is the original
+        /// text, since earlier batches may not be done yet.
+        public var concurrentBatchCount = 4
         public var temperature = 0.3
 
         public init(model: String) {
@@ -34,15 +40,24 @@ public struct SubtitleRefiner: Sendable {
         self.configuration = configuration
     }
 
+    public struct Result: Sendable {
+        public let segments: [TimedText]
+        /// Batches that kept their original text because the request failed.
+        public let failedBatchCount: Int
+        public let batchCount: Int
+        /// The error of a failed batch, for a warning.
+        public let firstFailure: String?
+    }
+
     /// - Parameter progress: called with (finished batches, total batches).
     public func refine(
         _ segments: [TimedText],
         job: Job,
         glossary: [(source: String, target: String)] = [],
-        progress: @Sendable (Int, Int) -> Void = { _, _ in }
-    ) async throws -> [TimedText] {
+        progress: @escaping @Sendable (Int, Int) -> Void = { _, _ in }
+    ) async throws -> Result {
         guard !segments.isEmpty else {
-            return []
+            return Result(segments: [], failedBatchCount: 0, batchCount: 0, firstFailure: nil)
         }
         let promptJob: SubtitlePrompt.Job = switch job {
         case .polishChinese: .polishChinese
@@ -51,27 +66,72 @@ public struct SubtitleRefiner: Sendable {
         }
         let system = ChatMessage(role: .system, content: SubtitlePrompt.systemMessage(for: promptJob, glossary: glossary))
 
+        let batches = stride(from: 0, to: segments.count, by: configuration.batchSize).map {
+            $0..<min($0 + configuration.batchSize, segments.count)
+        }
         var refinedTexts = segments.map(\.text)
-        let batchStarts = Array(stride(from: 0, to: segments.count, by: configuration.batchSize))
-        for (batchIndex, start) in batchStarts.enumerated() {
-            try Task.checkCancellation()
-            let batch = start..<min(start + configuration.batchSize, segments.count)
-            // Before the batch: already refined lines, so wording carries over.
-            let contextBefore = Array(refinedTexts[max(0, start - configuration.contextLineCount)..<start])
-            let contextAfter = segments[batch.upperBound..<min(batch.upperBound + configuration.contextLineCount, segments.count)].map(\.text)
-            let lines = batch.map { (id: $0, text: segments[$0].text) }
+        var failures: [any Error] = []
 
-            let replies = try await requestLines(lines, system: system, contextBefore: contextBefore, contextAfter: contextAfter)
-            for index in batch {
-                if let text = replies[index], !text.pythonStripped.isEmpty {
-                    refinedTexts[index] = text
+        try await withThrowingTaskGroup(of: (Range<Int>, Swift.Result<[Int: String], any Error>).self) { group in
+            var next = 0
+            func startNextBatch() {
+                let batch = batches[next]
+                next += 1
+                let contextBefore = segments[max(0, batch.lowerBound - configuration.contextLineCount)..<batch.lowerBound].map(\.text)
+                let contextAfter = segments[batch.upperBound..<min(batch.upperBound + configuration.contextLineCount, segments.count)].map(\.text)
+                let lines = batch.map { (id: $0, text: segments[$0].text) }
+                group.addTask {
+                    do {
+                        return (batch, .success(try await requestLines(lines, system: system, contextBefore: contextBefore, contextAfter: contextAfter)))
+                    } catch let error where Self.endsTheRun(error) {
+                        throw error
+                    } catch {
+                        return (batch, .failure(error))
+                    }
                 }
             }
-            progress(batchIndex + 1, batchStarts.count)
+            while next < min(max(configuration.concurrentBatchCount, 1), batches.count) {
+                startNextBatch()
+            }
+            var finished = 0
+            while let (batch, outcome) = try await group.next() {
+                switch outcome {
+                case .success(let replies):
+                    for index in batch {
+                        if let text = replies[index], !text.pythonStripped.isEmpty {
+                            refinedTexts[index] = text
+                        }
+                    }
+                case .failure(let error):
+                    failures.append(error)
+                }
+                finished += 1
+                progress(finished, batches.count)
+                if next < batches.count {
+                    startNextBatch()
+                }
+            }
+        }
+        if failures.count == batches.count, let error = failures.first {
+            throw error  // nothing came back: the run failed
         }
 
-        return zip(segments, refinedTexts).map { segment, text in
+        let refined = zip(segments, refinedTexts).map { segment, text in
             TimedText(start: segment.start, end: segment.end, text: text)
+        }
+        return Result(
+            segments: refined,
+            failedBatchCount: failures.count,
+            batchCount: batches.count,
+            firstFailure: failures.first?.localizedDescription
+        )
+    }
+
+    /// Errors no other batch can avoid.
+    private static func endsTheRun(_ error: any Error) -> Bool {
+        switch error {
+        case is CancellationError, LLMServiceError.invalidAPIKey, LLMServiceError.insufficientCredits: true
+        default: false
         }
     }
 

@@ -26,9 +26,13 @@ struct TranslateCommand: AsyncParsableCommand {
             let url = URL(fileURLWithPath: input)
             let original = try SubtitleParser.parse(fileAt: url)
             print("\(url.lastPathComponent): \(original.count) subtitles")
-            let translated = try await refiner.refine(original, job: .translateSubtitles(targetLanguage: language)) { completed, total in
+            let result = try await refiner.refine(original, job: .translateSubtitles(targetLanguage: language)) { completed, total in
                 print("  batch \(completed)/\(total)")
             }
+            if result.failedBatchCount > 0 {
+                print("  warning: \(result.failedBatchCount) of \(result.batchCount) batches failed: \(result.firstFailure ?? "")")
+            }
+            let translated = result.segments
             let outputURL = url.deletingLastPathComponent().appendingPathComponent("\(url.deletingPathExtension().lastPathComponent).\(language).srt")
             try SubtitleRenderer.render(translated, as: .srt).write(to: outputURL, atomically: true, encoding: .utf8)
             print("  wrote \(outputURL.path)")

@@ -47,7 +47,13 @@ public struct ChatMessage: Sendable, Equatable {
 /// schema in the prompt, then the prompt alone. The step that worked is
 /// remembered. On OpenRouter, requests set `provider.require_parameters` so
 /// they only reach providers that honor the schema. Rate limits and server
-/// errors are retried with backoff.
+/// errors are retried with backoff, and so are timeouts and dropped
+/// connections.
+///
+/// Replies are streamed (`stream: true`): a long answer arrives token by token,
+/// so the connection is never idle long enough to time out, however long the
+/// whole answer takes. A server that ignores `stream` answers with plain JSON,
+/// which is read the same way.
 public final class ChatCompletionsClient: StructuredChatCompleting {
     public static let defaultRetryDelays: [Duration] = [.seconds(1), .seconds(3), .seconds(8)]
 
@@ -62,6 +68,8 @@ public final class ChatCompletionsClient: StructuredChatCompleting {
     private let session: URLSession
     private let retryDelays: [Duration]
     private let workingMode = Mutex(OutputMode.jsonSchema)
+    /// Longest silence between two pieces of a reply.
+    static let idleTimeout: TimeInterval = 120
 
     public init(baseURL: URL, apiKey: String, session: URLSession = .shared, retryDelays: [Duration] = defaultRetryDelays) {
         self.baseURL = baseURL
@@ -85,7 +93,7 @@ public final class ChatCompletionsClient: StructuredChatCompleting {
         while true {
             do {
                 let request = try makeRequest(model: model, messages: messages, schemaName: schemaName, schema: schema, temperature: temperature, mode: mode)
-                let content = try Self.messageContent(from: try await send(request))
+                let content = try await streamedContent(of: request)
                 workingMode.withLock { $0 = mode }
                 return mode == .jsonSchema ? content : Self.strippingCodeFence(content)
             } catch LLMServiceError.requestFailed(let status, _) where [400, 422].contains(status) {
@@ -129,6 +137,7 @@ public final class ChatCompletionsClient: StructuredChatCompleting {
             "model": model,
             "messages": messages.map { ["role": $0.role.rawValue, "content": $0.content] },
             "temperature": temperature,
+            "stream": true,
         ]
         switch mode {
         case .jsonSchema:
@@ -142,6 +151,7 @@ public final class ChatCompletionsClient: StructuredChatCompleting {
             break
         }
         var request = URLRequest(url: baseURL.appendingPathComponent("chat/completions"))
+        request.timeoutInterval = Self.idleTimeout
         request.httpMethod = "POST"
         authorize(&request)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -168,23 +178,65 @@ public final class ChatCompletionsClient: StructuredChatCompleting {
     }
 
     private func send(_ request: URLRequest) async throws -> Data {
-        var attempt = 0
+        try await withRetries {
+            let (data, response) = try await self.session.data(for: request)
+            try Self.check(response, data: data)
+            return data
+        }
+    }
+
+    /// The message text of a streamed (server-sent events) or plain reply.
+    private func streamedContent(of request: URLRequest) async throws -> Data {
+        try await withRetries {
+            let (bytes, response) = try await self.session.bytes(for: request)
+            let isEventStream = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type")?.contains("text/event-stream") == true
+            guard isEventStream, (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false else {
+                var data = Data()
+                for try await byte in bytes {
+                    data.append(byte)
+                }
+                try Self.check(response, data: data)
+                return try Self.messageContent(from: data)
+            }
+            var content = ""
+            for try await line in bytes.lines {
+                guard line.hasPrefix("data:") else {
+                    continue  // comments (": keep-alive"), event names, blank lines
+                }
+                let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                if payload == "[DONE]" {
+                    break
+                }
+                let chunk = try JSONDecoder().decode(StreamChunk.self, from: Data(payload.utf8))
+                if let error = chunk.error {
+                    throw LLMServiceError.requestFailed(status: error.code ?? 0, message: error.message)
+                }
+                content += chunk.choices?.first?.delta?.content ?? ""
+            }
+            guard !content.isEmpty else {
+                throw LLMServiceError.emptyResponse
+            }
+            return Data(content.utf8)
+        }
+    }
+
+    private func withRetries<Result>(_ attempt: () async throws -> Result) async throws -> Result {
+        var retries = 0
         while true {
             do {
-                let (data, response) = try await session.data(for: request)
-                try Self.check(response, data: data)
-                return data
-            } catch let error as LLMServiceError where Self.isRetryable(error) && attempt < retryDelays.count {
-                try await Task.sleep(for: retryDelays[attempt])
-                attempt += 1
+                return try await attempt()
+            } catch where Self.isRetryable(error) && retries < retryDelays.count {
+                try await Task.sleep(for: retryDelays[retries])
+                retries += 1
             }
         }
     }
 
-    private static func isRetryable(_ error: LLMServiceError) -> Bool {
+    private static func isRetryable(_ error: any Error) -> Bool {
         switch error {
-        case .rateLimited: true
-        case .requestFailed(let status, _): status >= 500
+        case LLMServiceError.rateLimited: true
+        case LLMServiceError.requestFailed(let status, _): status >= 500
+        case let error as URLError: [.timedOut, .networkConnectionLost, .cannotConnectToHost, .notConnectedToInternet].contains(error.code)
         default: false
         }
     }
@@ -222,6 +274,19 @@ public final class ChatCompletionsClient: StructuredChatCompleting {
             }
 
             let message: Message
+        }
+
+        let choices: [Choice]?
+        let error: ErrorBody?
+    }
+
+    private struct StreamChunk: Decodable {
+        struct Choice: Decodable {
+            struct Delta: Decodable {
+                let content: String?
+            }
+
+            let delta: Delta?
         }
 
         let choices: [Choice]?

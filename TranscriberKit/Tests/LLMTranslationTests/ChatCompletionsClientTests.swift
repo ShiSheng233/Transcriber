@@ -8,6 +8,7 @@ final class MockURLProtocol: URLProtocol, @unchecked Sendable {
     struct Response {
         let status: Int
         let body: String
+        var contentType = "application/json"
     }
 
     static let state = Mutex<(responses: [Response], requests: [URLRequest])>(([], []))
@@ -33,7 +34,7 @@ final class MockURLProtocol: URLProtocol, @unchecked Sendable {
             state.requests.append(recorded)
             return state.responses.isEmpty ? Response(status: 500, body: "{}") : state.responses.removeFirst()
         }
-        let http = HTTPURLResponse(url: request.url!, statusCode: response.status, httpVersion: nil, headerFields: nil)!
+        let http = HTTPURLResponse(url: request.url!, statusCode: response.status, httpVersion: nil, headerFields: ["Content-Type": response.contentType])!
         client?.urlProtocol(self, didReceive: http, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(response.body.utf8))
         client?.urlProtocolDidFinishLoading(self)
@@ -87,6 +88,28 @@ struct ChatCompletionsClientTests {
         #expect(format["type"] as? String == "json_schema")
         #expect(schema["strict"] as? Bool == true)
         #expect((body["provider"] as? [String: Any])?["require_parameters"] as? Bool == true)
+    }
+
+    @Test func assemblesAStreamedReply() async throws {
+        let stream = [
+            #"data: {"choices":[{"delta":{"role":"assistant"}}]}"#,
+            ": keep-alive",
+            #"data: {"choices":[{"delta":{"content":"{\"lines\":"}}]}"#,
+            #"data: {"choices":[{"delta":{"content":"[]}"}}]}"#,
+            "data: [DONE]",
+        ].joined(separator: "\n\n")
+        let client = client([.init(status: 200, body: stream, contentType: "text/event-stream")])
+
+        #expect(String(decoding: try await complete(client), as: UTF8.self) == #"{"lines":[]}"#)
+        let body = try #require(try requestBodies().first)
+        #expect(body["stream"] as? Bool == true)
+    }
+
+    @Test func reportsAnErrorSentInsideTheStream() async throws {
+        let stream = #"data: {"error":{"message":"upstream overloaded","code":503}}"# + "\n\n"
+        await #expect(throws: LLMServiceError.self) {
+            try await complete(client([.init(status: 200, body: stream, contentType: "text/event-stream")]))
+        }
     }
 
     @Test func retriesRateLimitsThenSucceeds() async throws {
