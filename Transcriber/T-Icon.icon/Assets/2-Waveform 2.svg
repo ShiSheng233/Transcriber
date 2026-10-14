@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Speech: rounded bars, loudest in the middle. Solid fill so Icon
+       Composer's glass and colour options apply cleanly. -->
+  <g fill="#FFFFFF" transform="translate(512 512) scale(1.0164) translate(-512 -537)">
+    <rect x="252" y="390" width="40" height="100" rx="20"/>
+    <rect x="316" y="340" width="40" height="200" rx="20"/>
+    <rect x="380" y="280" width="40" height="320" rx="20"/>
+    <rect x="444" y="232" width="40" height="416" rx="20"/>
+    <rect x="508" y="300" width="40" height="280" rx="20"/>
+    <rect x="572" y="254" width="40" height="372" rx="20"/>
+    <rect x="636" y="320" width="40" height="240" rx="20"/>
+    <rect x="700" y="372" width="40" height="136" rx="20"/>
+  </g>
+</svg>
