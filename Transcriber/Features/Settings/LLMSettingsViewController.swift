@@ -65,7 +65,7 @@ final class LLMSettingsViewController: SettingsPaneViewController {
                 SettingsForm.row(String(localized: "Model"), descriptionLabel: modelStatusLabel, control: modelControls),
             ], footer: String(localized: "Only models with structured output are listed.")),
             SettingsForm.section(String(localized: "Translation"), rows: [
-                SettingsForm.row(String(localized: "Translate into"), description: String(localized: "Transcribe task only"), control: languageBox),
+                SettingsForm.row(String(localized: "Translate into"), description: String(localized: "For models whose output is translated"), control: languageBox),
                 SettingsForm.row(String(localized: "Keep the Japanese line"), description: String(localized: "Bilingual subtitles"), control: keepsOriginalSwitch),
             ]),
             SettingsForm.section(String(localized: "Glossary"), rows: [

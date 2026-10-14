@@ -1,4 +1,5 @@
 /// Settings the original ChickenRice pipeline (v1.10, commit 6210488) runs with.
+/// They are the defaults for every setting a model.json leaves out.
 ///
 /// Each value names where it comes from, so a reader can check it against the
 /// original without guessing.

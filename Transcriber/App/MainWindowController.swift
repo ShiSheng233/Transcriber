@@ -49,6 +49,26 @@ final class MainWindowController: NSWindowController {
     private func render() {
         detailViewModel.show(queueViewModel.selectedJob)
         window?.toolbar?.validateVisibleItems()
+        if queueViewModel.isMissingModels {
+            showMissingModelsAlert()
+        }
+    }
+
+    private func showMissingModelsAlert() {
+        guard let window, window.attachedSheet == nil else {
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = String(localized: "No Models Installed")
+        alert.informativeText = String(localized: "Choose a models folder in Settings. Each model needs its own folder with a model.json.")
+        alert.addButton(withTitle: String(localized: "Open Settings"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        alert.beginSheetModal(for: window) { [weak self] response in
+            self?.queueViewModel.dismissMissingModels()
+            if response == .alertFirstButtonReturn {
+                self?.openSettings()
+            }
+        }
     }
 
     // MARK: Actions (toolbar and menu)

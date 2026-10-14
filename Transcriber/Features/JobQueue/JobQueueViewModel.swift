@@ -9,7 +9,7 @@ final class JobQueueViewModel {
     struct Row: Identifiable, Equatable {
         let id: UUID
         let fileName: String
-        let taskName: String
+        let modelName: String
         let statusText: String
         let fractionCompleted: Double?
         let canCancel: Bool
@@ -24,16 +24,19 @@ final class JobQueueViewModel {
     private(set) var rows: [Row] = []
     private(set) var jobs: [Job] = []
     private(set) var selectedJobID: UUID?
+    private(set) var isMissingModels = false
 
     private let queue: JobQueue
     private let settingsStore: SettingsStore
     private let apiKeyStore: APIKeyStore
+    private let library: ModelLibrary
     private var snapshotTask: Task<Void, Never>?
 
-    init(queue: JobQueue, settingsStore: SettingsStore, apiKeyStore: APIKeyStore) {
+    init(queue: JobQueue, settingsStore: SettingsStore, apiKeyStore: APIKeyStore, library: ModelLibrary) {
         self.queue = queue
         self.settingsStore = settingsStore
         self.apiKeyStore = apiKeyStore
+        self.library = library
         snapshotTask = Task { [weak self] in
             for await jobs in await queue.snapshots() {
                 self?.apply(jobs)
@@ -55,14 +58,24 @@ final class JobQueueViewModel {
 
     // MARK: Intents
 
-    /// Adds media files, and the media files inside folders, with the current task.
+    /// Adds media files, and the media files inside folders, with the chosen
+    /// model. With no model installed, nothing is added and `isMissingModels`
+    /// asks the window to point the user to Settings.
     func addFiles(_ urls: [URL]) {
         let mediaFiles = urls.flatMap(Self.mediaFiles(in:))
         guard !mediaFiles.isEmpty else {
             return
         }
-        let task = settingsStore.settings.task
-        Task { await queue.add(mediaFiles, task: task) }
+        library.reloadIfFolderChanged()
+        guard let model = library.selectedModel else {
+            isMissingModels = true
+            return
+        }
+        Task { await queue.add(mediaFiles, model: model) }
+    }
+
+    func dismissMissingModels() {
+        isMissingModels = false
     }
 
     func startQueue() {
@@ -100,7 +113,7 @@ final class JobQueueViewModel {
         Row(
             id: job.id,
             fileName: job.sourceURL.lastPathComponent,
-            taskName: job.task == .translate ? String(localized: "Translate") : String(localized: "Transcribe"),
+            modelName: job.model.displayName,
             statusText: statusText(for: job),
             fractionCompleted: job.status.fractionCompleted,
             canCancel: !job.status.isFinished,

@@ -27,7 +27,8 @@ struct JobQueueTests {
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     private static let models = repository.appendingPathComponent("Models")
     private static let sample = repository.appendingPathComponent("ParityMedia/tts-long.wav")
-    private static let isAvailable = FileManager.default.fileExists(atPath: models.appendingPathComponent("whisper/whisper-ja-1.5b.bin").path)
+    private static let whisperJa = ModelCatalog.scan(models).model(withID: "whisper-ja-1.5b")
+    private static let isAvailable = whisperJa.map { FileManager.default.fileExists(atPath: $0.files.whisperCpp?.path ?? "") } == true
         && FileManager.default.fileExists(atPath: sample.path)
 
     @Test(.enabled(if: isAvailable), .timeLimit(.minutes(5)))
@@ -40,7 +41,7 @@ struct JobQueueTests {
             output: OutputSettings(formats: [.srt, .lrc], directory: outputDirectory)
         )
 
-        await queue.add([Self.sample], task: .transcribe)
+        await queue.add([Self.sample], model: try #require(Self.whisperJa))
         await queue.start(configuration: configuration)
 
         var sawTranscribing = false
@@ -65,12 +66,20 @@ struct JobQueueTests {
     }
 
     @Test func reportsMissingModelsAsAFailedJob() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let modelFolder = folder.appendingPathComponent("test-model")
+        try FileManager.default.createDirectory(at: modelFolder, withIntermediateDirectories: true)
+        try Data(#"{"id": "test-model", "name": "Test", "language": "ja", "task": "translate", "llm_mode": "polish"}"#.utf8)
+            .write(to: modelFolder.appendingPathComponent("model.json"))
+        let model = try #require(ModelCatalog.scan(folder).model(withID: "test-model"))
+
         let queue = JobQueue()
         let configuration = JobQueue.Configuration(
             engine: EngineSettings(modelsDirectory: URL(fileURLWithPath: "/nonexistent"), backend: .whisperCpp, concurrentChunkCount: 1),
             output: OutputSettings(formats: [.srt], directory: nil)
         )
-        await queue.add([URL(fileURLWithPath: "/tmp/sample.wav")], task: .translate)
+        await queue.add([URL(fileURLWithPath: "/tmp/sample.wav")], model: model)
         await queue.start(configuration: configuration)
         for await jobs in await queue.snapshots() {
             if let job = jobs.first, job.status.isFinished {
@@ -93,7 +102,7 @@ struct JobQueueTests {
             output: OutputSettings(formats: [.srt], directory: outputDirectory),
             llm: llm
         )
-        await queue.add([Self.sample], task: .transcribe)
+        await queue.add([Self.sample], model: try #require(Self.whisperJa))
         await queue.start(configuration: configuration)
         for await jobs in await queue.snapshots() {
             if let job = jobs.first, job.status.isFinished {

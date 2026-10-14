@@ -1,0 +1,9 @@
+{
+  "id": "chickenrice-v0.2",
+  "name": "ChickenRice v0.2",
+  "summary": "Japanese speech → Chinese subtitles",
+  "source": "https://huggingface.co/chickenrice0721/whisper-large-v2-translate-zh-v0.2-st",
+  "language": "ja",
+  "task": "translate",
+  "llm_mode": "polish"
+}

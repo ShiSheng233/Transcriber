@@ -17,6 +17,7 @@ final class SettingsViewModel {
 
     private let store: SettingsStore
     private let apiKeyStore: APIKeyStore
+    private let library: ModelLibrary
 
     private(set) var apiKey: String
     private(set) var availableModels: [OpenRouterModel] = []
@@ -37,9 +38,10 @@ final class SettingsViewModel {
         return choices
     }
 
-    init(store: SettingsStore, apiKeyStore: APIKeyStore) {
+    init(store: SettingsStore, apiKeyStore: APIKeyStore, library: ModelLibrary) {
         self.store = store
         self.apiKeyStore = apiKeyStore
+        self.library = library
         self.apiKey = apiKeyStore.read()
     }
 
@@ -47,44 +49,68 @@ final class SettingsViewModel {
         store.settings
     }
 
-    struct ModelStatus: Equatable {
-        let title: String
-        /// Path inside the models folder.
-        let relativePath: String
-        let isPresent: Bool
+    /// The speech models in the models folder, for the model menu.
+    var recognitionModels: [RecognitionModel] {
+        library.models
     }
 
-    /// The files the chosen engine needs, and whether each is in the models folder.
+    var selectedRecognitionModel: RecognitionModel? {
+        library.selectedModel
+    }
+
+    struct ModelStatus: Equatable {
+        let title: String
+        let detail: String
+        let isReady: Bool
+    }
+
+    /// Each installed model and whether the chosen engine can run it, then the
+    /// VAD models they use, then any model.json that could not be read.
     var modelStatuses: [ModelStatus] {
-        let engine = settings.backend == .whisperCpp ? "whisper.cpp" : "MLX"
-        let required: [(title: String, path: String)] = switch settings.backend {
-        case .whisperCpp: [
-            ("ChickenRice v0.2 · \(engine)", "whisper/chickenrice-v0.2.bin"),
-            ("whisper-ja-1.5B · \(engine)", "whisper/whisper-ja-1.5b.bin"),
-        ]
-        case .mlx: [
-            ("ChickenRice v0.2 · \(engine)", "mlx/chickenrice-v0.2/model.safetensors"),
-            ("whisper-ja-1.5B · \(engine)", "mlx/whisper-ja-1.5b/model.safetensors"),
-        ]
+        let fileManager = FileManager.default
+        let catalog = library.catalog
+        var statuses = catalog.models.map { model in
+            let weights = settings.backend == .whisperCpp ? model.files.whisperCpp : model.files.mlx
+            let isReady = weights.map { fileManager.fileExists(atPath: $0.path) } == true
+                && fileManager.fileExists(atPath: model.files.tokenizer.path)
+            let detail = isReady
+                ? model.summary
+                : String(localized: "No \(settings.backend.displayName) weights in \(model.directory.lastPathComponent)/")
+            return ModelStatus(title: model.displayName, detail: detail, isReady: isReady)
         }
-        let all = required + [(String(localized: "Voice activity detection (Core ML)"), "vad/whisper-vad-asmr.mlmodelc")]
-        return all.map { model in
-            ModelStatus(
-                title: model.title,
-                relativePath: model.path,
-                isPresent: FileManager.default.fileExists(atPath: settings.modelsDirectory.appendingPathComponent(model.path).path)
-            )
+        for vadModel in Set(catalog.models.map(\.vadModelName)).sorted() {
+            let path = "vad/\(vadModel).mlmodelc"
+            statuses.append(ModelStatus(
+                title: String(localized: "Voice activity detection"),
+                detail: path,
+                isReady: fileManager.fileExists(atPath: settings.modelsDirectory.appendingPathComponent(path).path)
+            ))
         }
+        for problem in catalog.problems {
+            let folder = problem.configurationURL.deletingLastPathComponent().lastPathComponent
+            statuses.append(ModelStatus(title: folder, detail: String(localized: "model.json could not be read"), isReady: false))
+        }
+        return statuses
+    }
+
+    var hasNoModels: Bool {
+        library.models.isEmpty
     }
 
     // MARK: Intents
 
     func setModelsDirectory(_ url: URL) {
         store.update { $0.modelsDirectory = url }
+        library.reload()
     }
 
-    func setTask(_ task: TranscriptionTask) {
-        store.update { $0.task = task }
+    /// Picks up models added to or removed from the folder.
+    func reloadModels() {
+        library.reload()
+    }
+
+    func setRecognitionModel(_ id: String) {
+        store.update { $0.modelID = id }
     }
 
     func setBackend(_ backend: EngineSettings.Backend) {

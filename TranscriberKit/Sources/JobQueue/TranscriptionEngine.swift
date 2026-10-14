@@ -8,10 +8,13 @@ import WhisperMLX
 
 public enum TranscriptionEngineError: LocalizedError, Equatable {
     case missingModel(URL)
+    /// The model's configuration names no files for the chosen engine.
+    case unsupportedBackend(model: String, backend: EngineSettings.Backend)
 
     public var errorDescription: String? {
         switch self {
         case .missingModel(let url): "Model not found: \(url.path)"
+        case .unsupportedBackend(let model, let backend): "\(model) has no \(backend.displayName) weights."
         }
     }
 }
@@ -21,48 +24,52 @@ public enum TranscriptionEngineError: LocalizedError, Equatable {
 public actor TranscriptionEngine {
     private struct PipelineKey: Hashable {
         let settings: EngineSettings
-        let task: TranscriptionTask
+        let model: RecognitionModel
     }
 
     private var loaded: (key: PipelineKey, pipeline: TranscriptionPipeline)?
 
     public init() {}
 
-    public func pipeline(for task: TranscriptionTask, settings: EngineSettings) throws -> TranscriptionPipeline {
-        let key = PipelineKey(settings: settings, task: task)
+    public func pipeline(for model: RecognitionModel, settings: EngineSettings) throws -> TranscriptionPipeline {
+        let key = PipelineKey(settings: settings, model: model)
         if let loaded, loaded.key == key {
             return loaded.pipeline
         }
         loaded = nil  // release the previous model before loading the next
-        let pipeline = try Self.makePipeline(for: task, settings: settings)
+        let pipeline = try Self.makePipeline(for: model, settings: settings)
         loaded = (key, pipeline)
         return pipeline
     }
 
-    private static func makePipeline(for task: TranscriptionTask, settings: EngineSettings) throws -> TranscriptionPipeline {
-        let models = settings.modelsDirectory
-        let modelName = EngineSettings.modelName(for: task)
-        let vadURL = try existing(models.appendingPathComponent("vad/whisper-vad-asmr.mlmodelc"))
+    private static func makePipeline(for model: RecognitionModel, settings: EngineSettings) throws -> TranscriptionPipeline {
+        let vadURL = try existing(settings.modelsDirectory.appendingPathComponent("vad/\(model.vadModelName).mlmodelc"))
 
         let backend: any WhisperBackend
-        let tokenizerURL: URL
         switch settings.backend {
         case .whisperCpp:
-            let modelURL = try existing(models.appendingPathComponent("whisper/\(modelName).bin"))
-            tokenizerURL = try existing(models.appendingPathComponent("whisper/\(modelName).tokenizer.json"))
-            backend = WhisperCppBackend(model: try WhisperModel(contentsOf: modelURL))
+            guard let weights = model.files.whisperCpp else {
+                throw TranscriptionEngineError.unsupportedBackend(model: model.displayName, backend: settings.backend)
+            }
+            backend = WhisperCppBackend(model: try WhisperModel(contentsOf: try existing(weights)))
         case .mlx:
-            let modelDirectory = try existing(models.appendingPathComponent("mlx/\(modelName)"))
-            tokenizerURL = try existing(modelDirectory.appendingPathComponent("tokenizer.json"))
-            backend = try WhisperMLXBackend(modelDirectory: modelDirectory)
+            guard let weights = model.files.mlx else {
+                throw TranscriptionEngineError.unsupportedBackend(model: model.displayName, backend: settings.backend)
+            }
+            backend = try WhisperMLXBackend(modelDirectory: try existing(weights))
         }
 
-        let tokenizer = try WhisperTokenizer(contentsOf: tokenizerURL)
+        let tokenizer = try WhisperTokenizer(contentsOf: try existing(model.files.tokenizer))
         let decoder = FallbackDecoder(windowDecoder: WindowDecoder(
-            tokenizer: tokenizer, settings: ChickenRiceDefaults.decoding(task: task)
+            tokenizer: tokenizer, settings: model.decoding
         ))
-        var pipelineSettings = TranscriptionPipeline.Settings.chickenRice
-        pipelineSettings.concurrentChunkCount = settings.concurrentChunkCount
+        let pipelineSettings = TranscriptionPipeline.Settings(
+            vad: model.vad,
+            chunking: model.chunking,
+            merge: model.merge,
+            concurrentChunkCount: settings.concurrentChunkCount,
+            samplingSeed: TranscriptionPipeline.Settings.chickenRice.samplingSeed
+        )
         return TranscriptionPipeline(
             vadModel: try WhisperVADModel(compiledModelAt: vadURL),
             segmentGenerator: SegmentGenerator(backend: backend, decoder: decoder),

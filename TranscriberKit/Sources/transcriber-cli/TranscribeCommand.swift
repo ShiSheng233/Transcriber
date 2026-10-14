@@ -16,11 +16,11 @@ struct TranscribeCommand: AsyncParsableCommand {
         abstract: "Run the full pipeline on media files and write subtitles next to them or into --output-dir."
     )
 
-    @Option(help: "Directory holding whisper/, vad/ (default: the repository's Models).")
+    @Option(help: "Directory holding one folder per model and vad/ (default: the repository's Models).")
     var modelsDirectory: String = "Models"
 
-    @Option(help: "translate (ChickenRice, Chinese) or transcribe (whisper-ja-1.5B, Japanese).")
-    var task: String = "translate"
+    @Option(help: "Model id, as listed by the models command.")
+    var model: String = "chickenrice-v0.2"
 
     @Option(help: "Comma-separated subtitle formats.")
     var formats: String = "srt,vtt,lrc"
@@ -37,13 +37,13 @@ struct TranscribeCommand: AsyncParsableCommand {
     @Flag(help: "Run whisper.cpp on the CPU instead of Metal.")
     var cpu = false
 
-    @Option(help: "ggml model file name suffix, e.g. -f32 for chickenrice-v0.2-f32.bin.")
-    var modelSuffix: String = ""
+    @Option(help: "ggml file in the model's folder instead of the configured one, e.g. ggml-q8_0.bin.")
+    var ggmlFile: String?
 
     @Option(help: "Chunks decoded at the same time.")
     var concurrency: Int = TranscriptionPipeline.Settings.chickenRice.concurrentChunkCount
 
-    @Option(help: "OpenRouter model id: polish (translate task) or translate (transcribe task) afterwards. Key from OPENROUTER_API_KEY.")
+    @Option(help: "OpenRouter model id: polishes or translates the output, as the model's llm_mode says. Key from OPENROUTER_API_KEY.")
     var llmModel: String?
 
     @Option(help: "Target language when the LLM translates.")
@@ -53,8 +53,9 @@ struct TranscribeCommand: AsyncParsableCommand {
     var inputs: [String]
 
     func run() async throws {
-        guard let task = TranscriptionTask(rawValue: task) else {
-            throw ValidationError("task must be translate or transcribe")
+        let models = URL(fileURLWithPath: modelsDirectory)
+        guard let recognitionModel = ModelCatalog.scan(models).model(withID: model) else {
+            throw ValidationError("no model \(model) in \(modelsDirectory); see the models command")
         }
         let subtitleFormats = try formats.split(separator: ",").map { name in
             guard let format = SubtitleFormat(rawValue: String(name)) else {
@@ -63,29 +64,35 @@ struct TranscribeCommand: AsyncParsableCommand {
             return format
         }
 
-        let models = URL(fileURLWithPath: modelsDirectory)
-        let modelName = task == .translate ? "chickenrice-v0.2" : "whisper-ja-1.5b"
-        let tokenizer = try WhisperTokenizer(contentsOf: models.appendingPathComponent("whisper/\(modelName).tokenizer.json"))
+        let tokenizer = try WhisperTokenizer(contentsOf: recognitionModel.files.tokenizer)
         let whisperBackend: any WhisperBackend
         switch backend {
         case "whispercpp":
-            whisperBackend = WhisperCppBackend(model: try WhisperModel(
-                contentsOf: models.appendingPathComponent("whisper/\(modelName)\(modelSuffix).bin"),
-                usesGPU: !cpu,
-                usesFlashAttention: flashAttention
-            ))
+            let weights = ggmlFile.map { recognitionModel.directory.appendingPathComponent($0) } ?? recognitionModel.files.whisperCpp
+            guard let weights else {
+                throw ValidationError("\(model) has no whisper.cpp weights")
+            }
+            whisperBackend = WhisperCppBackend(model: try WhisperModel(contentsOf: weights, usesGPU: !cpu, usesFlashAttention: flashAttention))
         case "mlx":
-            whisperBackend = try WhisperMLXBackend(modelDirectory: models.appendingPathComponent("mlx/\(modelName)"))
+            guard let weights = recognitionModel.files.mlx else {
+                throw ValidationError("\(model) has no MLX weights")
+            }
+            whisperBackend = try WhisperMLXBackend(modelDirectory: weights)
         default:
             throw ValidationError("backend must be whispercpp or mlx")
         }
-        let vadModel = try WhisperVADModel(compiledModelAt: models.appendingPathComponent("vad/whisper-vad-asmr.mlmodelc"))
+        let vadModel = try WhisperVADModel(compiledModelAt: models.appendingPathComponent("vad/\(recognitionModel.vadModelName).mlmodelc"))
         let segmentGenerator = SegmentGenerator(
             backend: whisperBackend,
-            decoder: FallbackDecoder(windowDecoder: WindowDecoder(tokenizer: tokenizer, settings: ChickenRiceDefaults.decoding(task: task)))
+            decoder: FallbackDecoder(windowDecoder: WindowDecoder(tokenizer: tokenizer, settings: recognitionModel.decoding))
         )
-        var settings = TranscriptionPipeline.Settings.chickenRice
-        settings.concurrentChunkCount = concurrency
+        let settings = TranscriptionPipeline.Settings(
+            vad: recognitionModel.vad,
+            chunking: recognitionModel.chunking,
+            merge: recognitionModel.merge,
+            concurrentChunkCount: concurrency,
+            samplingSeed: TranscriptionPipeline.Settings.chickenRice.samplingSeed
+        )
         let pipeline = TranscriptionPipeline(vadModel: vadModel, segmentGenerator: segmentGenerator, settings: settings)
 
         for input in inputs {
@@ -107,7 +114,7 @@ struct TranscribeCommand: AsyncParsableCommand {
                          segments.count, audioDuration.seconds, seconds, audioDuration.seconds / seconds))
 
             if let llmModel {
-                segments = try await refineWithLLM(segments, task: task, model: llmModel)
+                segments = try await refineWithLLM(segments, recognitionModel: recognitionModel, model: llmModel)
             }
 
             let directory = outputDirectory.map { URL(fileURLWithPath: $0) } ?? inputURL.deletingLastPathComponent()
@@ -121,12 +128,12 @@ struct TranscribeCommand: AsyncParsableCommand {
         }
     }
 
-    private func refineWithLLM(_ segments: [TimedText], task: TranscriptionTask, model: String) async throws -> [TimedText] {
+    private func refineWithLLM(_ segments: [TimedText], recognitionModel: RecognitionModel, model: String) async throws -> [TimedText] {
         guard let apiKey = ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"], !apiKey.isEmpty else {
             throw ValidationError("--llm-model needs OPENROUTER_API_KEY in the environment")
         }
         let refiner = SubtitleRefiner(client: OpenRouterClient(apiKey: apiKey), configuration: .init(model: model))
-        let job: SubtitleRefiner.Job = task == .translate ? .polishChinese : .translate(targetLanguage: llmTargetLanguage)
+        let job: SubtitleRefiner.Job = recognitionModel.llmMode == .polish ? .polishChinese : .translate(targetLanguage: llmTargetLanguage)
         let start = ContinuousClock.now
         let refined = try await refiner.refine(segments, job: job) { completed, total in
             print("  LLM batch \(completed)/\(total)")

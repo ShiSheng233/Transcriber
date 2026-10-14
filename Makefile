@@ -52,9 +52,9 @@ WHISPER_CMAKE_FLAGS := \
 help:
 	@echo "make whisper-xcframework  Build whisper.cpp $(WHISPER_VERSION) into $(WHISPER_XCFRAMEWORK)"
 	@echo "make ffmpeg-xcframeworks  Build FFmpeg $(FFMPEG_VERSION) (LGPL, audio decoding only) into TranscriberKit/Vendor"
-	@echo "make whisper-models       Download and convert the Whisper models into $(MODELS_DIR)/whisper"
+	@echo "make whisper-models       Download and convert the Whisper models into $(MODELS_DIR)/<model>"
 	@echo "make whisper-models-q8_0  Optional: q8_0 variants (not built by default)"
-	@echo "make mlx-models           Convert the Whisper models to MLX (original precision) into $(MODELS_DIR)/mlx"
+	@echo "make mlx-models           Convert the Whisper models to MLX (original precision) into $(MODELS_DIR)/<model>/mlx"
 	@echo "make vad-model            Convert the ASMR VAD to Core ML into $(MODELS_DIR)/vad"
 	@echo "make parity-fixtures      Regenerate test fixtures from the original Python pipeline"
 	@echo "make baseline-a           Run the original Python pipeline on $(PARITY_MEDIA) into $(BASELINE_A_DIR)"
@@ -175,6 +175,10 @@ $(foreach library,$(FFMPEG_LIBRARIES),$(eval $(call ffmpeg_framework,$(library))
 # whisper-models-q8_0 builds optional
 # quantized variants with whisper.cpp's quantize tool and is not part of the
 # default build. A -q8_0 file shares its Core ML encoder name with the f16 file.
+#
+# Every model lives in its own folder, $(MODELS_DIR)/<model>/, next to its
+# model.json (copied from ModelConfigurations/), which is all the app needs to
+# list and run it.
 
 MODELS_DIR          := Models
 DOWNLOADS_DIR       := $(TOOLS_DIR)/downloads
@@ -188,6 +192,7 @@ WHISPER_TOOLS_BUILD := $(TOOLS_DIR)/whisper-tools-build
 WHISPER_QUANTIZE    := $(WHISPER_TOOLS_BUILD)/bin/whisper-quantize
 
 WHISPER_MODELS := chickenrice-v0.2 whisper-ja-1.5b
+MODEL_CONFIGURATIONS := ModelConfigurations
 
 $(MEL_FILTERS):
 	mkdir -p $(@D)
@@ -213,29 +218,35 @@ $(DOWNLOADS_DIR)/$(1)/model.safetensors:
 
 # Inputs are fetched inside the recipe, so deleting the downloads after
 # conversion does not make the converted model look out of date.
-$(MODELS_DIR)/whisper/$(1).bin: $(GGML_CONVERTER)
+$(MODELS_DIR)/$(1)/ggml.bin: $(GGML_CONVERTER)
 	$(MAKE) $(MEL_FILTERS) $(DOWNLOADS_DIR)/$(1)/config.json $(DOWNLOADS_DIR)/$(1)/vocab.json $(DOWNLOADS_DIR)/$(1)/model.safetensors
 	uv run --script $(GGML_CONVERTER) $(DOWNLOADS_DIR)/$(1) $(MEL_FILTERS) $$@ --weight-type $(5)
 
 # The Swift decoder reads token ids and text from the model's own tokenizer.json.
-$(MODELS_DIR)/whisper/$(1).tokenizer.json:
+$(MODELS_DIR)/$(1)/tokenizer.json:
 	$(MAKE) $(DOWNLOADS_DIR)/$(1)/tokenizer.json
 	mkdir -p $$(@D)
 	cp $(DOWNLOADS_DIR)/$(1)/tokenizer.json $$@
 
-$(MODELS_DIR)/whisper/$(1)-q8_0.bin: $(MODELS_DIR)/whisper/$(1).bin $(WHISPER_QUANTIZE)
+$(MODELS_DIR)/$(1)/model.json: $(MODEL_CONFIGURATIONS)/$(1).json
+	mkdir -p $$(@D)
+	cp $$< $$@
+
+$(MODELS_DIR)/$(1)/ggml-q8_0.bin: $(MODELS_DIR)/$(1)/ggml.bin $(WHISPER_QUANTIZE)
 	$(WHISPER_QUANTIZE) $$< $$@ q8_0
 endef
 
 $(eval $(call whisper_model,chickenrice-v0.2,chickenrice0721/whisper-large-v2-translate-zh-v0.2-st,cc6f01704d188c6ed2d1ab84b83734f964c9a45a,0abdde18518f3902913e4e2124145fb7d4635ebba88fd5c035b71819ec328ad0,bf16))
 $(eval $(call whisper_model,whisper-ja-1.5b,efwkjn/whisper-ja-1.5B,72c13fb7b6cc2a831780cdd79cd1a829e77bab02,0bf92cf794ebb2cef2699c24dc71184be6a1ac133cc3c64f228ea08173d0155f,f16))
 
-WHISPER_MODEL_FILES := $(foreach model,$(WHISPER_MODELS),$(MODELS_DIR)/whisper/$(model).bin $(MODELS_DIR)/whisper/$(model).tokenizer.json)
+MODEL_FILES = $(foreach model,$(WHISPER_MODELS),$(addprefix $(MODELS_DIR)/$(model)/,$(1)))
 
-whisper-models: $(WHISPER_MODEL_FILES)
-	cd $(MODELS_DIR)/whisper && shasum -a 256 $(notdir $(WHISPER_MODEL_FILES)) > SHA256SUMS
+whisper-models: $(call MODEL_FILES,model.json ggml.bin tokenizer.json)
+	for model in $(WHISPER_MODELS); do \
+		(cd $(MODELS_DIR)/$$model && shasum -a 256 ggml.bin tokenizer.json > SHA256SUMS) || exit 1; \
+	done
 
-whisper-models-q8_0: $(foreach model,$(WHISPER_MODELS),$(MODELS_DIR)/whisper/$(model)-q8_0.bin)
+whisper-models-q8_0: $(call MODEL_FILES,ggml-q8_0.bin)
 
 # MLX models -------------------------------------------------------------------
 #
@@ -249,7 +260,6 @@ MLX_EXAMPLES_COMMIT := 796f5b53cab69a3d48a44233ce21aae889e94a08
 # weights.safetensors while convert.py at this commit writes model.safetensors.
 MLX_WHISPER_PACKAGE := mlx-whisper @ git+https://github.com/ml-explore/mlx-examples@$(MLX_EXAMPLES_COMMIT)\#subdirectory=whisper
 MLX_CONVERTER       := $(DOWNLOADS_DIR)/mlx-examples-$(MLX_EXAMPLES_COMMIT)/convert.py
-MLX_MODEL_FILES     := $(foreach model,$(WHISPER_MODELS),$(MODELS_DIR)/mlx/$(model)/model.safetensors $(MODELS_DIR)/mlx/$(model)/tokenizer.json)
 
 $(MLX_CONVERTER):
 	mkdir -p $(@D)
@@ -257,20 +267,17 @@ $(MLX_CONVERTER):
 
 # $(1): model name, $(2): MLX dtype (the checkpoint's own precision)
 define mlx_model
-$(MODELS_DIR)/mlx/$(1)/model.safetensors:
+$(MODELS_DIR)/$(1)/mlx/model.safetensors:
 	$(MAKE) $(MLX_CONVERTER) $(DOWNLOADS_DIR)/$(1)/config.json $(DOWNLOADS_DIR)/$(1)/model.safetensors
 	uv run --no-project --python 3.12 --with "$(MLX_WHISPER_PACKAGE)" \
 		python Tools/model-conversion/convert_whisper_to_mlx.py $(MLX_CONVERTER) $(DOWNLOADS_DIR)/$(1) $$(@D) $(2)
 
-$(MODELS_DIR)/mlx/$(1)/tokenizer.json: $(MODELS_DIR)/whisper/$(1).tokenizer.json
-	mkdir -p $$(@D)
-	cp $$< $$@
 endef
 
 $(eval $(call mlx_model,chickenrice-v0.2,bfloat16))
 $(eval $(call mlx_model,whisper-ja-1.5b,float16))
 
-mlx-models: $(MLX_MODEL_FILES)
+mlx-models: $(call MODEL_FILES,model.json tokenizer.json mlx/model.safetensors)
 
 # VAD model --------------------------------------------------------------------
 #
@@ -331,11 +338,12 @@ parity-fixtures: | $(CHICKENRICE_SOURCE) $(VAD_ONNX)
 	uv run --script Tools/parity/make_subtitle_fixture.py $(CHICKENRICE_PACKAGE)/infer.py \
 		$(TEST_FIXTURES)/SubtitleExportTests/Fixtures
 	uv run --script Tools/parity/make_decode_fixture.py $(TEST_FIXTURES)/MediaDecodingTests/Fixtures
-	$(MAKE) $(foreach model,$(WHISPER_MODELS),$(MODELS_DIR)/whisper/$(model).tokenizer.json)
-	cp $(MODELS_DIR)/whisper/chickenrice-v0.2.tokenizer.json $(MODELS_DIR)/whisper/whisper-ja-1.5b.tokenizer.json \
-		$(TEST_FIXTURES)/WhisperDecodingTests/Fixtures/
+	$(MAKE) $(call MODEL_FILES,tokenizer.json)
+	for model in $(WHISPER_MODELS); do \
+		cp $(MODELS_DIR)/$$model/tokenizer.json $(TEST_FIXTURES)/WhisperDecodingTests/Fixtures/$$model.tokenizer.json || exit 1; \
+	done
 	uv run --script Tools/parity/make_tokenizer_fixture.py $(TEST_FIXTURES)/WhisperDecodingTests/Fixtures/tokenizer-cases.json \
-		$(foreach model,$(WHISPER_MODELS),$(model)=$(MODELS_DIR)/whisper/$(model).tokenizer.json)
+		$(foreach model,$(WHISPER_MODELS),$(model)=$(MODELS_DIR)/$(model)/tokenizer.json)
 
 # Baseline A: the original pipeline ---------------------------------------------
 #
@@ -351,6 +359,9 @@ BASELINE_A_DIR  ?= Parity/baseline-a
 BASELINE_COMPUTE_TYPE ?= float32
 CT2_DIR         := $(TOOLS_DIR)/ct2
 BASELINE_TASKS  := translate transcribe
+# The model of ours that matches each original task.
+PARITY_MODEL_translate  := chickenrice-v0.2
+PARITY_MODEL_transcribe := whisper-ja-1.5b
 CT2_MODEL_FILES := config.json preprocessor_config.json tokenizer.json vocabulary.json model.bin
 
 ORIGINAL_DEPENDENCIES := --with faster-whisper==1.2.1 --with "av>=11,<16" --with ctranslate2 --with onnxruntime \
@@ -403,9 +414,8 @@ $(TRANSCRIBER_CLI): FORCE
 	swift build --package-path TranscriberKit -c release --product transcriber-cli
 
 ours: $(TRANSCRIBER_CLI)
-	for task in $(BASELINE_TASKS); do \
-		$(TRANSCRIBER_CLI) transcribe --task $$task --output-directory $(OURS_DIR)/$$task $(PARITY_FILES) 2>/dev/null || exit 1; \
-	done
+	$(foreach task,$(BASELINE_TASKS),$(TRANSCRIBER_CLI) transcribe --model $(PARITY_MODEL_$(task)) \
+		--output-directory $(OURS_DIR)/$(task) $(PARITY_FILES) 2>/dev/null &&) true
 
 parity-report:
 	for task in $(BASELINE_TASKS); do \

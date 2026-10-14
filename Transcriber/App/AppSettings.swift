@@ -7,7 +7,8 @@ import TranscriberCore
 /// Everything the user can change in Settings, saved in UserDefaults.
 struct AppSettings: Codable, Equatable {
     var modelsDirectory: URL
-    var task: TranscriptionTask
+    /// The `id` of a model.json in the models folder.
+    var modelID: String
     var backend: EngineSettings.Backend
     var concurrentChunkCount: Int
     var formats: [SubtitleFormat]
@@ -17,7 +18,7 @@ struct AppSettings: Codable, Equatable {
 
     static let defaults = AppSettings(
         modelsDirectory: URL.applicationSupportDirectory.appendingPathComponent("Transcriber/Models", isDirectory: true),
-        task: .translate,
+        modelID: "chickenrice-v0.2",
         backend: .whisperCpp,
         concurrentChunkCount: 4,
         formats: [.srt, .vtt, .lrc],
@@ -40,7 +41,7 @@ extension AppSettings {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = AppSettings.defaults
         modelsDirectory = try container.decodeIfPresent(URL.self, forKey: .modelsDirectory) ?? defaults.modelsDirectory
-        task = try container.decodeIfPresent(TranscriptionTask.self, forKey: .task) ?? defaults.task
+        modelID = try container.decodeIfPresent(String.self, forKey: .modelID) ?? defaults.modelID
         backend = try container.decodeIfPresent(EngineSettings.Backend.self, forKey: .backend) ?? defaults.backend
         concurrentChunkCount = try container.decodeIfPresent(Int.self, forKey: .concurrentChunkCount) ?? defaults.concurrentChunkCount
         formats = try container.decodeIfPresent([SubtitleFormat].self, forKey: .formats) ?? defaults.formats

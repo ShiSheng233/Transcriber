@@ -44,7 +44,7 @@ final class JobCellView: NSTableCellView {
 
     func configure(with row: JobQueueViewModel.Row) {
         nameLabel.stringValue = row.fileName
-        detailLabel.stringValue = "\(row.taskName) · \(row.statusText)"
+        detailLabel.stringValue = "\(row.modelName) · \(row.statusText)"
         detailLabel.toolTip = row.statusText
         if let fraction = row.fractionCompleted, row.canCancel {
             progressIndicator.isHidden = false

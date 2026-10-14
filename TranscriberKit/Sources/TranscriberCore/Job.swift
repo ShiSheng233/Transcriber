@@ -4,7 +4,7 @@ import Foundation
 public struct Job: Identifiable, Hashable, Sendable {
     public let id: UUID
     public let sourceURL: URL
-    public var task: TranscriptionTask
+    public var model: RecognitionModel
     public var status: JobStatus
     /// Final segments once transcription finished.
     public var segments: [TimedText]
@@ -13,10 +13,10 @@ public struct Job: Identifiable, Hashable, Sendable {
     /// Set when the job finished but an optional step (the LLM) did not.
     public var warning: String?
 
-    public init(id: UUID = UUID(), sourceURL: URL, task: TranscriptionTask) {
+    public init(id: UUID = UUID(), sourceURL: URL, model: RecognitionModel) {
         self.id = id
         self.sourceURL = sourceURL
-        self.task = task
+        self.model = model
         self.status = .queued
         self.segments = []
         self.outputURLs = []

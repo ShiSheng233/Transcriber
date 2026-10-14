@@ -5,4 +5,5 @@ final class AppEnvironment {
     let settingsStore = SettingsStore()
     let apiKeyStore = APIKeyStore()
     let jobQueue = JobQueue()
+    private(set) lazy var modelLibrary = ModelLibrary(settingsStore: settingsStore)
 }

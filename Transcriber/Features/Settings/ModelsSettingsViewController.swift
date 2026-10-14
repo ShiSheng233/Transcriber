@@ -16,16 +16,19 @@ final class ModelsSettingsViewController: SettingsPaneViewController {
         return SettingsForm.page([
             SettingsForm.section(String(localized: "Models Folder"), rows: [
                 SettingsForm.row(control: folderControls),
-            ], footer: String(localized: "Contains whisper/, mlx/ and vad/.")),
-            SettingsForm.section(String(localized: "Required Files"), rows: [statusStack]),
+            ], footer: String(localized: "One folder per model, each with a model.json, plus vad/.")),
+            SettingsForm.section(String(localized: "Installed Models"), rows: [statusStack]),
         ])
     }
 
     override func render() {
         folderPath.url = viewModel.settings.modelsDirectory
         statusStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        for (index, status) in viewModel.modelStatuses.enumerated() {
-            let row = SettingsForm.row(status.title, description: status.relativePath, control: Self.statusIcon(isPresent: status.isPresent))
+        let statuses = viewModel.hasNoModels
+            ? [SettingsViewModel.ModelStatus(title: String(localized: "No models"), detail: String(localized: "This folder has no model.json files"), isReady: false)] + viewModel.modelStatuses
+            : viewModel.modelStatuses
+        for (index, status) in statuses.enumerated() {
+            let row = SettingsForm.row(status.title, description: status.detail, control: Self.statusIcon(isPresent: status.isReady))
             statusStack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: statusStack.widthAnchor).isActive = true
             if index > 0 {
@@ -53,7 +56,7 @@ final class ModelsSettingsViewController: SettingsPaneViewController {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.prompt = String(localized: "Choose")
-        panel.message = String(localized: "Choose the folder that holds whisper/, mlx/ and vad/.")
+        panel.message = String(localized: "Choose the folder that holds the model folders and vad/.")
         panel.directoryURL = viewModel.settings.modelsDirectory
         panel.beginSheetModal(for: window) { [weak self] response in
             if response == .OK, let url = panel.url {

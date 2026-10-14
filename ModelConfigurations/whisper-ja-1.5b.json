@@ -1,0 +1,9 @@
+{
+  "id": "whisper-ja-1.5b",
+  "name": "whisper-ja-1.5B",
+  "summary": "Japanese speech → Japanese subtitles",
+  "source": "https://huggingface.co/efwkjn/whisper-ja-1.5B",
+  "language": "ja",
+  "task": "transcribe",
+  "llm_mode": "translate"
+}

@@ -60,9 +60,9 @@ public actor JobQueue {
         return stream
     }
 
-    public func add(_ sourceURLs: [URL], task: TranscriptionTask) {
+    public func add(_ sourceURLs: [URL], model: RecognitionModel) {
         let known = Set(jobs.filter { !$0.status.isFinished }.map(\.sourceURL))
-        jobs += sourceURLs.filter { !known.contains($0) }.map { Job(sourceURL: $0, task: task) }
+        jobs += sourceURLs.filter { !known.contains($0) }.map { Job(sourceURL: $0, model: model) }
         publish()
     }
 
@@ -110,7 +110,7 @@ public actor JobQueue {
     private func process(_ job: Job, configuration: Configuration) async {
         do {
             update(job.id) { $0.status = .loadingModel }
-            let pipeline = try await engine.pipeline(for: job.task, settings: configuration.engine)
+            let pipeline = try await engine.pipeline(for: job.model, settings: configuration.engine)
             update(job.id) { $0.status = .decodingAudio }
 
             let jobID = job.id
@@ -144,13 +144,13 @@ public actor JobQueue {
         }
     }
 
-    /// ChickenRice's Chinese is polished; whisper-ja's Japanese is translated.
+    /// The model's configuration says whether its output is polished or translated.
     private func refine(_ segments: [TimedText], of job: Job, with llm: LLMConfiguration) async throws -> [TimedText] {
         let refiner = SubtitleRefiner(
             client: makeChatClient(llm.apiKey),
             configuration: SubtitleRefiner.Configuration(model: llm.settings.model)
         )
-        let refinerJob: SubtitleRefiner.Job = job.task == .translate
+        let refinerJob: SubtitleRefiner.Job = job.model.llmMode == .polish
             ? .polishChinese
             : .translate(targetLanguage: llm.settings.targetLanguage)
         let jobID = job.id

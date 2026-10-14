@@ -211,19 +211,23 @@ whisper.cpp 以 `WHISPER_COREML=ON` + `WHISPER_COREML_ALLOW_FALLBACK=ON` 自行�
 
 ```
 <用户选择的目录>/
-├─ whisper/
-│   ├─ chickenrice-v0.2.bin                  ggml f16
-│   ├─ chickenrice-v0.2-encoder.mlmodelc     可选 Core ML 编码器
-│   ├─ whisper-ja-1.5b.bin
+├─ chickenrice-v0.2/
+│   ├─ model.json          模型配置（来自仓库 ModelConfigurations/）
+│   ├─ ggml.bin            whisper.cpp 权重
+│   ├─ tokenizer.json
+│   ├─ mlx/                mlx-whisper 权重（可选）
 │   └─ SHA256SUMS
-├─ mlx/
-│   ├─ chickenrice-v0.2/                     config + safetensors
-│   └─ whisper-ja-1.5b/
-├─ vad/
-│   ├─ whisper-vad-asmr.mlpackage
-│   └─ whisper-vad-asmr.mlmodelc             本机编译产物
-└─ manifest.json                             版本、校验和、来源、许可证
+├─ whisper-ja-1.5b/        同上
+└─ vad/
+    ├─ whisper-vad-asmr.mlpackage
+    └─ whisper-vad-asmr.mlmodelc             本机编译产物
 ```
+
+### 6.3 模型配置（model.json）
+
+**App 里不写死任何模型。** 每个模型文件夹带一个 `model.json`，`ModelCatalog` 扫描模型目录列出所有模型；用户在设置里**选模型而不是选 task**——Whisper 的 task token（translate/transcribe）、语言、解码参数、VAD/分块/合并参数、LLM 步骤是润色还是翻译，都由配置决定。配置里没写的项取原 ChickenRice 管线的值（`ChickenRiceDefaults`）。格式见 `ModelConfigurations/README.md`。
+
+新增模型 = 在 `ModelConfigurations/` 加一个 JSON + Makefile 加转换规则，不改 Swift 代码（除非它需要管线里还没有的能力，例如无时间戳解码）。
 
 ## 7. Job 状态机
 

@@ -8,7 +8,8 @@ public struct EngineSettings: Hashable, Sendable, Codable {
         case mlx
     }
 
-    /// Holds whisper/, mlx/ and vad/ as `make whisper-models mlx-models vad-model` lays them out.
+    /// One folder per model (each with a model.json) plus vad/, as
+    /// `make whisper-models mlx-models vad-model` lays them out.
     public var modelsDirectory: URL
     public var backend: Backend
     public var concurrentChunkCount: Int
@@ -18,12 +19,13 @@ public struct EngineSettings: Hashable, Sendable, Codable {
         self.backend = backend
         self.concurrentChunkCount = concurrentChunkCount
     }
+}
 
-    /// Model files for a task, relative to `modelsDirectory`.
-    static func modelName(for task: TranscriptionTask) -> String {
-        switch task {
-        case .translate: "chickenrice-v0.2"
-        case .transcribe: "whisper-ja-1.5b"
+extension EngineSettings.Backend {
+    public var displayName: String {
+        switch self {
+        case .whisperCpp: "whisper.cpp"
+        case .mlx: "MLX"
         }
     }
 }

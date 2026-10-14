@@ -12,7 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = MainMenuBuilder.makeMainMenu()
 
         let queueViewModel = JobQueueViewModel(
-            queue: environment.jobQueue, settingsStore: environment.settingsStore, apiKeyStore: environment.apiKeyStore
+            queue: environment.jobQueue, settingsStore: environment.settingsStore, apiKeyStore: environment.apiKeyStore,
+            library: environment.modelLibrary
         )
         queueViewModel.addFiles(pendingOpenedURLs)
         pendingOpenedURLs = []
@@ -57,9 +58,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showSettings(_ sender: Any?) {
         if settingsWindowController == nil {
             settingsWindowController = SettingsWindowController(
-                viewModel: SettingsViewModel(store: environment.settingsStore, apiKeyStore: environment.apiKeyStore)
+                viewModel: SettingsViewModel(
+                    store: environment.settingsStore, apiKeyStore: environment.apiKeyStore, library: environment.modelLibrary
+                )
             )
         }
+        environment.modelLibrary.reload()  // pick up models installed since the last look
         settingsWindowController?.showWindow(nil)
         settingsWindowController?.window?.center()
     }
