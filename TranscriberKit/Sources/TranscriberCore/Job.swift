@@ -10,6 +10,8 @@ public struct Job: Identifiable, Hashable, Sendable {
     public var segments: [TimedText]
     /// Subtitle files written for this job.
     public var outputURLs: [URL]
+    /// Set when the job finished but an optional step (the LLM) did not.
+    public var warning: String?
 
     public init(id: UUID = UUID(), sourceURL: URL, task: TranscriptionTask) {
         self.id = id
@@ -18,6 +20,7 @@ public struct Job: Identifiable, Hashable, Sendable {
         self.status = .queued
         self.segments = []
         self.outputURLs = []
+        self.warning = nil
     }
 }
 
@@ -26,6 +29,7 @@ public enum JobStatus: Hashable, Sendable {
     case loadingModel
     case decodingAudio
     case transcribing(completedChunks: Int, totalChunks: Int)
+    case refining(completedBatches: Int, totalBatches: Int)
     case exporting
     case completed
     case failed(message: String)
@@ -43,7 +47,8 @@ public enum JobStatus: Hashable, Sendable {
         switch self {
         case .queued, .loadingModel: 0
         case .decodingAudio: 0.02
-        case .transcribing(let completed, let total): 0.05 + 0.9 * Double(completed) / Double(max(total, 1))
+        case .transcribing(let completed, let total): 0.05 + 0.8 * Double(completed) / Double(max(total, 1))
+        case .refining(let completed, let total): 0.85 + 0.1 * Double(completed) / Double(max(total, 1))
         case .exporting: 0.97
         case .completed: 1
         case .failed, .cancelled: nil

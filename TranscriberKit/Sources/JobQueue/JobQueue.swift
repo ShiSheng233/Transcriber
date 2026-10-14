@@ -1,4 +1,5 @@
 import Foundation
+import LLMTranslation
 import TranscriberCore
 import TranscriptionPipeline
 
@@ -8,21 +9,43 @@ public actor JobQueue {
     public struct Configuration: Sendable {
         public var engine: EngineSettings
         public var output: OutputSettings
+        /// `nil` skips the LLM step.
+        public var llm: LLMConfiguration?
 
-        public init(engine: EngineSettings, output: OutputSettings) {
+        public init(engine: EngineSettings, output: OutputSettings, llm: LLMConfiguration? = nil) {
             self.engine = engine
             self.output = output
+            self.llm = llm
+        }
+    }
+
+    public struct LLMConfiguration: Sendable {
+        public var settings: LLMSettings
+        public var apiKey: String
+
+        public init(settings: LLMSettings, apiKey: String) {
+            self.settings = settings
+            self.apiKey = apiKey
+        }
+
+        var isUsable: Bool {
+            settings.isEnabled && !settings.model.isEmpty && !apiKey.isEmpty
         }
     }
 
     private let engine: TranscriptionEngine
+    private let makeChatClient: @Sendable (_ apiKey: String) -> any StructuredChatCompleting
     private var jobs: [Job] = []
     private var runningTask: Task<Void, Never>?
     private var runningJobID: UUID?
     private var observers: [UUID: AsyncStream<[Job]>.Continuation] = [:]
 
-    public init(engine: TranscriptionEngine = TranscriptionEngine()) {
+    public init(
+        engine: TranscriptionEngine = TranscriptionEngine(),
+        makeChatClient: @escaping @Sendable (_ apiKey: String) -> any StructuredChatCompleting = { OpenRouterClient(apiKey: $0) }
+    ) {
         self.engine = engine
+        self.makeChatClient = makeChatClient
     }
 
     /// Current jobs first, then every change.
@@ -91,10 +114,21 @@ public actor JobQueue {
             update(job.id) { $0.status = .decodingAudio }
 
             let jobID = job.id
-            let segments = try await pipeline.transcribe(fileAt: job.sourceURL) { [weak self] progress in
+            var segments = try await pipeline.transcribe(fileAt: job.sourceURL) { [weak self] progress in
                 Task { await self?.record(progress, for: jobID) }
             }
             try Task.checkCancellation()
+
+            if let llm = configuration.llm, llm.isUsable, !segments.isEmpty {
+                do {
+                    segments = try await refine(segments, of: job, with: llm)
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    // The machine subtitles are still worth keeping.
+                    update(job.id) { $0.warning = "LLM step skipped: \(error.localizedDescription)" }
+                }
+            }
 
             update(job.id) { $0.status = .exporting }
             let outputURLs = try SubtitleFileWriter.write(segments, for: job.sourceURL, settings: configuration.output)
@@ -108,6 +142,26 @@ public actor JobQueue {
         } catch {
             update(job.id) { $0.status = .failed(message: error.localizedDescription) }
         }
+    }
+
+    /// ChickenRice's Chinese is polished; whisper-ja's Japanese is translated.
+    private func refine(_ segments: [TimedText], of job: Job, with llm: LLMConfiguration) async throws -> [TimedText] {
+        let refiner = SubtitleRefiner(
+            client: makeChatClient(llm.apiKey),
+            configuration: SubtitleRefiner.Configuration(model: llm.settings.model)
+        )
+        let refinerJob: SubtitleRefiner.Job = job.task == .translate
+            ? .polishChinese
+            : .translate(targetLanguage: llm.settings.targetLanguage)
+        let jobID = job.id
+        update(jobID) { $0.status = .refining(completedBatches: 0, totalBatches: 1) }
+        let refined = try await refiner.refine(segments, job: refinerJob, glossary: llm.settings.glossaryEntries) { [weak self] completed, total in
+            Task { await self?.update(jobID) { $0.status = .refining(completedBatches: completed, totalBatches: total) } }
+        }
+        if case .translate = refinerJob, llm.settings.keepsOriginalLine {
+            return refined.withOriginalLines(from: segments)
+        }
+        return refined
     }
 
     private func record(_ progress: TranscriptionPipeline.Progress, for jobID: UUID) {

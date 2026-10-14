@@ -30,7 +30,7 @@ let package = Package(
         .target(
             name: "JobQueue",
             dependencies: [
-                "TranscriberCore", "SpeechDetection", "SubtitleExport", "TranscriptionPipeline",
+                "TranscriberCore", "LLMTranslation", "SpeechDetection", "SubtitleExport", "TranscriptionPipeline",
                 "WhisperCpp", "WhisperDecoding", "WhisperMLX",
             ]
         ),
@@ -104,7 +104,7 @@ let package = Package(
         ),
         .testTarget(
             name: "JobQueueTests",
-            dependencies: ["JobQueue", "SubtitleExport", "TranscriberCore"]
+            dependencies: ["JobQueue", "LLMTranslation", "SubtitleExport", "TranscriberCore"]
         ),
         .testTarget(
             name: "LLMTranslationTests",
