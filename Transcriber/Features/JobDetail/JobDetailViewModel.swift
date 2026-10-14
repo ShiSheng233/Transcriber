@@ -73,6 +73,11 @@ final class JobDetailViewModel {
         }
     }
 
+    /// The line being spoken, shown over the video.
+    var currentSubtitle: String? {
+        currentLineIndex.flatMap { lines.indices.contains($0) ? lines[$0].text : nil }
+    }
+
     /// Highlights the line being spoken at `seconds`.
     func playbackTimeChanged(to seconds: Double) {
         let index = lines.firstIndex { seconds >= $0.startSeconds && seconds < $0.endSeconds }

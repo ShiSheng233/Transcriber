@@ -32,7 +32,6 @@ final class JobQueueViewController: NSViewController {
         tableView.style = .sourceList
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.registerForDraggedTypes([.fileURL])
         tableView.menu = makeContextMenu()
 
         let scrollView = NSScrollView()
@@ -46,7 +45,8 @@ final class JobQueueViewController: NSViewController {
         emptyState.translatesAutoresizingMaskIntoConstraints = false
         statusBar.translatesAutoresizingMaskIntoConstraints = false
 
-        let container = NSView()
+        let container = FileDropView()
+        container.onDrop = { [viewModel] urls in viewModel.addFiles(urls) }
         container.addSubview(scrollView)
         container.addSubview(emptyState)
         container.addSubview(statusBar)
@@ -168,14 +168,4 @@ extension JobQueueViewController: NSTableViewDataSource, NSTableViewDelegate {
         viewModel.select(jobID: displayedRows.indices.contains(index) ? displayedRows[index].id : nil)
     }
 
-    func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int, proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
-        tableView.setDropRow(-1, dropOperation: .on)
-        return .copy
-    }
-
-    func tableView(_ tableView: NSTableView, acceptDrop info: NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
-        let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
-        viewModel.addFiles(urls)
-        return !urls.isEmpty
-    }
 }

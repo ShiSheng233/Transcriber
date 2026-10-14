@@ -59,6 +59,21 @@ final class JobQueueViewModel {
         jobs.first { $0.id == selectedJobID }
     }
 
+    /// The selected file's name, or the app name.
+    var windowTitle: String {
+        selectedJob?.sourceURL.lastPathComponent ?? "Transcriber"
+    }
+
+    /// "ChickenRice v0.2 · 412 subtitles", or how many files are queued.
+    var windowSubtitle: String {
+        if let job = selectedJob {
+            return job.segments.isEmpty
+                ? job.model.displayName
+                : String(localized: "\(job.model.displayName) · \(job.segments.count) subtitles")
+        }
+        return jobs.isEmpty ? "" : String(localized: "\(jobs.count) files")
+    }
+
     var canStart: Bool {
         jobs.contains { $0.status == .queued }
     }

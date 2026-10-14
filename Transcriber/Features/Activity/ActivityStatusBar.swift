@@ -12,6 +12,10 @@ final class ActivityStatusBar: NSView {
     private let progressBar = NSProgressIndicator()
     private let progressLabel = NSTextField(labelWithString: "")
     private let progressRow: NSStackView
+    /// One line when idle, two (with the progress bar) while working.
+    private lazy var heightConstraint = heightAnchor.constraint(equalToConstant: Self.idleHeight)
+    private static let idleHeight: CGFloat = 32
+    private static let busyHeight: CGFloat = 54
     private var binder: ObservationBinder?
 
     init(viewModel: ActivityViewModel, showLog: @escaping () -> Void) {
@@ -27,6 +31,7 @@ final class ActivityStatusBar: NSView {
         progressLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         progressRow = NSStackView(views: [progressBar, progressLabel])
         progressRow.spacing = 8
+        progressRow.distribution = .fill  // the bar takes all the width the label leaves
         super.init(frame: .zero)
 
         statusIcon.symbolConfiguration = .init(pointSize: 11, weight: .regular)
@@ -41,6 +46,7 @@ final class ActivityStatusBar: NSView {
             action: showLog
         )
         logButton.isBordered = false
+        logButton.setContentHuggingPriority(.required, for: .horizontal)
         logButton.toolTip = String(localized: "Show Activity (⌥⌘L)")
 
         let firstLine = NSStackView(views: [statusIcon, stepLabel, positionLabel])
@@ -49,30 +55,31 @@ final class ActivityStatusBar: NSView {
         lines.orientation = .vertical
         lines.alignment = .leading
         lines.spacing = 4
+        lines.setContentHuggingPriority(.defaultLow, for: .horizontal)
         progressRow.widthAnchor.constraint(equalTo: lines.widthAnchor).isActive = true
         firstLine.widthAnchor.constraint(lessThanOrEqualTo: lines.widthAnchor).isActive = true
 
-        let content = NSStackView(views: [lines, logButton])
-        content.alignment = .centerY
-        content.spacing = 8
-        content.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 10)
-        content.translatesAutoresizingMaskIntoConstraints = false
+        lines.translatesAutoresizingMaskIntoConstraints = false
+        logButton.translatesAutoresizingMaskIntoConstraints = false
 
         let separator = NSBox()
         separator.boxType = .separator
         separator.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(separator)
-        addSubview(content)
+        addSubview(lines)
+        addSubview(logButton)
         NSLayoutConstraint.activate([
             separator.topAnchor.constraint(equalTo: topAnchor),
             separator.leadingAnchor.constraint(equalTo: leadingAnchor),
             separator.trailingAnchor.constraint(equalTo: trailingAnchor),
-            content.topAnchor.constraint(equalTo: separator.bottomAnchor),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor),
-            content.leadingAnchor.constraint(equalTo: leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: trailingAnchor),
-            heightAnchor.constraint(greaterThanOrEqualToConstant: 32),
+            // Centered in the bar below the separator, clear of both edges.
+            lines.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 0.5),
+            lines.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            lines.trailingAnchor.constraint(equalTo: logButton.leadingAnchor, constant: -10),
+            logButton.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 0.5),
+            logButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            heightConstraint,
         ])
         binder = ObservationBinder { [weak self] in self?.render() }
     }
@@ -83,11 +90,13 @@ final class ActivityStatusBar: NSView {
     }
 
     private func render() {
+        heightConstraint.constant = viewModel.isBusy ? Self.busyHeight : Self.idleHeight
         if viewModel.isBusy {
             let step = viewModel.stepText ?? ""
             let file = viewModel.runningFileName.map { " · \($0)" } ?? ""
             stepLabel.stringValue = step + file
             stepLabel.textColor = .labelColor
+            stepLabel.lineBreakMode = .byTruncatingMiddle  // keep the file name's end
             stepLabel.toolTip = step + file
             positionLabel.stringValue = viewModel.queuePositionText ?? ""
             positionLabel.isHidden = viewModel.queuePositionText == nil
@@ -110,6 +119,7 @@ final class ActivityStatusBar: NSView {
             stepLabel.stringValue = viewModel.idleText
             stepLabel.toolTip = viewModel.idleText
             stepLabel.textColor = .secondaryLabelColor
+            stepLabel.lineBreakMode = .byTruncatingTail
             let symbol: (name: String, color: NSColor)? = switch viewModel.latestLevel {
             case .error: ("xmark.octagon.fill", .systemRed)
             case .warning: ("exclamationmark.triangle.fill", .systemOrange)

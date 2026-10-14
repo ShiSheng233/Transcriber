@@ -63,6 +63,8 @@ final class MainWindowController: NSWindowController {
 
     private func render() {
         detailViewModel.show(queueViewModel.selectedJob)
+        window?.title = queueViewModel.windowTitle
+        window?.subtitle = queueViewModel.windowSubtitle
         _ = detailViewModel.showsPlayer  // re-validate the Player item when it changes
         window?.toolbar?.validateVisibleItems()
         renderModelMenu()

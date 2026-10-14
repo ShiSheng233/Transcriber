@@ -36,10 +36,12 @@ final class JobCellView: NSTableCellView {
         labels.orientation = .vertical
         labels.alignment = .leading
         labels.spacing = 2
+        labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         let row = NSStackView(views: [iconView, labels, progressRing, stateIcon])
         row.orientation = .horizontal
         row.alignment = .centerY
+        row.distribution = .fill  // the labels stretch; the ring sits at the trailing edge
         row.spacing = 8
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)

@@ -22,6 +22,22 @@ final class ActivityViewModel {
     /// "153/309 · about 4 min left".
     private(set) var progressDetailText: String?
 
+    /// Progress of all files in the queue, for the Dock icon; nil when idle.
+    private(set) var queueFraction: Double?
+    /// Files not finished yet, for the Dock badge.
+    private(set) var remainingFileCount = 0
+
+    struct RunSummary: Equatable {
+        let completed: Int
+        let failed: Int
+    }
+
+    /// Set when the queue goes idle after working, for a notification.
+    private(set) var finishedRun: RunSummary?
+
+    /// Jobs already finished when the queue started, left out of the summary.
+    @ObservationIgnored private var finishedBeforeRun: Set<UUID> = []
+
     /// When the running job's current counted step began, for the estimate.
     @ObservationIgnored private var stepStart: (jobID: UUID, step: String, date: Date)?
 
@@ -93,7 +109,27 @@ final class ActivityViewModel {
 
     private func apply(_ jobs: [Job]) {
         let running = jobs.first { !$0.status.isFinished && $0.status != .queued }
+        let wasBusy = isBusy
         isBusy = running != nil
+        remainingFileCount = jobs.filter { !$0.status.isFinished }.count
+        if isBusy {
+            let total = jobs.reduce(0.0) { sum, job in
+                sum + (job.status.isFinished ? 1 : job.status.fractionCompleted ?? 0)
+            }
+            queueFraction = total / Double(max(jobs.count, 1))
+        } else {
+            queueFraction = nil
+        }
+        if !wasBusy, isBusy {
+            finishedBeforeRun = Set(jobs.filter(\.status.isFinished).map(\.id))
+        }
+        if wasBusy, !isBusy {
+            let run = jobs.filter { !finishedBeforeRun.contains($0.id) }
+            finishedRun = RunSummary(
+                completed: run.filter { $0.status == .completed }.count,
+                failed: run.filter { if case .failed = $0.status { true } else { false } }.count
+            )
+        }
         if isBusy, jobs.count > 1 {
             let finished = jobs.filter(\.status.isFinished).count
             queuePositionText = String(localized: "\(finished + 1) of \(jobs.count)")

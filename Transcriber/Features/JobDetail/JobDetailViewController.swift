@@ -6,6 +6,7 @@ import AppKit
 final class JobDetailViewController: NSViewController {
     private let viewModel: JobDetailViewModel
     private let playerView = AVPlayerView()
+    private let subtitleOverlay = SubtitleOverlayView()
     private let player = AVPlayer()
     private let tableView = NSTableView()
     private let placeholderLabel = NSTextField(labelWithString: "")
@@ -23,6 +24,8 @@ final class JobDetailViewController: NSViewController {
     private static let audioPlayerHeight: CGFloat = 64
     private lazy var playerMinimumHeight = playerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 160)
     private var displayedAsAudio: Bool?
+    /// Set when the kind of media changed; applied once the split view has a size.
+    private var needsPlayerResize = false
 
     init(viewModel: JobDetailViewModel) {
         self.viewModel = viewModel
@@ -40,6 +43,11 @@ final class JobDetailViewController: NSViewController {
         // No Live Text over video: not needed here, and it runs a background
         // analysis service whose overlay logs Auto Layout conflicts.
         playerView.allowsVideoFrameAnalysis = false
+        if let overlay = playerView.contentOverlayView {
+            subtitleOverlay.frame = overlay.bounds
+            subtitleOverlay.autoresizingMask = [.width, .height]
+            overlay.addSubview(subtitleOverlay)
+        }
 
         let timeColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("Time"))
         timeColumn.title = String(localized: "Time")
@@ -68,6 +76,7 @@ final class JobDetailViewController: NSViewController {
         placeholderLabel.alignment = .center
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        splitView.delegate = self
         splitView.isVertical = false
         splitView.dividerStyle = .thin
         splitView.addArrangedSubview(playerView)
@@ -105,6 +114,16 @@ final class JobDetailViewController: NSViewController {
         binder = ObservationBinder { [weak self] in self?.render() }
     }
 
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        guard needsPlayerResize, splitView.bounds.height > 0, let isAudioOnly = displayedAsAudio else {
+            return
+        }
+        needsPlayerResize = false
+        let height = isAudioOnly ? Self.audioPlayerHeight : (splitView.bounds.height * 0.55).rounded()
+        splitView.setPosition(height, ofDividerAt: 0)
+    }
+
     override func viewDidAppear() {
         super.viewDidAppear()
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 10), queue: .main) { [weak self] time in
@@ -131,9 +150,12 @@ final class JobDetailViewController: NSViewController {
         if displayedAsAudio != viewModel.isAudioOnly, viewModel.hasSelection {
             displayedAsAudio = viewModel.isAudioOnly
             playerMinimumHeight.constant = viewModel.isAudioOnly ? Self.audioPlayerHeight : 160
-            view.layoutSubtreeIfNeeded()
-            let height = viewModel.isAudioOnly ? Self.audioPlayerHeight : splitView.bounds.height * 0.55
-            splitView.setPosition(height, ofDividerAt: 0)
+            // When the window resizes, the lower holding priority grows: the
+            // picture for video, the subtitle list for audio.
+            splitView.setHoldingPriority(viewModel.isAudioOnly ? .defaultHigh : .defaultLow - 1, forSubviewAt: 0)
+            splitView.setHoldingPriority(viewModel.isAudioOnly ? .defaultLow - 1 : .defaultLow, forSubviewAt: 1)
+            needsPlayerResize = true
+            view.needsLayout = true
         }
         if viewModel.lines != displayedLines {
             displayedLines = viewModel.lines
@@ -144,6 +166,7 @@ final class JobDetailViewController: NSViewController {
         placeholderLabel.stringValue = viewModel.subtitlesPlaceholder ?? ""
         placeholderLabel.isHidden = !viewModel.hasSelection || viewModel.subtitlesPlaceholder == nil
         highlight(viewModel.currentLineIndex)
+        subtitleOverlay.text = viewModel.isAudioOnly ? nil : viewModel.currentSubtitle
     }
 
     private func highlight(_ index: Int?) {
@@ -162,6 +185,14 @@ final class JobDetailViewController: NSViewController {
             return
         }
         player.seek(to: CMTime(seconds: displayedLines[index].startSeconds, preferredTimescale: 1_000), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+}
+
+extension JobDetailViewController: NSSplitViewDelegate {
+    /// The player is shown or hidden only by Hide Player, never collapsed
+    /// by the split view (which would hide it behind our back).
+    func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool {
+        false
     }
 }
 

@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainWindowController: MainWindowController?
     private var settingsWindowController: SettingsWindowController?
     private var activityWindowController: ActivityWindowController?
+    private var statusPresenter: AppStatusPresenter?
     private var queueViewModel: JobQueueViewModel?
     /// Files opened before the window existed (e.g. dropped on the Dock icon at launch).
     private var pendingOpenedURLs: [URL] = []
@@ -28,11 +29,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         windowController.showWindow(nil)
         mainWindowController = windowController
+        statusPresenter = AppStatusPresenter(viewModel: environment.activityViewModel)
 
         #if DEBUG
         if let directory = DebugSnapshotRenderer.requestedDirectory {
             if let media = DebugSnapshotRenderer.requestedMedia {
-                DebugSnapshotRenderer.transcribe(media, with: queueViewModel)
+                DebugSnapshotRenderer.transcribe(media, with: queueViewModel, main: windowController, to: directory)
                 showActivity(nil)
                 if let activityWindowController {
                     DebugSnapshotRenderer.renderActivity(activityWindowController, to: directory)

@@ -25,15 +25,25 @@ enum DebugSnapshotRenderer {
     }
 
     /// Adds and runs `media`, waiting up to five minutes for it to finish.
-    static func transcribe(_ media: URL, with queueViewModel: JobQueueViewModel) {
+    /// Renders `main-running.png` once the first chunk is done.
+    static func transcribe(_ media: URL, with queueViewModel: JobQueueViewModel, main: MainWindowController, to directory: URL) {
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        main.window?.appearance = NSAppearance(named: .aqua)
         queueViewModel.addFiles([media])
         let deadline = Date().addingTimeInterval(300)
         while queueViewModel.jobs.isEmpty, Date() < deadline {
             RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         }
+        queueViewModel.select(jobID: queueViewModel.jobs.first?.id)
         queueViewModel.startQueue()
+        var renderedRunning = false
         while queueViewModel.jobs.contains(where: { !$0.status.isFinished }), Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            if !renderedRunning, case .transcribing(let completed, _)? = queueViewModel.jobs.first?.status, completed >= 1 {
+                renderedRunning = true
+                RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+                snapshot(main.window?.contentView, to: directory.appendingPathComponent("main-running.png"))
+            }
         }
         queueViewModel.select(jobID: queueViewModel.jobs.first?.id)
         RunLoop.main.run(until: Date().addingTimeInterval(0.5))
