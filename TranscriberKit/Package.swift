@@ -8,12 +8,24 @@ let package = Package(
     products: [
         .library(name: "TranscriberCore", targets: ["TranscriberCore"]),
         .library(name: "WhisperCpp", targets: ["WhisperCpp"]),
+        .executable(name: "transcriber-cli", targets: ["transcriber-cli"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
     ],
     targets: [
         .target(name: "TranscriberCore"),
         .target(
             name: "WhisperCpp",
             dependencies: ["TranscriberCore", "whisper"]
+        ),
+        .executableTarget(
+            name: "transcriber-cli",
+            dependencies: [
+                "TranscriberCore",
+                "WhisperCpp",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ]
         ),
         .testTarget(
             name: "TranscriberCoreTests",
