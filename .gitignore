@@ -19,3 +19,7 @@ __pycache__/
 
 # Built by `make whisper-xcframework`
 /TranscriberKit/Vendor/
+
+# Parity media and outputs (user files, make baseline-a)
+/ParityMedia/
+/Parity/

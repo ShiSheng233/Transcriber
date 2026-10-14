@@ -10,6 +10,7 @@ CMAKE             ?= $(shell command -v cmake 2>/dev/null || echo uvx cmake)
 # Keep uv's package cache and any Python it installs inside $(TOOLS_DIR).
 export UV_CACHE_DIR          := $(abspath $(TOOLS_DIR))/uv-cache
 export UV_PYTHON_INSTALL_DIR := $(abspath $(TOOLS_DIR))/uv-python
+export HF_HOME               := $(abspath $(TOOLS_DIR))/huggingface
 
 # Large downloads resume after dropped connections (-C - with retries on every
 # error); verify_sha256 then checks the assembled file before it is used.
@@ -46,7 +47,7 @@ WHISPER_CMAKE_FLAGS := \
 	-DGGML_NATIVE=OFF \
 	-DGGML_OPENMP=OFF
 
-.PHONY: help whisper-xcframework ffmpeg-xcframeworks whisper-models whisper-models-q8_0 mlx-models vad-model parity-fixtures build test clean-tools
+.PHONY: help whisper-xcframework ffmpeg-xcframeworks whisper-models whisper-models-q8_0 mlx-models vad-model parity-fixtures baseline-a build test clean-tools
 
 help:
 	@echo "make whisper-xcframework  Build whisper.cpp $(WHISPER_VERSION) into $(WHISPER_XCFRAMEWORK)"
@@ -56,6 +57,7 @@ help:
 	@echo "make mlx-models           Convert the Whisper models to MLX float16 into $(MODELS_DIR)/mlx"
 	@echo "make vad-model            Convert the ASMR VAD to Core ML into $(MODELS_DIR)/vad"
 	@echo "make parity-fixtures      Regenerate test fixtures from the original Python pipeline"
+	@echo "make baseline-a           Run the original Python pipeline on $(PARITY_MEDIA) into $(BASELINE_A_DIR)"
 	@echo "make build                Build TranscriberKit and transcriber-cli"
 	@echo "make test                 Run TranscriberKit tests"
 	@echo "make clean-tools          Delete $(TOOLS_DIR) (downloads and intermediates)"
@@ -206,8 +208,10 @@ $(DOWNLOADS_DIR)/$(1)/model.safetensors:
 	$$(call verify_sha256,$(4),$$@.partial)
 	mv $$@.partial $$@
 
-$(MODELS_DIR)/whisper/$(1).bin: $(GGML_CONVERTER) $(MEL_FILTERS) \
-		$(DOWNLOADS_DIR)/$(1)/config.json $(DOWNLOADS_DIR)/$(1)/vocab.json $(DOWNLOADS_DIR)/$(1)/model.safetensors
+# Inputs are fetched inside the recipe, so deleting the downloads after
+# conversion does not make the converted model look out of date.
+$(MODELS_DIR)/whisper/$(1).bin: $(GGML_CONVERTER)
+	$(MAKE) $(MEL_FILTERS) $(DOWNLOADS_DIR)/$(1)/config.json $(DOWNLOADS_DIR)/$(1)/vocab.json $(DOWNLOADS_DIR)/$(1)/model.safetensors
 	uv run --script $(GGML_CONVERTER) $(DOWNLOADS_DIR)/$(1) $(MEL_FILTERS) $$@
 
 $(MODELS_DIR)/whisper/$(1)-q8_0.bin: $(MODELS_DIR)/whisper/$(1).bin $(WHISPER_QUANTIZE)
@@ -242,7 +246,8 @@ $(MLX_CONVERTER):
 	curl -fsSL -o $@ https://raw.githubusercontent.com/ml-explore/mlx-examples/$(MLX_EXAMPLES_COMMIT)/whisper/convert.py
 
 define mlx_model
-$(MODELS_DIR)/mlx/$(1)/model.safetensors: $(MLX_CONVERTER) $(DOWNLOADS_DIR)/$(1)/config.json $(DOWNLOADS_DIR)/$(1)/model.safetensors
+$(MODELS_DIR)/mlx/$(1)/model.safetensors:
+	$(MAKE) $(MLX_CONVERTER) $(DOWNLOADS_DIR)/$(1)/config.json $(DOWNLOADS_DIR)/$(1)/model.safetensors
 	uv run --no-project --python 3.12 --with "$(MLX_WHISPER_PACKAGE)" \
 		python $(MLX_CONVERTER) --torch-name-or-path $(DOWNLOADS_DIR)/$(1) --mlx-path $$(@D) --dtype float16
 endef
@@ -304,6 +309,59 @@ parity-fixtures: | $(CHICKENRICE_SOURCE) $(VAD_ONNX)
 	uv run --script Tools/parity/make_subtitle_fixture.py $(CHICKENRICE_PACKAGE)/infer.py \
 		$(TEST_FIXTURES)/SubtitleExportTests/Fixtures
 	uv run --script Tools/parity/make_decode_fixture.py $(TEST_FIXTURES)/MediaDecodingTests/Fixtures
+
+# Baseline A: the original pipeline ---------------------------------------------
+#
+# Runs the pinned original infer.py, unmodified, with the arguments of its
+# .bat launchers and the officially published CTranslate2 models. On a Mac it
+# runs on the CPU; compute type is fixed to float32 because "auto" would pick
+# int8/int16 on CPU, while users run float16/bfloat16 on a GPU.
+# Media and outputs are the user's own files and stay out of git.
+
+PARITY_MEDIA    ?= ParityMedia
+BASELINE_A_DIR  ?= Parity/baseline-a
+CT2_DIR         := $(TOOLS_DIR)/ct2
+BASELINE_TASKS  := translate transcribe
+CT2_MODEL_FILES := config.json preprocessor_config.json tokenizer.json vocabulary.json model.bin
+
+ORIGINAL_DEPENDENCIES := --with faster-whisper==1.2.1 --with "av>=11,<16" --with ctranslate2 --with onnxruntime \
+	--with "transformers>=4.45,<5" --with pyjson5 --with librosa
+ORIGINAL_ARGUMENTS := --audio_suffixes="mp3,wav,flac,m4a,aac,ogg,wma,mp4,mkv,avi,mov,webm,flv,wmv" \
+	--sub_formats="srt,vtt,lrc" --device=cpu --compute_type=float32 --overwrite --log_level=INFO
+
+# $(1): local name, $(2): repo, $(3): revision, $(4): SHA-256 of model.bin
+define ct2_model
+$(CT2_DIR)/$(1)/%:
+	mkdir -p $$(@D)
+	$(DOWNLOAD) -o $$@.partial $(HUGGING_FACE)/$(2)/resolve/$(3)/$$*
+	mv $$@.partial $$@
+
+$(CT2_DIR)/$(1)/model.bin:
+	mkdir -p $$(@D)
+	$(DOWNLOAD) -o $$@.partial $(HUGGING_FACE)/$(2)/resolve/$(3)/model.bin
+	$$(call verify_sha256,$(4),$$@.partial)
+	mv $$@.partial $$@
+endef
+
+$(eval $(call ct2_model,translate,chickenrice0721/whisper-large-v2-translate-zh-v0.2-st-ct2,2a896581429aa8100eaa5586bc36a5b3011871bc,d9ede0107bf5eef437db3625216e2395aebafd0a72967c5583c6234659d18273))
+$(eval $(call ct2_model,transcribe,TransWithAI/whisper-ja-1.5B-ct2,1527314b14da5bdf0d14e7328649d4fa26840188,01041dbc312122f6f0f5ef6dd89f2ad7dc0bba7b746e8e1bc3c4f04f0af0befd))
+
+$(DOWNLOADS_DIR)/whisper-vad-asmr/model_metadata.json:
+	mkdir -p $(@D)
+	$(DOWNLOAD) -o $@ $(HUGGING_FACE)/$(VAD_REPO)/resolve/$(VAD_REVISION)/model_metadata.json
+
+baseline-a: $(foreach task,$(BASELINE_TASKS),$(addprefix $(CT2_DIR)/$(task)/,$(CT2_MODEL_FILES))) \
+		$(VAD_ONNX) $(DOWNLOADS_DIR)/whisper-vad-asmr/model_metadata.json | $(CHICKENRICE_SOURCE)
+	mkdir -p $(CHICKENRICE_SOURCE)/models
+	ln -sf $(abspath $(VAD_ONNX)) $(CHICKENRICE_SOURCE)/models/whisper_vad.onnx
+	ln -sf $(abspath $(DOWNLOADS_DIR)/whisper-vad-asmr/model_metadata.json) $(CHICKENRICE_SOURCE)/models/whisper_vad_metadata.json
+	for task in $(BASELINE_TASKS); do \
+		cd $(abspath $(CHICKENRICE_SOURCE)) && uv run --no-project --python 3.12 $(ORIGINAL_DEPENDENCIES) \
+			python infer.py $(ORIGINAL_ARGUMENTS) --task=$$task \
+			--model_name_or_path=$(abspath $(CT2_DIR))/$$task \
+			--output_dir=$(abspath $(BASELINE_A_DIR))/$$task \
+			$(abspath $(PARITY_MEDIA)) || exit 1; \
+	done
 
 # TranscriberKit ---------------------------------------------------------------
 
