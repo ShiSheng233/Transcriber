@@ -113,7 +113,9 @@ final class LLMSettingsViewController: SettingsPaneViewController {
             apiKeyField.stringValue = viewModel.apiKey
         }
         apiKeyField.placeholderString = provider.needsAPIKey ? String(localized: "Required") : String(localized: "Not needed")
-        apiKeyDescription.stringValue = String(localized: "Stored in Keychain")
+        apiKeyDescription.stringValue = viewModel.apiKeyProblem ?? String(localized: "Stored in Keychain")
+        apiKeyDescription.textColor = viewModel.apiKeyProblem == nil ? .secondaryLabelColor : .systemRed
+        baseURLField.contentType = .URL
         getKeyButton?.isHidden = provider.keysPage == nil
         if languageBox.currentEditor() == nil {
             languageBox.stringValue = llm.targetLanguage
@@ -137,7 +139,7 @@ final class LLMSettingsViewController: SettingsPaneViewController {
         modelStatusLabel.stringValue = switch viewModel.modelListState {
         case .notLoaded, .loading: String(localized: "Loading…")
         case .loaded: String(localized: "\(viewModel.availableModels.count) models")
-        case .failed: String(localized: "Couldn't load models")
+        case .failed(let message): message
         }
         if case .failed(let message) = viewModel.modelListState {
             modelStatusLabel.toolTip = message

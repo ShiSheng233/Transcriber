@@ -20,6 +20,8 @@ final class SettingsViewModel {
     private let library: ModelLibrary
 
     private(set) var apiKey: String
+    /// Why the last API key entered was not saved.
+    private(set) var apiKeyProblem: String?
     private(set) var availableModels: [LLMModel] = []
     private(set) var modelListState = ModelListState.notLoaded
 
@@ -119,6 +121,16 @@ final class SettingsViewModel {
 
     func setAPIKey(_ key: String) {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        // An address in the key field (pasted, or AutoFilled from the Base
+        // URL) is sent as "Bearer https://…" and rejected by every server.
+        if trimmed.lowercased().hasPrefix("http://") || trimmed.lowercased().hasPrefix("https://") {
+            apiKeyProblem = String(localized: "That is a URL, not an API key")
+            return
+        }
+        apiKeyProblem = nil
+        guard trimmed != apiKey else {
+            return
+        }
         apiKeyStore.save(trimmed, for: settings.llm.baseURL)
         apiKey = trimmed
         reloadLLMModels()
@@ -157,6 +169,7 @@ final class SettingsViewModel {
         }
         store.update { $0.llm.baseURL = url }
         apiKey = apiKeyStore.read(for: url)
+        apiKeyProblem = nil
         reloadLLMModels()
     }
 
