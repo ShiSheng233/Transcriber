@@ -276,8 +276,24 @@ ViewModel 的单元测试放在 `TranscriberTests`，用假的 Service 实现驱
 | whisper.cpp f32，无 flash | translate | 9.6% | 88.8 | 10/10 | 2 / 62 ms | 7.8× |
 | **whisper.cpp bf16，无 flash（默认）** | translate | **8.1%** | **90.1** | **10/10** | **2 / 162 ms** | **10.3×** |
 | **whisper.cpp f16，无 flash（默认）** | transcribe | **0.0%** | **100** | **6/6** | **0 / 0 ms** | **30.8×** |
+| **MLX bf16** | translate | **6.6%** | **91.4** | **10/10** | **12 / 346 ms** | — |
+| **MLX f16** | transcribe | **0.0%** | **100** | **6/6** | **0 / 0 ms** | — |
 
 结论：Metal flash attention 用 f16 累加，改变了海南鸡的时间戳 token，导致分段不同，所以默认关闭；海南鸡用训练时的 bf16 最接近原版，f32 并不更好。whisper-ja 与原版完全一致，说明 VAD、切块、拼接、时间映射、解码规则、合并整条链路逻辑正确。
+
+### 9.2 速度与并行（5.4 分钟样本，13 个 chunk，M5 Max / 64GB）
+
+chunk 之间相互独立，并行处理不影响结果；温度回退的随机采样按 chunk 固定种子，结果在并发数和多次运行之间完全一致（原版的 CTranslate2 不固定种子，静音段的幻觉每次运行都可能不同）。
+
+| 后端 | 并发 | translate | transcribe | 峰值内存 |
+| --- | --- | --- | --- | --- |
+| whisper.cpp | 1 | 27.4× | 33.0× | 3.9 GB |
+| whisper.cpp | **4（默认）** | **42.8×** | **52.8×** | 5.0 GB |
+| whisper.cpp | 8 | 32.8× | 51.4× | 6.6 GB |
+| MLX | 1 | 19.4× | 36.2× | 3.4 GB |
+| MLX | 4 | 23.0× | 40.6× | 3.4 GB |
+
+结论：目前默认 whisper.cpp（更快）；MLX 与原版最接近、内存最低，但多个任务的 GPU 工作会被串行化，需要真正的跨 chunk batch 才能发挥优势。实现 batch 后重新测，再定默认后端。Metal flash attention 不做适配：其 kernel 中 Q/K/V 为 f16，精度设置对它无效，开启后在 bf16 下也没有提速。
 
 单窗口对照（`transcriber-cli decode-window` 对 `capture_faster_whisper_windows.py`）：avg_logprob −0.5850 对 −0.5849，前 7 个 token（含 1.44 s 初始时间戳）完全相同。
 
@@ -292,8 +308,8 @@ ViewModel 的单元测试放在 `TranscriberTests`，用假的 Service 实现驱
 5. ✅ 基准 A 工具链（`make baseline-a` / `ours` / `parity-report`）；**等待真实测试媒体**放入 `ParityMedia/`。
 6. 基准 B：mlx-whisper Python 原型（模型已就绪并冒烟通过）。
 7. ✅ `WhisperDecoding`：分词器、CTranslate2 逐步 logits 处理、采样、回退、分段、seek、VAD 时间映射；whisper.cpp 后端；`TranscriptionPipeline` 端到端可用（`transcriber-cli transcribe`）。
-8. `WhisperMLX` 后端：先读 mlx-audio-swift 源码决定复用还是自己移植；跨 chunk batch 解码。
-9. 性能：whisper.cpp 多 state 并行 chunk 对比 MLX batch，定默认后端与并发。
+8. ✅ `WhisperMLX` 后端：mlx-audio-swift 的层都是 internal，无法接入我们的解码循环，因此自己移植 mlx-whisper 的 `whisper.py`（权重命名一致）。待做：跨 chunk batch 解码（动态合批：多个会话的单步解码合成一次前向）。
+9. ✅ 性能：whisper.cpp 4 路并行 chunk 为默认（§9.2）；MLX batch 完成后复测。
 
 ### Phase 1：完整链路（CLI 可用）
 
