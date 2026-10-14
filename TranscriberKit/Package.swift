@@ -7,6 +7,7 @@ let package = Package(
     platforms: [.macOS(.v15)],
     products: [
         .library(name: "TranscriberCore", targets: ["TranscriberCore"]),
+        .library(name: "AudioFeatures", targets: ["AudioFeatures"]),
         .library(name: "WhisperCpp", targets: ["WhisperCpp"]),
         .executable(name: "transcriber-cli", targets: ["transcriber-cli"]),
     ],
@@ -15,6 +16,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "TranscriberCore"),
+        .target(name: "AudioFeatures"),
         .target(
             name: "WhisperCpp",
             dependencies: ["TranscriberCore", "whisper"]
@@ -30,6 +32,11 @@ let package = Package(
         .testTarget(
             name: "TranscriberCoreTests",
             dependencies: ["TranscriberCore"]
+        ),
+        .testTarget(
+            name: "AudioFeaturesTests",
+            dependencies: ["AudioFeatures"],
+            resources: [.copy("Fixtures")]
         ),
         .testTarget(
             name: "WhisperCppTests",
