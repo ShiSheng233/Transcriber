@@ -319,9 +319,22 @@ chunk 之间相互独立，并行处理不影响结果；温度回退的随机�
 
 JobQueue、JobDetail 预览、Settings（含后端选择、Core ML 编码器开关）、ModelLibrary（下载与导入）、拖放、通知、Sparkle。
 
-### Phase 3：LLM
+### Phase 2：AppKit 应用（主体完成）
 
-OpenRouter 客户端、模式 A/B、术语表、失败重试与断点续跑。
+✅ 文件队列（拖放、Open With、进度、取消/移除/在 Finder 中显示）、预览（播放器 + 字幕列表同步高亮、点击跳转）、设置（General / Output / Models / LLM 四个标签，System Settings 风格分组表单）。待做：中文本地化、Sparkle、通知。
+
+### Phase 3：LLM（主体完成）
+
+✅ `LLMTranslation` 模块与接入：
+
+- **模式由任务决定**：translate（海南鸡中文）→ 润色；transcribe（whisper-ja 日文）→ 翻译到目标语言（默认简体中文），可选双语（译文在上、原文在下）。
+- **OpenRouter**：`response_format` 严格 JSON Schema（`{lines: [{id, text}]}`）+ `provider.require_parameters`；模型列表实时拉取（只列支持 structured output 的模型，排除 `:batch`），不在代码里写死模型名；429/5xx 退避重试，401/402 给出明确提示。API key 存 Keychain。
+- **逐行对齐**：每批 40 行，前后各带 8 行上下文（前文用已处理的结果）；回复的 id 必须与本批完全一致，不一致重试一次，仍缺的行保留原文；时间轴从不改动。
+- **术语表**：每行 `源 = 译`，写进系统提示。
+- **失败不丢结果**：LLM 步骤出错时仍写出机器字幕，任务标记完成并附警告。
+- CLI：`transcriber-cli llm-models`、`transcribe --llm-model <id>`（key 读 `OPENROUTER_API_KEY`）。
+
+待做：用真实 API key 做端到端试跑与提示词调优；按 token 用量估算费用。
 
 ## 11. 待定事项
 
