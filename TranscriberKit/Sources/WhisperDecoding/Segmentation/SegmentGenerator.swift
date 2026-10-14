@@ -18,7 +18,7 @@ public struct DecodedSegment: Sendable, Equatable {
 /// clip timestamps, no previous-text prompt, no word timestamps): decode 30 s
 /// windows one after another, skip windows that are silence, split each
 /// window's tokens into segments and seek to where the last complete one ended.
-public struct SegmentGenerator {
+public struct SegmentGenerator: Sendable {
     private static let secondsPerFrame = 0.01
 
     public let backend: any WhisperBackend

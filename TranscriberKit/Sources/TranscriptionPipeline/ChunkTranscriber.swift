@@ -7,10 +7,11 @@ import WhisperDecoding
 /// `transcribe(chunk, vad_filter=True)` (inner VAD, speech joined, decoded,
 /// times mapped back), then infer.py's collection into millisecond segments
 /// shifted by the chunk start and kept inside the chunk.
-struct ChunkTranscriber {
+struct ChunkTranscriber: Sendable {
     let voiceActivityDetector: VoiceActivityDetector
     let segmentGenerator: SegmentGenerator
     let spectrogram: LogMelSpectrogram
+    let samplingSeed: UInt64
 
     func transcribe(_ chunk: AudioChunk, of samples: [Float]) throws -> [TimedText] {
         let chunkSamples = Array(samples[chunk.sampleRange(inAudioOfLength: samples.count)])
@@ -24,7 +25,7 @@ struct ChunkTranscriber {
         }
         let timeline = SpeechTimeline(spans: speech)
         let features = spectrogram.features(for: SpeechTimeline.joinedSpeech(from: chunkSamples, spans: speech))
-        var generator = SystemRandomNumberGenerator()
+        var generator = SeededRandomNumberGenerator(seed: samplingSeed &+ UInt64(chunk.index))
         let decoded = try segmentGenerator.segments(for: features, generator: &generator)
 
         return decoded.compactMap { segment in

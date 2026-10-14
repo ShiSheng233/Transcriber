@@ -3,7 +3,7 @@ import TranscriberCore
 /// faster-whisper's `generate_with_fallback`: decode at each temperature until
 /// a result is neither repetitive (compression ratio) nor unlikely (average log
 /// probability), unless the window looks like silence.
-public struct FallbackDecoder {
+public struct FallbackDecoder: Sendable {
     public let windowDecoder: WindowDecoder
 
     public init(windowDecoder: WindowDecoder) {

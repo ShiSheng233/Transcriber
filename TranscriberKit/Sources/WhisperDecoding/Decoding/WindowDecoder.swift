@@ -20,7 +20,7 @@ public struct WindowDecodingResult: Sendable, Equatable {
 
 /// Generates tokens for one window: prompt `<|sot|><|lang|><|task|>`, then up
 /// to `maximumGeneratedTokenCount` steps through the logits pipeline.
-public struct WindowDecoder {
+public struct WindowDecoder: Sendable {
     public let tokenizer: WhisperTokenizer
     public let settings: DecodingSettings
     private let pipeline: LogitsPipeline

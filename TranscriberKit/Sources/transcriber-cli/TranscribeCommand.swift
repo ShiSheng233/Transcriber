@@ -1,13 +1,14 @@
 import ArgumentParser
 import Foundation
 import SpeechDetection
+import Synchronization
 import SubtitleExport
 import TranscriberCore
 import TranscriptionPipeline
 import WhisperCpp
 import WhisperDecoding
 
-struct TranscribeCommand: ParsableCommand {
+struct TranscribeCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "transcribe",
         abstract: "Run the full pipeline on media files and write subtitles next to them or into --output-dir."
@@ -34,10 +35,13 @@ struct TranscribeCommand: ParsableCommand {
     @Option(help: "ggml model file name suffix, e.g. -f32 for chickenrice-v0.2-f32.bin.")
     var modelSuffix: String = ""
 
+    @Option(help: "Chunks decoded at the same time.")
+    var concurrency: Int = TranscriptionPipeline.Settings.chickenRice.concurrentChunkCount
+
     @Argument(help: "Media files.")
     var inputs: [String]
 
-    func run() throws {
+    func run() async throws {
         guard let task = TranscriptionTask(rawValue: task) else {
             throw ValidationError("task must be translate or transcribe")
         }
@@ -61,19 +65,23 @@ struct TranscribeCommand: ParsableCommand {
             backend: backend,
             decoder: FallbackDecoder(windowDecoder: WindowDecoder(tokenizer: tokenizer, settings: ChickenRiceDefaults.decoding(task: task)))
         )
-        let pipeline = TranscriptionPipeline(vadModel: vadModel, segmentGenerator: segmentGenerator)
+        var settings = TranscriptionPipeline.Settings.chickenRice
+        settings.concurrentChunkCount = concurrency
+        let pipeline = TranscriptionPipeline(vadModel: vadModel, segmentGenerator: segmentGenerator, settings: settings)
 
         for input in inputs {
             let inputURL = URL(fileURLWithPath: input)
             let start = ContinuousClock.now
-            var audioDuration = AudioTime.zero
-            let segments = try pipeline.transcribe(fileAt: inputURL) { progress in
+            let fileName = inputURL.lastPathComponent
+            let decodedDuration = Mutex(AudioTime.zero)
+            let segments = try await pipeline.transcribe(fileAt: inputURL) { progress in
                 switch progress {
-                case .decodedAudio(let duration): audioDuration = duration
-                case .plannedChunks(let count): print("\(inputURL.lastPathComponent): \(count) chunk(s)")
+                case .decodedAudio(let duration): decodedDuration.withLock { $0 = duration }
+                case .plannedChunks(let count): print("\(fileName): \(count) chunk(s)")
                 case .transcribedChunk(let index, let count): print("  chunk \(index + 1)/\(count)")
                 }
             }
+            let audioDuration = decodedDuration.withLock { $0 }
             let elapsed = ContinuousClock.now - start
             let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
             print(String(format: "  %d segments, %.1f s audio in %.1f s (%.1fx realtime)",
