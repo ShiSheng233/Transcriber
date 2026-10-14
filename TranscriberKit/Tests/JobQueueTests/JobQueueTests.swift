@@ -55,6 +55,7 @@ struct JobQueueTests {
             }
         }
 
+        await queue.shutDown()  // free the model: ggml checks at process exit
         let job = try #require(finishedJob)
         #expect(job.status == .completed)
         #expect(sawTranscribing)
@@ -62,6 +63,24 @@ struct JobQueueTests {
         #expect(job.outputURLs.map(\.lastPathComponent) == ["tts-long.srt", "tts-long.lrc"])
         for url in job.outputURLs {
             #expect(FileManager.default.fileExists(atPath: url.path))
+        }
+
+        // The log replays its history; every step comes before "done".
+        var messages: [String] = []
+        for await entry in await queue.logs() {
+            messages.append(entry.message)
+            if entry.message.contains(": done in") {
+                break
+            }
+        }
+        let loaded = messages.firstIndex { $0.contains("loaded in") || $0.contains("already loaded") }
+        let lastChunk = messages.firstIndex { $0.hasPrefix("Chunk 3/3") }
+        let merged = messages.firstIndex { $0 == "Merged into 6 subtitle(s)" }
+        #expect(loaded != nil && lastChunk != nil && merged != nil)
+        #expect(messages.contains { $0.hasPrefix("Speech: ") })
+        #expect(messages.last?.hasSuffix("6 subtitles") == true)
+        if let loaded, let lastChunk, let merged {
+            #expect(loaded < lastChunk && lastChunk < merged && merged < messages.count - 1)
         }
     }
 
@@ -106,6 +125,7 @@ struct JobQueueTests {
         await queue.start(configuration: configuration)
         for await jobs in await queue.snapshots() {
             if let job = jobs.first, job.status.isFinished {
+                await queue.shutDown()
                 return job
             }
         }

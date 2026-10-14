@@ -6,4 +6,5 @@ final class AppEnvironment {
     let apiKeyStore = APIKeyStore()
     let jobQueue = JobQueue()
     private(set) lazy var modelLibrary = ModelLibrary(settingsStore: settingsStore)
+    private(set) lazy var activityViewModel = ActivityViewModel(queue: jobQueue)
 }

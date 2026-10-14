@@ -104,7 +104,8 @@ struct TranscribeCommand: AsyncParsableCommand {
                 switch progress {
                 case .decodedAudio(let duration): decodedDuration.withLock { $0 = duration }
                 case .plannedChunks(let count): print("\(fileName): \(count) chunk(s)")
-                case .transcribedChunk(let index, let count): print("  chunk \(index + 1)/\(count)")
+                case .transcribedChunk(let completed, let count, _, _): print("  chunk \(completed)/\(count)")
+                case .detectedSpeech, .postProcessed: break
                 }
             }
             let audioDuration = decodedDuration.withLock { $0 }

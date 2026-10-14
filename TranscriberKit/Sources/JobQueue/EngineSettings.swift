@@ -28,4 +28,12 @@ extension EngineSettings.Backend {
         case .mlx: "MLX"
         }
     }
+
+    /// The weights this engine loads for `model`.
+    public func weights(of model: RecognitionModel) -> URL? {
+        switch self {
+        case .whisperCpp: model.files.whisperCpp
+        case .mlx: model.files.mlx
+        }
+    }
 }

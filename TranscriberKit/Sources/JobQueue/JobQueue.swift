@@ -39,6 +39,12 @@ public actor JobQueue {
     private var runningTask: Task<Void, Never>?
     private var runningJobID: UUID?
     private var observers: [UUID: AsyncStream<[Job]>.Continuation] = [:]
+    private static let logCapacity = 5_000
+    private var logEntries: [LogEntry] = []
+    private var logObservers: [UUID: AsyncStream<LogEntry>.Continuation] = [:]
+    /// When the running job's transcription started, for the speed figure.
+    private var transcriptionStart: ContinuousClock.Instant?
+    private var audioDuration: AudioTime?
 
     public init(
         engine: TranscriptionEngine = TranscriptionEngine(),
@@ -60,10 +66,28 @@ public actor JobQueue {
         return stream
     }
 
+    /// The kept history first, then every new entry.
+    public func logs() -> AsyncStream<LogEntry> {
+        let (stream, continuation) = AsyncStream<LogEntry>.makeStream(bufferingPolicy: .bufferingNewest(Self.logCapacity))
+        let observerID = UUID()
+        logObservers[observerID] = continuation
+        for entry in logEntries {
+            continuation.yield(entry)
+        }
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.removeLogObserver(observerID) }
+        }
+        return stream
+    }
+
     public func add(_ sourceURLs: [URL], model: RecognitionModel) {
         let known = Set(jobs.filter { !$0.status.isFinished }.map(\.sourceURL))
-        jobs += sourceURLs.filter { !known.contains($0) }.map { Job(sourceURL: $0, model: model) }
+        let newJobs = sourceURLs.filter { !known.contains($0) }.map { Job(sourceURL: $0, model: model) }
+        jobs += newJobs
         publish()
+        for job in newJobs {
+            log(.detail, job.id, "\(job.sourceURL.lastPathComponent): queued with \(model.displayName)")
+        }
     }
 
     public func remove(_ jobID: UUID) {
@@ -87,6 +111,13 @@ public actor JobQueue {
         }
     }
 
+    /// Cancels the running job, waits for it to stop and frees the model.
+    public func shutDown() async {
+        runningTask?.cancel()
+        await runningTask?.value
+        await engine.unload()
+    }
+
     /// Processes queued jobs until none are left.
     public func start(configuration: Configuration) {
         guard runningTask == nil else {
@@ -108,16 +139,25 @@ public actor JobQueue {
     }
 
     private func process(_ job: Job, configuration: Configuration) async {
+        let fileName = job.sourceURL.lastPathComponent
+        let jobStart = ContinuousClock.now
+        log(.info, job.id, "\(fileName): started")
         do {
             update(job.id) { $0.status = .loadingModel }
-            let pipeline = try await engine.pipeline(for: job.model, settings: configuration.engine)
+            let pipeline = try await loadPipeline(for: job, settings: configuration.engine)
             update(job.id) { $0.status = .decodingAudio }
+            log(.info, job.id, "Reading audio…")
 
             let jobID = job.id
-            var segments = try await pipeline.transcribe(fileAt: job.sourceURL) { [weak self] progress in
-                Task { await self?.record(progress, for: jobID) }
+            transcriptionStart = ContinuousClock.now
+            audioDuration = nil
+            var segments = try await withOrderedProgress { queue, progress in
+                queue.record(progress, for: jobID)
+            } work: { report in
+                try await pipeline.transcribe(fileAt: job.sourceURL, progress: report)
             }
             try Task.checkCancellation()
+            logTranscriptionSpeed(for: job.id, segmentCount: segments.count)
 
             if let llm = configuration.llm, llm.isUsable, !segments.isEmpty {
                 do {
@@ -137,11 +177,47 @@ public actor JobQueue {
                 $0.outputURLs = outputURLs
                 $0.status = .completed
             }
+            if let folder = outputURLs.first?.deletingLastPathComponent().path {
+                log(.detail, job.id, "Wrote \(outputURLs.map(\.lastPathComponent).joined(separator: ", ")) to \(folder)")
+            }
+            log(.info, job.id, "\(fileName): done in \(ActivityFormatting.seconds(ContinuousClock.now - jobStart)), \(segments.count) subtitles")
         } catch is CancellationError {
             update(job.id) { $0.status = .cancelled }
+            log(.warning, job.id, "\(fileName): cancelled")
         } catch {
             update(job.id) { $0.status = .failed(message: error.localizedDescription) }
+            log(.error, job.id, "\(fileName): \(error.localizedDescription)")
         }
+    }
+
+    private func loadPipeline(for job: Job, settings: EngineSettings) async throws -> TranscriptionPipeline {
+        let model = job.model
+        let engineName = settings.backend.displayName
+        if await engine.isLoaded(model, settings: settings) {
+            log(.detail, job.id, "\(model.displayName) is already loaded (\(engineName))")
+            return try await engine.pipeline(for: model, settings: settings)
+        }
+        let weights = settings.backend.weights(of: model)
+        let size = weights.flatMap(ActivityFormatting.fileSize(of:)).map { ", \($0)" } ?? ""
+        log(.info, job.id, "Loading \(model.displayName) with \(engineName)…")
+        log(.detail, job.id, "Weights: \(weights?.path ?? "none")\(size)")
+        log(.detail, job.id, "Decoding: task \(model.decoding.task.rawValue), language \(model.decoding.languageCode), "
+            + "temperatures \(model.decoding.temperatures.map { String(format: "%.1f", $0) }.joined(separator: "/")), "
+            + "\(settings.concurrentChunkCount) chunk(s) at once")
+        let start = ContinuousClock.now
+        let pipeline = try await engine.pipeline(for: model, settings: settings)
+        log(.info, job.id, "\(model.displayName) loaded in \(ActivityFormatting.seconds(ContinuousClock.now - start))")
+        return pipeline
+    }
+
+    private func logTranscriptionSpeed(for jobID: UUID, segmentCount: Int) {
+        guard let transcriptionStart, let audioDuration else {
+            return
+        }
+        let elapsed = ContinuousClock.now - transcriptionStart
+        let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+        let speed = seconds > 0 ? String(format: " (%.1f× realtime)", audioDuration.seconds / seconds) : ""
+        log(.info, jobID, "Transcribed \(ActivityFormatting.clock(audioDuration.seconds)) of audio in \(ActivityFormatting.seconds(elapsed))\(speed)")
     }
 
     /// The model's configuration says whether its output is polished or translated.
@@ -155,9 +231,16 @@ public actor JobQueue {
             : .translate(targetLanguage: llm.settings.targetLanguage)
         let jobID = job.id
         update(jobID) { $0.status = .refining(completedBatches: 0, totalBatches: 1) }
-        let refined = try await refiner.refine(segments, job: refinerJob, glossary: llm.settings.glossaryEntries) { [weak self] completed, total in
-            Task { await self?.update(jobID) { $0.status = .refining(completedBatches: completed, totalBatches: total) } }
+        let action = job.model.llmMode == .polish ? "Polishing" : "Translating"
+        log(.info, jobID, "\(action) \(segments.count) subtitles with \(llm.settings.model)…")
+        let start = ContinuousClock.now
+        let refined = try await withOrderedProgress { (queue, batches: (completed: Int, total: Int)) in
+            queue.update(jobID) { $0.status = .refining(completedBatches: batches.completed, totalBatches: batches.total) }
+            queue.log(.detail, jobID, "LLM batch \(batches.completed)/\(batches.total) done")
+        } work: { report in
+            try await refiner.refine(segments, job: refinerJob, glossary: llm.settings.glossaryEntries) { report(($0, $1)) }
         }
+        log(.info, jobID, "LLM step finished in \(ActivityFormatting.seconds(ContinuousClock.now - start))")
         if case .translate = refinerJob, llm.settings.keepsOriginalLine {
             return refined.withOriginalLines(from: segments)
         }
@@ -165,18 +248,68 @@ public actor JobQueue {
     }
 
     private func record(_ progress: TranscriptionPipeline.Progress, for jobID: UUID) {
-        guard case .transcribedChunk(let index, let count) = progress else {
-            if case .plannedChunks(let count) = progress {
-                update(jobID) { $0.status = .transcribing(completedChunks: 0, totalChunks: count) }
+        switch progress {
+        case .decodedAudio(let duration):
+            audioDuration = duration
+            log(.detail, jobID, "Audio: \(ActivityFormatting.clock(duration.seconds)) at 16 kHz mono")
+            update(jobID) { $0.status = .detectingSpeech }
+            log(.info, jobID, "Detecting speech…")
+        case .detectedSpeech(let spanCount, let speechDuration):
+            log(.detail, jobID, "Speech: \(spanCount) span(s), \(ActivityFormatting.clock(speechDuration.seconds)) in total")
+        case .plannedChunks(let count):
+            update(jobID) { $0.status = .transcribing(completedChunks: 0, totalChunks: count) }
+            log(.info, jobID, "Transcribing \(count) chunk(s)…")
+        case .transcribedChunk(let completed, let count, let chunk, let segmentCount):
+            update(jobID) { job in
+                // Progress messages can arrive after the job moved on.
+                if case .transcribing = job.status {
+                    job.status = .transcribing(completedChunks: completed, totalChunks: count)
+                }
             }
-            return
+            log(.detail, jobID, "Chunk \(completed)/\(count) "
+                + "(\(ActivityFormatting.clock(chunk.startSeconds))–\(ActivityFormatting.clock(chunk.endSeconds))): \(segmentCount) segment(s)")
+        case .postProcessed(let segmentCount):
+            log(.detail, jobID, "Merged into \(segmentCount) subtitle(s)")
         }
-        update(jobID) { job in
-            // Progress messages can arrive after the job moved on.
-            if case .transcribing = job.status {
-                job.status = .transcribing(completedChunks: index + 1, totalChunks: count)
+    }
+
+    /// Runs `work` and handles everything it reports, in order, before
+    /// returning, so later log lines never overtake its progress.
+    private func withOrderedProgress<Progress: Sendable, Result: Sendable>(
+        handle: @escaping @Sendable (isolated JobQueue, Progress) -> Void,
+        work: (_ report: @escaping @Sendable (Progress) -> Void) async throws -> Result
+    ) async throws -> Result {
+        let (stream, continuation) = AsyncStream<Progress>.makeStream()
+        let consumer = Task {
+            for await progress in stream {
+                handle(self, progress)
             }
         }
+        do {
+            let result = try await work { continuation.yield($0) }
+            continuation.finish()
+            await consumer.value
+            return result
+        } catch {
+            continuation.finish()
+            await consumer.value
+            throw error
+        }
+    }
+
+    private func log(_ level: LogEntry.Level, _ jobID: UUID?, _ message: String) {
+        let entry = LogEntry(level: level, jobID: jobID, message: message)
+        logEntries.append(entry)
+        if logEntries.count > Self.logCapacity {
+            logEntries.removeFirst(logEntries.count - Self.logCapacity)
+        }
+        for continuation in logObservers.values {
+            continuation.yield(entry)
+        }
+    }
+
+    private func removeLogObserver(_ observerID: UUID) {
+        logObservers[observerID] = nil
     }
 
     private func update(_ jobID: UUID, _ change: (inout Job) -> Void) {

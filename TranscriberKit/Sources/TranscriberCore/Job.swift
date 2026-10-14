@@ -28,6 +28,7 @@ public enum JobStatus: Hashable, Sendable {
     case queued
     case loadingModel
     case decodingAudio
+    case detectingSpeech
     case transcribing(completedChunks: Int, totalChunks: Int)
     case refining(completedBatches: Int, totalBatches: Int)
     case exporting
@@ -47,6 +48,7 @@ public enum JobStatus: Hashable, Sendable {
         switch self {
         case .queued, .loadingModel: 0
         case .decodingAudio: 0.02
+        case .detectingSpeech: 0.04
         case .transcribing(let completed, let total): 0.05 + 0.8 * Double(completed) / Double(max(total, 1))
         case .refining(let completed, let total): 0.85 + 0.1 * Double(completed) / Double(max(total, 1))
         case .exporting: 0.97

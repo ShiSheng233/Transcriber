@@ -3,6 +3,7 @@ import AppKit
 /// The list of queued files. Accepts dropped files and folders.
 final class JobQueueViewController: NSViewController {
     private let viewModel: JobQueueViewModel
+    private let statusBar: ActivityStatusBar
     private let tableView = NSTableView()
     private let emptyState = EmptyStateView(
         symbolName: "waveform.badge.plus",
@@ -12,8 +13,9 @@ final class JobQueueViewController: NSViewController {
     private var binder: ObservationBinder?
     private var displayedRows: [JobQueueViewModel.Row] = []
 
-    init(viewModel: JobQueueViewModel) {
+    init(viewModel: JobQueueViewModel, activityViewModel: ActivityViewModel, showActivity: @escaping () -> Void) {
         self.viewModel = viewModel
+        statusBar = ActivityStatusBar(viewModel: activityViewModel, showLog: showActivity)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -40,17 +42,22 @@ final class JobQueueViewController: NSViewController {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
         emptyState.translatesAutoresizingMaskIntoConstraints = false
+        statusBar.translatesAutoresizingMaskIntoConstraints = false
 
         let container = NSView()
         container.addSubview(scrollView)
         container.addSubview(emptyState)
+        container.addSubview(statusBar)
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: container.topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
+            statusBar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            statusBar.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            statusBar.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             emptyState.topAnchor.constraint(equalTo: container.topAnchor),
-            emptyState.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            emptyState.bottomAnchor.constraint(equalTo: statusBar.topAnchor),
             emptyState.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             emptyState.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             container.widthAnchor.constraint(greaterThanOrEqualToConstant: 260),

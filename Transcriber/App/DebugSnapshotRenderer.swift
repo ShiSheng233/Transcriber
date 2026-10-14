@@ -1,8 +1,11 @@
 #if DEBUG
 import AppKit
+import TranscriberCore
 
 /// Development aid: `-RenderSnapshots <directory>` renders every settings tab
-/// and the main window to PNG files, then quits. Used
+/// and the main window to PNG files, then quits. With `-SnapshotMedia <file>`
+/// it first transcribes that file, selects it and also renders the Activity
+/// window. Used
 /// to review layouts without screen recording. Not compiled into release builds.
 enum DebugSnapshotRenderer {
     static var requestedDirectory: URL? {
@@ -11,6 +14,37 @@ enum DebugSnapshotRenderer {
             return nil
         }
         return URL(fileURLWithPath: arguments[index + 1], isDirectory: true)
+    }
+
+    static var requestedMedia: URL? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-SnapshotMedia"), arguments.indices.contains(index + 1) else {
+            return nil
+        }
+        return URL(fileURLWithPath: arguments[index + 1])
+    }
+
+    /// Adds and runs `media`, waiting up to five minutes for it to finish.
+    static func transcribe(_ media: URL, with queueViewModel: JobQueueViewModel) {
+        queueViewModel.addFiles([media])
+        let deadline = Date().addingTimeInterval(300)
+        while queueViewModel.jobs.isEmpty, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        }
+        queueViewModel.startQueue()
+        while queueViewModel.jobs.contains(where: { !$0.status.isFinished }), Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        }
+        queueViewModel.select(jobID: queueViewModel.jobs.first?.id)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+    }
+
+    static func renderActivity(_ activity: ActivityWindowController, to directory: URL) {
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        activity.window?.appearance = NSAppearance(named: .aqua)
+        activity.showWindow(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        snapshot(activity.window?.contentView, to: directory.appendingPathComponent("activity.png"))
     }
 
     static func render(settings: SettingsWindowController, main: MainWindowController, to directory: URL) {

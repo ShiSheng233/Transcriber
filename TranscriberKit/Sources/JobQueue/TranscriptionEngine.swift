@@ -31,6 +31,17 @@ public actor TranscriptionEngine {
 
     public init() {}
 
+    /// Frees the loaded model. ggml's Metal device checks at process exit
+    /// that every buffer was freed, so call this before quitting.
+    public func unload() {
+        loaded = nil
+    }
+
+    /// Whether `pipeline(for:settings:)` would return without loading.
+    public func isLoaded(_ model: RecognitionModel, settings: EngineSettings) -> Bool {
+        loaded?.key == PipelineKey(settings: settings, model: model)
+    }
+
     public func pipeline(for model: RecognitionModel, settings: EngineSettings) throws -> TranscriptionPipeline {
         let key = PipelineKey(settings: settings, model: model)
         if let loaded, loaded.key == key {

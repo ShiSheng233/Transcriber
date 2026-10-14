@@ -41,8 +41,13 @@ public struct TranscriptionPipeline: Sendable {
 
     public enum Progress: Sendable {
         case decodedAudio(duration: AudioTime)
+        /// The outer VAD pass: speech spans and their total length.
+        case detectedSpeech(spanCount: Int, speechDuration: AudioTime)
         case plannedChunks(count: Int)
-        case transcribedChunk(index: Int, count: Int)
+        /// `completed` chunks of `count` are done; `chunk` is the one that just finished.
+        case transcribedChunk(completed: Int, count: Int, chunk: AudioChunk, segmentCount: Int)
+        /// Subtitles after merging.
+        case postProcessed(segmentCount: Int)
     }
 
     private let mediaDecoder = MediaDecoder()
@@ -70,6 +75,8 @@ public struct TranscriptionPipeline: Sendable {
     public func transcribe(samples: [Float], progress: @escaping @Sendable (Progress) -> Void = { _ in }) async throws -> [TimedText] {
         let durationSeconds = Double(samples.count) / Double(AudioTime.sampleRate)
         let speech = try voiceActivityDetector.speechSpans(in: samples)
+        let speechSamples = speech.reduce(0) { $0 + max(($1.end - $1.start).samples, 0) }
+        progress(.detectedSpeech(spanCount: speech.count, speechDuration: AudioTime(samples: speechSamples)))
         // infer.py returns nothing when the outer VAD finds no speech at all.
         guard speech.contains(where: { $0.end > $0.start }) else {
             return []
@@ -87,7 +94,9 @@ public struct TranscriptionPipeline: Sendable {
         progress(.plannedChunks(count: chunks.count))
 
         let segments = try await transcribeConcurrently(chunks, of: samples, progress: progress)
-        return SubtitlePostProcessor.process(segments, settings: settings.merge)
+        let subtitles = SubtitlePostProcessor.process(segments, settings: settings.merge)
+        progress(.postProcessed(segmentCount: subtitles.count))
+        return subtitles
     }
 
     /// Keeps up to `concurrentChunkCount` chunks in flight and returns their
@@ -116,7 +125,7 @@ public struct TranscriptionPipeline: Sendable {
             while let (index, segments) = try await group.next() {
                 segmentsByChunk[index] = segments
                 finishedCount += 1
-                progress(.transcribedChunk(index: finishedCount - 1, count: chunks.count))
+                progress(.transcribedChunk(completed: finishedCount, count: chunks.count, chunk: chunks[index], segmentCount: segments.count))
                 if nextChunk < chunks.count {
                     startNextChunk()
                 }

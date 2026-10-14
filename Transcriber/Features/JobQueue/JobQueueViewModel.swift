@@ -130,6 +130,7 @@ final class JobQueueViewModel {
         case .queued: String(localized: "Waiting")
         case .loadingModel: String(localized: "Loading model…")
         case .decodingAudio: String(localized: "Reading audio…")
+        case .detectingSpeech: String(localized: "Detecting speech…")
         case .transcribing(let completed, let total): String(localized: "Transcribing \(completed)/\(total)")
         case .refining(let completed, let total): String(localized: "Improving with LLM \(completed)/\(total)")
         case .exporting: String(localized: "Writing subtitles…")

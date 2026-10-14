@@ -95,6 +95,9 @@ enum MainMenuBuilder {
             action: #selector(NSWindow.performZoom(_:)),
             keyEquivalent: ""
         )
+        menu.addItem(.separator())
+        let activity = menu.addItem(withTitle: String(localized: "Activity"), action: #selector(AppDelegate.showActivity(_:)), keyEquivalent: "l")
+        activity.keyEquivalentModifierMask = [.command, .option]
         NSApp.windowsMenu = menu
         return menu
     }

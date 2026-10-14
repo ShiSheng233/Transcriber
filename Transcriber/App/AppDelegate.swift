@@ -1,9 +1,11 @@
 import AppKit
+import JobQueue
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let environment = AppEnvironment()
     private var mainWindowController: MainWindowController?
     private var settingsWindowController: SettingsWindowController?
+    private var activityWindowController: ActivityWindowController?
     private var queueViewModel: JobQueueViewModel?
     /// Files opened before the window existed (e.g. dropped on the Dock icon at launch).
     private var pendingOpenedURLs: [URL] = []
@@ -18,14 +20,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         queueViewModel.addFiles(pendingOpenedURLs)
         pendingOpenedURLs = []
         self.queueViewModel = queueViewModel
-        let windowController = MainWindowController(queueViewModel: queueViewModel) { [weak self] in
-            self?.showSettings(nil)
-        }
+        let windowController = MainWindowController(
+            queueViewModel: queueViewModel,
+            activityViewModel: environment.activityViewModel,
+            openSettings: { [weak self] in self?.showSettings(nil) },
+            showActivity: { [weak self] in self?.showActivity(nil) }
+        )
         windowController.showWindow(nil)
         mainWindowController = windowController
 
         #if DEBUG
         if let directory = DebugSnapshotRenderer.requestedDirectory {
+            if let media = DebugSnapshotRenderer.requestedMedia {
+                DebugSnapshotRenderer.transcribe(media, with: queueViewModel)
+                showActivity(nil)
+                if let activityWindowController {
+                    DebugSnapshotRenderer.renderActivity(activityWindowController, to: directory)
+                }
+            }
             showSettings(nil)
             if let settingsWindowController {
                 DebugSnapshotRenderer.render(settings: settingsWindowController, main: windowController, to: directory)
@@ -47,12 +59,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Stops work and frees the model first: ggml aborts at exit if Metal
+    /// buffers are still allocated.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let queue = environment.jobQueue
+        Task {
+            await queue.shutDown()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
         true
+    }
+
+    @objc func showActivity(_ sender: Any?) {
+        if activityWindowController == nil {
+            activityWindowController = ActivityWindowController(viewModel: environment.activityViewModel)
+            activityWindowController?.window?.center()
+        }
+        activityWindowController?.showWindow(nil)
     }
 
     @objc func showSettings(_ sender: Any?) {

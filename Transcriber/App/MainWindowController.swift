@@ -12,12 +12,19 @@ final class MainWindowController: NSWindowController {
     private let openSettings: () -> Void
     private var binder: ObservationBinder?
 
-    init(queueViewModel: JobQueueViewModel, openSettings: @escaping () -> Void) {
+    init(
+        queueViewModel: JobQueueViewModel,
+        activityViewModel: ActivityViewModel,
+        openSettings: @escaping () -> Void,
+        showActivity: @escaping () -> Void
+    ) {
         self.queueViewModel = queueViewModel
         self.openSettings = openSettings
 
         let splitViewController = NSSplitViewController()
-        let sidebar = NSSplitViewItem(sidebarWithViewController: JobQueueViewController(viewModel: queueViewModel))
+        let sidebar = NSSplitViewItem(sidebarWithViewController: JobQueueViewController(
+            viewModel: queueViewModel, activityViewModel: activityViewModel, showActivity: showActivity
+        ))
         sidebar.minimumThickness = 260
         sidebar.canCollapse = false
         splitViewController.addSplitViewItem(sidebar)
