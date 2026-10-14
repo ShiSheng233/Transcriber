@@ -7,6 +7,7 @@ enum MainMenuBuilder {
         mainMenu.addItem(submenuItem(makeApplicationMenu()))
         mainMenu.addItem(submenuItem(makeFileMenu()))
         mainMenu.addItem(submenuItem(makeEditMenu()))
+        mainMenu.addItem(submenuItem(makeViewMenu()))
         mainMenu.addItem(submenuItem(makeWindowMenu()))
         return mainMenu
     }
@@ -70,6 +71,15 @@ enum MainMenuBuilder {
         menu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         menu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         menu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        return menu
+    }
+
+    private static func makeViewMenu() -> NSMenu {
+        let menu = NSMenu(title: String(localized: "View"))
+        let player = menu.addItem(
+            withTitle: String(localized: "Hide Player"), action: #selector(MainWindowController.togglePlayer(_:)), keyEquivalent: "p"
+        )
+        player.keyEquivalentModifierMask = [.command, .option]
         return menu
     }
 

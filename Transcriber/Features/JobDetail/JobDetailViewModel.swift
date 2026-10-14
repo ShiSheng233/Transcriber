@@ -12,14 +12,34 @@ final class JobDetailViewModel {
         let endSeconds: Double
     }
 
+    private static let showsPlayerKey = "ShowsPlayer"
+    private let userDefaults: UserDefaults
+
     private(set) var mediaURL: URL?
+    /// Off: only the subtitle list; the media is not loaded at all.
+    private(set) var showsPlayer: Bool
     private(set) var lines: [Line] = []
     private(set) var currentLineIndex: Int?
     /// Shown above the subtitle list while it is empty.
     private(set) var subtitlesPlaceholder: String?
 
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+        showsPlayer = userDefaults.object(forKey: Self.showsPlayerKey) as? Bool ?? true
+    }
+
     var hasSelection: Bool {
         mediaURL != nil
+    }
+
+    /// What the player should load: nothing while it is hidden.
+    var playerURL: URL? {
+        showsPlayer ? mediaURL : nil
+    }
+
+    func togglePlayer() {
+        showsPlayer.toggle()
+        userDefaults.set(showsPlayer, forKey: Self.showsPlayerKey)
     }
 
     /// Shows `job`, or nothing. Keeps the media when only its status changed.

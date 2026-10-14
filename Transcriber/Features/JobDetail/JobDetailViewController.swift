@@ -17,7 +17,7 @@ final class JobDetailViewController: NSViewController {
     private let splitView = NSSplitView()
     private var binder: ObservationBinder?
     private var timeObserver: Any?
-    private var displayedMediaURL: URL?
+    private var displayedPlayerURL: URL?
     private var displayedLines: [JobDetailViewModel.Line] = []
 
     init(viewModel: JobDetailViewModel) {
@@ -74,11 +74,12 @@ final class JobDetailViewController: NSViewController {
         container.addSubview(placeholderLabel)
         container.addSubview(emptyState)
         NSLayoutConstraint.activate([
-            splitView.topAnchor.constraint(equalTo: container.topAnchor),
+            // Below the toolbar: the window has a full-size content view.
+            splitView.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
             splitView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             splitView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             splitView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            emptyState.topAnchor.constraint(equalTo: container.topAnchor),
+            emptyState.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
             emptyState.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             emptyState.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             emptyState.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -115,10 +116,11 @@ final class JobDetailViewController: NSViewController {
     }
 
     private func render() {
-        if viewModel.mediaURL != displayedMediaURL {
-            displayedMediaURL = viewModel.mediaURL
-            player.replaceCurrentItem(with: viewModel.mediaURL.map { AVPlayerItem(url: $0) })
+        if viewModel.playerURL != displayedPlayerURL {
+            displayedPlayerURL = viewModel.playerURL
+            player.replaceCurrentItem(with: viewModel.playerURL.map { AVPlayerItem(url: $0) })
         }
+        playerView.isHidden = !viewModel.showsPlayer
         if viewModel.lines != displayedLines {
             displayedLines = viewModel.lines
             tableView.reloadData()

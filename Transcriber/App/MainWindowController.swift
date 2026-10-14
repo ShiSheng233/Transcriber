@@ -48,6 +48,7 @@ final class MainWindowController: NSWindowController {
 
     private func render() {
         detailViewModel.show(queueViewModel.selectedJob)
+        _ = detailViewModel.showsPlayer  // re-validate the Player item when it changes
         window?.toolbar?.validateVisibleItems()
         if queueViewModel.isMissingModels {
             showMissingModelsAlert()
@@ -100,6 +101,19 @@ final class MainWindowController: NSWindowController {
     @objc func showSettingsFromToolbar(_ sender: Any?) {
         openSettings()
     }
+
+    @objc func togglePlayer(_ sender: Any?) {
+        detailViewModel.togglePlayer()
+    }
+}
+
+extension MainWindowController: NSMenuItemValidation {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(togglePlayer(_:)) {
+            menuItem.title = detailViewModel.showsPlayer ? String(localized: "Hide Player") : String(localized: "Show Player")
+        }
+        return true
+    }
 }
 
 extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
@@ -107,6 +121,7 @@ extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
         static let add = NSToolbarItem.Identifier("add")
         static let start = NSToolbarItem.Identifier("start")
         static let clear = NSToolbarItem.Identifier("clear")
+        static let player = NSToolbarItem.Identifier("player")
         static let settings = NSToolbarItem.Identifier("settings")
     }
 
@@ -118,7 +133,7 @@ extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [ItemID.add, ItemID.start, ItemID.clear, .flexibleSpace, ItemID.settings]
+        [ItemID.add, ItemID.start, ItemID.clear, .flexibleSpace, ItemID.player, ItemID.settings]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -135,6 +150,8 @@ extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
             configure(item, label: String(localized: "Start"), symbol: "play.fill", action: #selector(startQueue(_:)))
         case ItemID.clear:
             configure(item, label: String(localized: "Clear Finished"), symbol: "checklist.checked", action: #selector(clearFinished(_:)))
+        case ItemID.player:
+            configure(item, label: String(localized: "Player"), symbol: "play.rectangle", action: #selector(togglePlayer(_:)))
         case ItemID.settings:
             configure(item, label: String(localized: "Settings"), symbol: "gearshape", action: #selector(showSettingsFromToolbar(_:)))
         default:
@@ -144,7 +161,15 @@ extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
     }
 
     func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
-        switch item.itemIdentifier {
+        if item.itemIdentifier == ItemID.player {
+            let label = detailViewModel.showsPlayer ? String(localized: "Hide Player") : String(localized: "Show Player")
+            item.toolTip = label
+            item.image = NSImage(
+                systemSymbolName: detailViewModel.showsPlayer ? "play.rectangle.fill" : "play.rectangle",
+                accessibilityDescription: label
+            )
+        }
+        return switch item.itemIdentifier {
         case ItemID.start: queueViewModel.canStart
         case ItemID.clear: queueViewModel.hasFinishedJobs
         default: true
