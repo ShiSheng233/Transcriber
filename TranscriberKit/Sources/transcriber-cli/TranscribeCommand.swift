@@ -129,8 +129,8 @@ struct TranscribeCommand: AsyncParsableCommand {
         let refiner = SubtitleRefiner(client: try llmEndpoint.makeClient(), configuration: .init(model: model))
         let job: SubtitleRefiner.Job = recognitionModel.llmMode == .polish ? .polishChinese : .translate(targetLanguage: llmTargetLanguage)
         let start = ContinuousClock.now
-        let result = try await refiner.refine(segments, job: job) { completed, total in
-            print("  LLM batch \(completed)/\(total)")
+        let result = try await refiner.refine(segments, job: job) { batch in
+            print("  LLM batch \(batch.completed)/\(batch.total)")
         }
         if result.failedBatchCount > 0 {
             print("  warning: \(result.failedBatchCount) of \(result.batchCount) batches failed: \(result.firstFailure ?? "")")

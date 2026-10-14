@@ -300,6 +300,37 @@ struct SubtitleTranslationJobTests {
         #expect(try String(contentsOf: folder.appendingPathComponent("movie.srt"), encoding: .utf8) == original)
     }
 
+    @Test func savesEditedSubtitlesOverTheWrittenFile() async throws {
+        var settings = LLMSettings.defaults
+        settings.isEnabled = true
+        settings.model = "test/model"
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let subtitleURL = folder.appendingPathComponent("movie.srt")
+        try "1\n00:00:01,000 --> 00:00:02,000\nこんにちは\n".write(to: subtitleURL, atomically: true, encoding: .utf8)
+
+        let queue = JobQueue(makeChatClient: { _, _ in StubChat(fails: false) })
+        await queue.addSubtitleTranslations([(subtitleURL, nil)])
+        await queue.start(configuration: JobQueue.Configuration(
+            engine: EngineSettings(modelsDirectory: URL(fileURLWithPath: "/nonexistent"), backend: .whisperCpp, concurrentChunkCount: 1),
+            output: OutputSettings(formats: [.srt], directory: nil),
+            llm: .init(settings: settings, apiKey: "sk-test")
+        ))
+        var job: Job?
+        for await jobs in await queue.snapshots() where jobs.first?.status.isFinished == true {
+            job = jobs.first
+            break
+        }
+        let finished = try #require(job)
+
+        await queue.replaceSegments(of: finished.id, with: [TimedText(start: .zero, end: AudioTime(seconds: 1), text: "改好了")])
+        let saved = try await queue.saveSubtitles(of: finished.id)
+
+        #expect(saved.map(\.lastPathComponent) == ["movie.简体中文.srt"])
+        #expect(try String(contentsOf: saved[0], encoding: .utf8).contains("改好了"))
+    }
+
     @Test func failsClearlyWithoutTheLanguageModel() async throws {
         let (job, _, folder) = try await run(llm: nil)
         defer { try? FileManager.default.removeItem(at: folder) }

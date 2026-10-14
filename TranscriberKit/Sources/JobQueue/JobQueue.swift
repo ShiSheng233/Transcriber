@@ -112,6 +112,21 @@ public actor JobQueue {
         }
     }
 
+    /// The editor's version of a finished job's subtitles; `save` writes them.
+    public func replaceSegments(of jobID: UUID, with segments: [TimedText]) {
+        update(jobID) { $0.segments = segments }
+    }
+
+    /// Writes a finished job's current subtitles over the files it produced.
+    public func saveSubtitles(of jobID: UUID) throws -> [URL] {
+        guard let job = jobs.first(where: { $0.id == jobID }), job.status.isFinished, !job.outputURLs.isEmpty else {
+            throw JobQueueError.nothingToSave
+        }
+        try SubtitleFileWriter.rewrite(job.segments, to: job.outputURLs)
+        log(.info, jobID, "Saved \(job.outputURLs.map(\.lastPathComponent).joined(separator: ", "))")
+        return job.outputURLs
+    }
+
     public func remove(_ jobID: UUID) {
         if jobID == runningJobID {
             currentJobTask?.cancel()
@@ -306,15 +321,23 @@ public actor JobQueue {
             client: makeChatClient(llm.settings.baseURL, llm.apiKey),
             configuration: SubtitleRefiner.Configuration(model: llm.settings.model)
         )
-        update(jobID) { $0.status = .refining(completedBatches: 0, totalBatches: 1) }
+        update(jobID) {
+            $0.status = .refining(completedBatches: 0, totalBatches: 1)
+            $0.segments = segments  // finished batches replace their lines as they arrive
+        }
         let action = if case .polishChinese = refinerJob { "Polishing" } else { "Translating" }
         log(.info, jobID, "\(action) \(segments.count) subtitles with \(llm.settings.model)…")
         let start = ContinuousClock.now
-        let result = try await withOrderedProgress { (queue, batches: (completed: Int, total: Int)) in
-            queue.update(jobID) { $0.status = .refining(completedBatches: batches.completed, totalBatches: batches.total) }
-            queue.log(.detail, jobID, "LLM batch \(batches.completed)/\(batches.total) done")
+        let result = try await withOrderedProgress { (queue, batch: SubtitleRefiner.BatchProgress) in
+            queue.update(jobID) { job in
+                job.status = .refining(completedBatches: batch.completed, totalBatches: batch.total)
+                for (index, text) in batch.lines where job.segments.indices.contains(index) {
+                    job.segments[index].text = text
+                }
+            }
+            queue.log(.detail, jobID, "LLM batch \(batch.completed)/\(batch.total) done")
         } work: { report in
-            try await refiner.refine(segments, job: refinerJob, glossary: llm.settings.glossaryEntries) { report(($0, $1)) }
+            try await refiner.refine(segments, job: refinerJob, glossary: llm.settings.glossaryEntries, progress: report)
         }
         log(.info, jobID, "LLM step finished in \(ActivityFormatting.seconds(ContinuousClock.now - start))")
         if result.failedBatchCount > 0 {
@@ -416,9 +439,11 @@ public actor JobQueue {
 
 public enum JobQueueError: LocalizedError, Equatable {
     case languageModelRequired
+    case nothingToSave
 
     public var errorDescription: String? {
         switch self {
+        case .nothingToSave: "Only finished files with written subtitles can be saved."
         case .languageModelRequired: "Translating subtitles needs the language model: turn it on and choose a model in Settings › LLM."
         }
     }

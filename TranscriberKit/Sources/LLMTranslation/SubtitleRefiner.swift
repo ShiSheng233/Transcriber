@@ -49,12 +49,20 @@ public struct SubtitleRefiner: Sendable {
         public let firstFailure: String?
     }
 
-    /// - Parameter progress: called with (finished batches, total batches).
+    /// A finished batch, so its lines can be shown before the rest are done.
+    public struct BatchProgress: Sendable {
+        public let completed: Int
+        public let total: Int
+        /// New text by line index; empty for a batch that failed.
+        public let lines: [Int: String]
+    }
+
+    /// - Parameter progress: called after every batch, in completion order.
     public func refine(
         _ segments: [TimedText],
         job: Job,
         glossary: [(source: String, target: String)] = [],
-        progress: @escaping @Sendable (Int, Int) -> Void = { _, _ in }
+        progress: @escaping @Sendable (BatchProgress) -> Void = { _ in }
     ) async throws -> Result {
         guard !segments.isEmpty else {
             return Result(segments: [], failedBatchCount: 0, batchCount: 0, firstFailure: nil)
@@ -95,18 +103,20 @@ public struct SubtitleRefiner: Sendable {
             }
             var finished = 0
             while let (batch, outcome) = try await group.next() {
+                var batchLines: [Int: String] = [:]
                 switch outcome {
                 case .success(let replies):
                     for index in batch {
                         if let text = replies[index], !text.pythonStripped.isEmpty {
                             refinedTexts[index] = text
+                            batchLines[index] = text
                         }
                     }
                 case .failure(let error):
                     failures.append(error)
                 }
                 finished += 1
-                progress(finished, batches.count)
+                progress(BatchProgress(completed: finished, total: batches.count, lines: batchLines))
                 if next < batches.count {
                     startNextBatch()
                 }

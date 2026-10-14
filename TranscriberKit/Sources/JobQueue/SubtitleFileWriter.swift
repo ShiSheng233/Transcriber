@@ -31,6 +31,17 @@ enum SubtitleFileWriter {
         }
     }
 
+    /// Renders `segments` again into files written earlier, each in the
+    /// format its extension names.
+    static func rewrite(_ segments: [TimedText], to urls: [URL]) throws {
+        for url in urls {
+            guard let format = SubtitleFormat.allCases.first(where: { $0.fileExtension == url.pathExtension.lowercased() }) else {
+                continue
+            }
+            try SubtitleRenderer.render(segments, as: format).write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
     /// Text usable in a file name ("简体中文" stays, "/" and ":" go).
     static func safeNamePart(_ text: String) -> String {
         let cleaned = text.components(separatedBy: CharacterSet(charactersIn: "/:\\")).joined(separator: "-")
