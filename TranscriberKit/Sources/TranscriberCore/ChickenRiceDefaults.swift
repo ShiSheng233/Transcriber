@@ -27,4 +27,24 @@ public enum ChickenRiceDefaults {
         maximumGap: AudioTime(milliseconds: 2_000),
         maximumSegmentDuration: AudioTime(milliseconds: 20_000)
     )
+
+    /// `generation_config.json5` (task, max_initial_timestamp, repetition_penalty),
+    /// infer.py's `setdefault`s (beam_size 1, condition_on_previous_text False)
+    /// and faster-whisper 1.2.1 defaults for everything else. `max_length` 448
+    /// leaves 224 generated tokens after the 3-token prompt.
+    public static func decoding(task: TranscriptionTask) -> DecodingSettings {
+        DecodingSettings(
+            task: task,
+            languageCode: "ja",
+            temperatures: [0, 0.2, 0.4, 0.6, 0.8, 1],
+            compressionRatioThreshold: 2.4,
+            logProbabilityThreshold: -1,
+            noSpeechThreshold: 0.6,
+            bestOf: 5,
+            repetitionPenalty: 1.1,
+            suppressesBlankStart: true,
+            maximumInitialTimestampSeconds: 30,
+            maximumGeneratedTokenCount: 224
+        )
+    }
 }
