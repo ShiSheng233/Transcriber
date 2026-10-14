@@ -10,6 +10,10 @@ final class JobDetailViewController: NSViewController {
     private let subtitleOverlay = SubtitleOverlayView()
     private let player = AVPlayer()
     let editorView: SubtitleEditorView
+    private let modeControl = NSSegmentedControl(
+        labels: [String(localized: "Edit"), String(localized: "Translate")], trackingMode: .selectOne, target: nil, action: nil
+    )
+    private let modeBar = NSStackView()
     /// Pauses at the end of the line being played by Play Line.
     private var lineEndObserver: Any?
     private let placeholderLabel = NSTextField(labelWithString: "")
@@ -68,16 +72,38 @@ final class JobDetailViewController: NSViewController {
         splitView.translatesAutoresizingMaskIntoConstraints = false
         emptyState.translatesAutoresizingMaskIntoConstraints = false
 
+        modeControl.target = self
+        modeControl.action = #selector(modeChanged(_:))
+        modeControl.segmentStyle = .automatic
+        let modeHint = NSTextField(labelWithString: String(localized: "Translate writes a new file next to this one; the original stays."))
+        modeHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        modeHint.textColor = .secondaryLabelColor
+        modeHint.lineBreakMode = .byTruncatingTail
+        modeHint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        modeBar.setViews([modeControl, modeHint], in: .leading)
+        modeBar.edgeInsets = NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
+        let content = NSStackView(views: [modeBar, splitView])
+        content.orientation = .vertical
+        content.spacing = 0
+        content.detachesHiddenViews = true
+        // The editor area takes all the height the mode bar leaves.
+        content.distribution = .fill
+        modeBar.setHuggingPriority(.required, for: .vertical)  // a stack view's own hugging
+        splitView.setContentHuggingPriority(.defaultLow, for: .vertical)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        modeBar.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
+        splitView.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
+
         let container = NSView()
-        container.addSubview(splitView)
+        container.addSubview(content)
         container.addSubview(placeholderLabel)
         container.addSubview(emptyState)
         NSLayoutConstraint.activate([
             // Below the toolbar: the window has a full-size content view.
-            splitView.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
-            splitView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            splitView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            splitView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            content.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
+            content.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            content.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             emptyState.topAnchor.constraint(equalTo: container.safeAreaLayoutGuide.topAnchor),
             emptyState.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             emptyState.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -99,12 +125,15 @@ final class JobDetailViewController: NSViewController {
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        guard needsPlayerResize, splitView.bounds.height > 0, let isAudioOnly = displayedAsAudio else {
+        // A hidden player gets no space; sizing it would leave a blank band.
+        guard needsPlayerResize, viewModel.showsPlayerArea, splitView.bounds.height > 0, let isAudioOnly = displayedAsAudio else {
             return
         }
         needsPlayerResize = false
         let height = isAudioOnly ? Self.audioPlayerHeight : (splitView.bounds.height * 0.55).rounded()
-        splitView.setPosition(height, ofDividerAt: 0)
+        if splitView.arrangedSubviews.count == 2 {
+            splitView.setPosition(height, ofDividerAt: 0)
+        }
     }
 
     override func viewDidAppear() {
@@ -129,12 +158,18 @@ final class JobDetailViewController: NSViewController {
             displayedPlayerURL = viewModel.playerURL
             player.replaceCurrentItem(with: viewModel.playerURL.map { AVPlayerItem(url: $0) })
         }
-        if playerView.isHidden == viewModel.showsPlayerArea {
-            playerView.isHidden = !viewModel.showsPlayerArea
-            // A player that was hidden has no height yet: size it when shown.
+        // Without a player the editor has the split view to itself: a hidden
+        // arranged view would still keep its share of the height.
+        let playerIsArranged = splitView.arrangedSubviews.contains(playerView)
+        if playerIsArranged != viewModel.showsPlayerArea {
             if viewModel.showsPlayerArea {
-                needsPlayerResize = true
+                splitView.insertArrangedSubview(playerView, at: 0)
+                playerView.isHidden = false
+                needsPlayerResize = true  // a newly added player has no height yet
                 view.needsLayout = true
+            } else {
+                splitView.removeArrangedSubview(playerView)
+                playerView.removeFromSuperview()
             }
         }
         if displayedAsAudio != viewModel.isAudioOnly, viewModel.hasSelection {
@@ -142,16 +177,25 @@ final class JobDetailViewController: NSViewController {
             playerMinimumHeight.constant = viewModel.isAudioOnly ? Self.audioPlayerHeight : 160
             // When the window resizes, the lower holding priority grows: the
             // picture for video, the subtitle list for audio.
-            splitView.setHoldingPriority(viewModel.isAudioOnly ? .defaultHigh : .defaultLow - 1, forSubviewAt: 0)
-            splitView.setHoldingPriority(viewModel.isAudioOnly ? .defaultLow - 1 : .defaultLow, forSubviewAt: 1)
+            if splitView.arrangedSubviews.count == 2 {
+                splitView.setHoldingPriority(viewModel.isAudioOnly ? .defaultHigh : .defaultLow - 1, forSubviewAt: 0)
+                splitView.setHoldingPriority(viewModel.isAudioOnly ? .defaultLow - 1 : .defaultLow, forSubviewAt: 1)
+            }
             needsPlayerResize = true
             view.needsLayout = true
         }
         emptyState.isHidden = viewModel.hasSelection
         splitView.isHidden = !viewModel.hasSelection
+        modeBar.isHidden = !viewModel.hasSelection || viewModel.subtitleMode == nil
+        modeControl.selectedSegment = viewModel.subtitleMode == .translate ? 1 : 0
         placeholderLabel.stringValue = viewModel.subtitlesPlaceholder ?? ""
         placeholderLabel.isHidden = !viewModel.hasSelection || viewModel.subtitlesPlaceholder == nil
         subtitleOverlay.text = viewModel.isAudioOnly ? nil : viewModel.currentSubtitle
+    }
+
+    @objc private func modeChanged(_ sender: NSSegmentedControl) {
+        editorView.commitPendingText()
+        viewModel.switchMode(to: sender.selectedSegment == 1 ? .translate : .edit)
     }
 
     // MARK: Playback commands

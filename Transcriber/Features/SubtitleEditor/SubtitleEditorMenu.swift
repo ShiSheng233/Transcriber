@@ -20,6 +20,7 @@ import AppKit
     func jumpToLineEnd(_ sender: Any?)
     func showFindReplace(_ sender: Any?)
     func findNextSubtitle(_ sender: Any?)
+    func translateSubtitles(_ sender: Any?)
     func saveSubtitles(_ sender: Any?)
 }
 
@@ -65,6 +66,11 @@ enum SubtitleEditorMenu {
         menu.title = String(localized: "Subtitle")
         let top = [
             NSMenuItem(title: String(localized: "Save Subtitles"), action: #selector(SubtitleEditorCommands.saveSubtitles(_:)), keyEquivalent: "s"),
+            {
+                let item = NSMenuItem(title: String(localized: "Translate Subtitles"), action: #selector(SubtitleEditorCommands.translateSubtitles(_:)), keyEquivalent: "t")
+                item.keyEquivalentModifierMask = [.command, .shift]
+                return item
+            }(),
             .separator(),
             NSMenuItem(title: String(localized: "Find and Replace…"), action: #selector(SubtitleEditorCommands.showFindReplace(_:)), keyEquivalent: "f"),
             NSMenuItem(title: String(localized: "Find Next"), action: #selector(SubtitleEditorCommands.findNextSubtitle(_:)), keyEquivalent: "g"),

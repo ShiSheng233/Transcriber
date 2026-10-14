@@ -105,9 +105,16 @@ final class JobQueueViewModel {
     }
 
     enum SubtitleChoice {
+        case editSubtitles
         case translateSubtitles
         case transcribe
         case cancel
+    }
+
+    /// What a subtitle file is open for; switching moves between its jobs.
+    enum SubtitleMode {
+        case edit
+        case translate
     }
 
     /// Adds media files to transcribe with the chosen model and subtitle
@@ -129,10 +136,14 @@ final class JobQueueViewModel {
             return
         }
         pendingSubtitleChoice = nil
+        let subtitles = intake.mediaWithSubtitles.map { (subtitleURL: $0.subtitleURL, mediaURL: Optional($0.mediaURL)) }
         switch choice {
+        case .editSubtitles:
+            intake.subtitleFiles += subtitles.map { FileIntake.SubtitleFile(subtitleURL: $0.subtitleURL, mediaURL: $0.mediaURL) }
         case .translateSubtitles:
-            intake.subtitlesToTranslate += intake.mediaWithSubtitles.map {
-                FileIntake.SubtitleFile(subtitleURL: $0.subtitleURL, mediaURL: $0.mediaURL)
+            Task {
+                await queue.addSubtitleTranslations(subtitles)
+                startQueue()
             }
         case .transcribe:
             intake.mediaToTranscribe += intake.mediaWithSubtitles.map(\.mediaURL)
@@ -144,9 +155,14 @@ final class JobQueueViewModel {
     }
 
     private func enqueue(_ intake: FileIntake) {
-        let subtitles = intake.subtitlesToTranslate.map { (subtitleURL: $0.subtitleURL, mediaURL: $0.mediaURL) }
+        let subtitles = intake.subtitleFiles.map { (subtitleURL: $0.subtitleURL, mediaURL: $0.mediaURL) }
         if !subtitles.isEmpty {
-            Task { await queue.addSubtitleTranslations(subtitles) }
+            Task {
+                // Ready at once: show the first one in the editor.
+                if let first = await queue.openSubtitles(subtitles).first {
+                    select(jobID: first)
+                }
+            }
         }
         let media = intake.mediaToTranscribe
         guard !media.isEmpty else {
@@ -176,6 +192,49 @@ final class JobQueueViewModel {
         for jobID in unsavedJobIDs {
             try await saveSubtitles(of: jobID)
         }
+    }
+
+    /// The mode of the job's subtitle file, or nil for a transcription.
+    static func subtitleMode(of job: Job) -> SubtitleMode? {
+        switch job.kind {
+        case .subtitleEditing: .edit
+        case .subtitleTranslation: .translate
+        case .transcription: nil
+        }
+    }
+
+    /// Edit: the file's editing job (opened if needed). Translate: its
+    /// translation, or a new one of `lines` (the editor's current lines),
+    /// started right away. A translation that failed is made again.
+    func switchMode(of jobID: UUID, to mode: SubtitleMode, lines: [TimedText]) {
+        guard let job = jobs.first(where: { $0.id == jobID }), let current = Self.subtitleMode(of: job), current != mode else {
+            return
+        }
+        let file = (subtitleURL: job.sourceURL, mediaURL: job.mediaURL)
+        let counterpart = jobs.last { other in
+            other.sourceURL == job.sourceURL && Self.subtitleMode(of: other) == mode && other.status != .cancelled
+        }
+        if let counterpart, mode == .edit || !Self.isFailed(counterpart) {
+            select(jobID: counterpart.id)
+            return
+        }
+        Task {
+            switch mode {
+            case .edit:
+                if let opened = await queue.openSubtitles([file]).first {
+                    select(jobID: opened)
+                }
+            case .translate:
+                if let created = await queue.addSubtitleTranslations([file], lines: lines).first {
+                    select(jobID: created)
+                    startQueue()
+                }
+            }
+        }
+    }
+
+    private static func isFailed(_ job: Job) -> Bool {
+        if case .failed = job.status { true } else { false }
     }
 
     func dismissMissingModels() {
@@ -249,9 +308,13 @@ final class JobQueueViewModel {
         )
     }
 
-    /// The speech model, or "Translation" for an imported subtitle file.
+    /// The speech model, or what is being done with a subtitle file.
     private static func taskName(for job: Job) -> String {
-        job.model?.displayName ?? String(localized: "Translation")
+        switch job.kind {
+        case .transcription(let model): model.displayName
+        case .subtitleTranslation: String(localized: "Translation")
+        case .subtitleEditing: String(localized: "Subtitles")
+        }
     }
 
     private static func shortStatus(for job: Job) -> String {
@@ -263,6 +326,7 @@ final class JobQueueViewModel {
         case .detectingSpeech: String(localized: "Finding speech")
         case .transcribing, .refining, .exporting:
             (job.status.fractionCompleted ?? 0).formatted(.percent.precision(.fractionLength(0)))
+        case .completed where job.kind == .subtitleEditing: String(localized: "\(job.segments.count) lines")
         case .completed: job.warning == nil ? String(localized: "Done") : String(localized: "Done with warning")
         case .failed: String(localized: "Failed")
         case .cancelled: String(localized: "Cancelled")

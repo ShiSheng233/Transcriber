@@ -3,11 +3,11 @@ import SubtitleExport
 
 /// Sorts added files into what the queue should do with them.
 ///
-/// - A subtitle file (SRT, VTT) is translated; a media file with the same
-///   name next to it is used for the preview.
+/// - A subtitle file (SRT, VTT) is opened for editing; a media file with the
+///   same name next to it is used for the preview.
 /// - A media file is transcribed, unless a subtitle file with the same name
-///   sits next to it: then the user decides (translate those subtitles, or
-///   transcribe again).
+///   sits next to it: then the user decides (edit or translate those
+///   subtitles, or transcribe again).
 /// - Folders are searched; there, translations the app wrote earlier
 ///   ("movie.简体中文.srt" next to "movie.mp4") are skipped.
 public struct FileIntake: Equatable, Sendable {
@@ -32,10 +32,10 @@ public struct FileIntake: Equatable, Sendable {
 
     public var mediaToTranscribe: [URL] = []
     public var mediaWithSubtitles: [MediaWithSubtitles] = []
-    public var subtitlesToTranslate: [SubtitleFile] = []
+    public var subtitleFiles: [SubtitleFile] = []
 
     public var isEmpty: Bool {
-        mediaToTranscribe.isEmpty && mediaWithSubtitles.isEmpty && subtitlesToTranslate.isEmpty
+        mediaToTranscribe.isEmpty && mediaWithSubtitles.isEmpty && subtitleFiles.isEmpty
     }
 
     public init(_ urls: [URL]) {
@@ -56,7 +56,7 @@ public struct FileIntake: Equatable, Sendable {
             }
         }
         for subtitleURL in subtitles where !claimedSubtitles.contains(subtitleURL.standardizedFileURL) {
-            subtitlesToTranslate.append(SubtitleFile(
+            subtitleFiles.append(SubtitleFile(
                 subtitleURL: subtitleURL,
                 mediaURL: Self.sibling(of: subtitleURL, withExtensions: Self.mediaExtensions)
             ))

@@ -35,6 +35,9 @@ final class MainWindowController: NSWindowController {
         detailViewModel.onEdit = { [queueViewModel] jobID, lines in
             queueViewModel.updateSubtitles(of: jobID, to: lines)
         }
+        detailViewModel.onSwitchMode = { [queueViewModel] jobID, mode, lines in
+            queueViewModel.switchMode(of: jobID, to: mode, lines: lines)
+        }
 
         let splitViewController = NSSplitViewController()
         let sidebar = NSSplitViewItem(sidebarWithViewController: JobQueueViewController(
@@ -121,14 +124,16 @@ final class MainWindowController: NSWindowController {
         alert.messageText = count == 1
             ? String(localized: "This File Already Has Subtitles")
             : String(localized: "\(count) Files Already Have Subtitles")
-        alert.informativeText = String(localized: "Translate the existing subtitles (such as \(example?.lastPathComponent ?? "")) with the language model, or transcribe the audio again?")
+        alert.informativeText = String(localized: "Open the existing subtitles (such as \(example?.lastPathComponent ?? "")) to edit or translate them, or transcribe the audio again?")
+        alert.addButton(withTitle: String(localized: "Edit Subtitles"))
         alert.addButton(withTitle: String(localized: "Translate Subtitles"))
-        alert.addButton(withTitle: String(localized: "Transcribe"))
+        alert.addButton(withTitle: String(localized: "Transcribe Again"))
         alert.addButton(withTitle: String(localized: "Cancel"))
         alert.beginSheetModal(for: window) { [weak self] response in
             let choice: JobQueueViewModel.SubtitleChoice = switch response {
-            case .alertFirstButtonReturn: .translateSubtitles
-            case .alertSecondButtonReturn: .transcribe
+            case .alertFirstButtonReturn: .editSubtitles
+            case .alertSecondButtonReturn: .translateSubtitles
+            case .alertThirdButtonReturn: .transcribe
             default: .cancel
             }
             self?.queueViewModel.resolveSubtitleChoice(choice)
@@ -303,6 +308,11 @@ extension MainWindowController: SubtitleEditorCommands {
         }
     }
 
+    @objc func translateSubtitles(_ sender: Any?) {
+        detailViewController.editorView.commitPendingText()
+        detailViewModel.switchMode(to: .translate)
+    }
+
     @objc func saveSubtitles(_ sender: Any?) {
         detailViewController.editorView.commitPendingText()
         guard let jobID = detailViewModel.shownJobID else { return }
@@ -337,6 +347,8 @@ extension MainWindowController: NSMenuItemValidation {
             return editor.isEditable && !editor.lines.isEmpty
         case #selector(playLine(_:)):
             return editor.activeLine != nil && detailViewModel.showsPlayerArea
+        case #selector(translateSubtitles(_:)):
+            return detailViewModel.subtitleMode == .edit
         case #selector(saveSubtitles(_:)):
             return detailViewModel.shownJobID.map(queueViewModel.unsavedJobIDs.contains) ?? false
         case #selector(togglePlayer(_:)):

@@ -100,16 +100,41 @@ public actor JobQueue {
         runningTask != nil
     }
 
+    /// Opens subtitle files for editing; they are ready at once. A file that
+    /// cannot be read shows up as a failed job with the reason.
+    public func openSubtitles(_ files: [(subtitleURL: URL, mediaURL: URL?)]) -> [UUID] {
+        let open = Set(jobs.filter { $0.kind == .subtitleEditing }.map(\.sourceURL))
+        var opened: [UUID] = []
+        for file in files where !open.contains(file.subtitleURL) {
+            var job: Job
+            do {
+                job = Job(editing: file.subtitleURL, mediaURL: file.mediaURL, lines: try SubtitleParser.parse(fileAt: file.subtitleURL))
+                log(.info, job.id, "\(file.subtitleURL.lastPathComponent): opened, \(job.segments.count) subtitles")
+            } catch {
+                job = Job(editing: file.subtitleURL, mediaURL: file.mediaURL, lines: [])
+                job.status = .failed(message: error.localizedDescription)
+                log(.error, job.id, "\(file.subtitleURL.lastPathComponent): \(error.localizedDescription)")
+            }
+            jobs.append(job)
+            opened.append(job.id)
+        }
+        publish()
+        return opened
+    }
+
     /// Queues subtitle files for translation by the language model; `mediaURL`
     /// is what the preview plays, if a media file sits next to the subtitles.
-    public func addSubtitleTranslations(_ files: [(subtitleURL: URL, mediaURL: URL?)]) {
-        let known = Set(jobs.filter { !$0.status.isFinished }.map(\.sourceURL))
-        let newJobs = files.filter { !known.contains($0.subtitleURL) }.map { Job(subtitlesAt: $0.subtitleURL, mediaURL: $0.mediaURL) }
+    /// With `lines`, those are translated instead of the file's contents.
+    @discardableResult
+    public func addSubtitleTranslations(_ files: [(subtitleURL: URL, mediaURL: URL?)], lines: [TimedText] = []) -> [UUID] {
+        let known = Set(jobs.filter { !$0.status.isFinished && $0.kind == .subtitleTranslation }.map(\.sourceURL))
+        let newJobs = files.filter { !known.contains($0.subtitleURL) }.map { Job(subtitlesAt: $0.subtitleURL, mediaURL: $0.mediaURL, lines: lines) }
         jobs += newJobs
         publish()
         for job in newJobs {
             log(.detail, job.id, "\(job.sourceURL.lastPathComponent): queued for translation")
         }
+        return newJobs.map(\.id)
     }
 
     /// The editor's version of a finished job's subtitles; `save` writes them.
@@ -205,6 +230,8 @@ public actor JobQueue {
             switch job.kind {
             case .transcription(let model):
                 segments = try await transcribe(job, with: model, configuration: configuration)
+            case .subtitleEditing:
+                return  // ready since it was opened; never queued
             case .subtitleTranslation:
                 guard let llm = configuration.llm, llm.isUsable else {
                     throw JobQueueError.languageModelRequired
@@ -279,7 +306,7 @@ public actor JobQueue {
     /// translation is the whole job, so its errors fail the job.
     private func translateSubtitles(of job: Job, with llm: LLMConfiguration) async throws -> [TimedText] {
         update(job.id) { $0.status = .readingSubtitles }
-        let original = try SubtitleParser.parse(fileAt: job.sourceURL)
+        let original = job.segments.isEmpty ? try SubtitleParser.parse(fileAt: job.sourceURL) : job.segments
         log(.info, job.id, "Read \(original.count) subtitles")
         update(job.id) { $0.segments = original }  // shown while translating
         return try await refine(original, jobID: job.id, as: .translateSubtitles(targetLanguage: llm.settings.targetLanguage), with: llm)

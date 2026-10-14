@@ -7,6 +7,8 @@ public struct Job: Identifiable, Hashable, Sendable {
         case transcription(RecognitionModel)
         /// Translate an existing subtitle file with the language model.
         case subtitleTranslation
+        /// A subtitle file opened for editing; Save writes it back.
+        case subtitleEditing
     }
 
     public let id: UUID
@@ -29,8 +31,18 @@ public struct Job: Identifiable, Hashable, Sendable {
         self.init(id: id, sourceURL: sourceURL, kind: .transcription(model), mediaURL: sourceURL)
     }
 
-    public init(id: UUID = UUID(), subtitlesAt subtitleURL: URL, mediaURL: URL?) {
+    /// `lines`: what to translate instead of the file's contents (edits not saved yet).
+    public init(id: UUID = UUID(), subtitlesAt subtitleURL: URL, mediaURL: URL?, lines: [TimedText] = []) {
         self.init(id: id, sourceURL: subtitleURL, kind: .subtitleTranslation, mediaURL: mediaURL)
+        segments = lines
+    }
+
+    /// Ready to edit at once; its own file is where Save writes.
+    public init(id: UUID = UUID(), editing subtitleURL: URL, mediaURL: URL?, lines: [TimedText]) {
+        self.init(id: id, sourceURL: subtitleURL, kind: .subtitleEditing, mediaURL: mediaURL)
+        segments = lines
+        outputURLs = [subtitleURL]
+        status = .completed
     }
 
     private init(id: UUID, sourceURL: URL, kind: Kind, mediaURL: URL?) {

@@ -18,9 +18,13 @@ final class JobDetailViewModel {
     /// Shown over the grid while it is empty.
     private(set) var subtitlesPlaceholder: String?
     private(set) var shownJobID: UUID?
+    /// Edit or Translate for a subtitle file; nil for a transcription.
+    private(set) var subtitleMode: JobQueueViewModel.SubtitleMode?
 
     /// Edits to the shown job, for the queue to keep.
     @ObservationIgnored var onEdit: (UUID, [TimedText]) -> Void = { _, _ in }
+    /// Switches the shown subtitle file to the other mode, with the editor's lines.
+    @ObservationIgnored var onSwitchMode: (UUID, JobQueueViewModel.SubtitleMode, [TimedText]) -> Void = { _, _, _ in }
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -62,11 +66,13 @@ final class JobDetailViewModel {
         hasSelection = job != nil
         guard let job else {
             shownJobID = nil
+            subtitleMode = nil
             mediaURL = nil
             editor.load([], isEditable: false)
             subtitlesPlaceholder = nil
             return
         }
+        subtitleMode = JobQueueViewModel.subtitleMode(of: job)
         let isEditable = job.status == .completed && !job.outputURLs.isEmpty
         if shownJobID != job.id {
             shownJobID = job.id
@@ -80,6 +86,12 @@ final class JobDetailViewModel {
         case .completed: isEmpty ? String(localized: "No speech was found in this file.") : nil
         case .failed, .cancelled: isEmpty ? String(localized: "No subtitles.") : nil
         default: isEmpty ? String(localized: "Subtitles appear here as they are made.") : nil
+        }
+    }
+
+    func switchMode(to mode: JobQueueViewModel.SubtitleMode) {
+        if let jobID = shownJobID, mode != subtitleMode {
+            onSwitchMode(jobID, mode, editor.lines)
         }
     }
 

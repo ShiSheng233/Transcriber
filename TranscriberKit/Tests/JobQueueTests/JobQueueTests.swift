@@ -358,8 +358,8 @@ struct FileIntakeTests {
         #expect(names(intake.mediaToTranscribe) == ["b.mkv"])
         // a.mp4 and c.wav have subtitles beside them: the user decides.
         #expect(intake.mediaWithSubtitles.map { "\($0.mediaURL.lastPathComponent)+\($0.subtitleURL.lastPathComponent)" } == ["a.mp4+a.srt", "c.wav+c.srt"])
-        #expect(intake.subtitlesToTranslate.map(\.subtitleURL.lastPathComponent) == ["d.vtt"])
-        #expect(intake.subtitlesToTranslate.first?.mediaURL == nil)
+        #expect(intake.subtitleFiles.map(\.subtitleURL.lastPathComponent) == ["d.vtt"])
+        #expect(intake.subtitleFiles.first?.mediaURL == nil)
     }
 
     @Test func aDroppedSubtitleFileFindsItsMediaAndSkipsEarlierTranslations() throws {
@@ -367,11 +367,64 @@ struct FileIntakeTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let dropped = FileIntake([root.appendingPathComponent("movie.srt")])
-        #expect(dropped.subtitlesToTranslate == [.init(subtitleURL: root.appendingPathComponent("movie.srt"), mediaURL: root.appendingPathComponent("movie.mkv"))])
+        #expect(dropped.subtitleFiles == [.init(subtitleURL: root.appendingPathComponent("movie.srt"), mediaURL: root.appendingPathComponent("movie.mkv"))])
 
         // In a folder, "movie.简体中文.srt" is our own earlier output, not a new file to translate.
         let whole = FileIntake([root])
-        #expect(whole.subtitlesToTranslate.isEmpty)
+        #expect(whole.subtitleFiles.isEmpty)
         #expect(whole.mediaWithSubtitles.map(\.subtitleURL.lastPathComponent) == ["movie.srt"])
+    }
+}
+
+struct SubtitleEditingJobTests {
+    @Test func opensAnSRTReadyToEditAndSavesBackToIt() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("movie.srt")
+        try "1\n00:00:01,000 --> 00:00:02,000\nこんにちは\n".write(to: url, atomically: true, encoding: .utf8)
+        let broken = folder.appendingPathComponent("broken.srt")
+        try "not subtitles".write(to: broken, atomically: true, encoding: .utf8)
+
+        let queue = JobQueue()
+        let ids = await queue.openSubtitles([(url, nil), (broken, nil)])
+        var jobs: [Job] = []
+        for await snapshot in await queue.snapshots() {
+            jobs = snapshot
+            break
+        }
+
+        #expect(ids.count == 2)
+        #expect(jobs[0].status == .completed && jobs[0].segments.map(\.text) == ["こんにちは"])
+        #expect(jobs[0].outputURLs == [url])
+        if case .failed = jobs[1].status {} else { Issue.record("expected the unreadable file to fail") }
+
+        await queue.replaceSegments(of: ids[0], with: [TimedText(start: .zero, end: AudioTime(seconds: 1), text: "直した")])
+        _ = try await queue.saveSubtitles(of: ids[0])
+        #expect(try String(contentsOf: url, encoding: .utf8).contains("直した"))
+        #expect(await queue.isRunning == false)  // opening never starts the queue
+    }
+
+    @Test func translatesTheGivenLinesInsteadOfTheFile() async throws {
+        var settings = LLMSettings.defaults
+        settings.isEnabled = true
+        settings.model = "test/model"
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let url = folder.appendingPathComponent("movie.srt")
+        try "1\n00:00:01,000 --> 00:00:02,000\nold\n".write(to: url, atomically: true, encoding: .utf8)
+
+        let queue = JobQueue(makeChatClient: { _, _ in StubChat(fails: false) })
+        await queue.addSubtitleTranslations([(url, nil)], lines: [TimedText(start: .zero, end: AudioTime(seconds: 1), text: "edited")])
+        await queue.start(configuration: JobQueue.Configuration(
+            engine: EngineSettings(modelsDirectory: URL(fileURLWithPath: "/nonexistent"), backend: .whisperCpp, concurrentChunkCount: 1),
+            output: OutputSettings(formats: [.srt], directory: nil),
+            llm: .init(settings: settings, apiKey: "sk-test")
+        ))
+        for await jobs in await queue.snapshots() where jobs.first?.status.isFinished == true {
+            #expect(jobs[0].segments.map(\.text) == ["EN: edited"])
+            break
+        }
     }
 }
