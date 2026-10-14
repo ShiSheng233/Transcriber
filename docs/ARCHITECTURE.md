@@ -348,7 +348,8 @@ JobQueue、JobDetail 预览、Settings（含后端选择、Core ML 编码器开�
 ✅ `LLMTranslation` 模块与接入：
 
 - **模式由模型配置的 `llm_mode` 决定**：polish（海南鸡中文）→ 润色；translate（whisper-ja / anime-whisper 日文）→ 翻译到目标语言（默认简体中文），可选双语（译文在上、原文在下）。
-- **OpenRouter**：`response_format` 严格 JSON Schema（`{lines: [{id, text}]}`）+ `provider.require_parameters`；模型列表实时拉取（只列支持 structured output 的模型，排除 `:batch`），不在代码里写死模型名；429/5xx 退避重试，401/402 给出明确提示。API key 存 Keychain。
+- **任意 OpenAI 兼容 API**（OpenRouter、OpenAI、DeepSeek、Ollama、LM Studio 或自定义 Base URL；本地服务不需要 key，key 按服务分别存 Keychain）。结构化输出逐级降级：`json_schema` → `json_object` + 提示词里的 schema → 只有提示词，成功的模式会被记住。评估过 MacPaw/OpenAI：它丢失 HTTP 状态码（无法按 429/5xx 重试、按 401/402 提示），`.relaxed` 解析可能把错误响应当成空的成功响应，也不能附带 OpenRouter 的 `provider` 参数，所以继续用自己的 URLSession 客户端（只用到 `/chat/completions` 和 `/models`）。
+- **OpenRouter 专属**：`response_format` 严格 JSON Schema（`{lines: [{id, text}]}`）+ `provider.require_parameters`；模型列表实时拉取（只列支持 structured output 的模型，排除 `:batch`），不在代码里写死模型名；429/5xx 退避重试，401/402 给出明确提示。API key 存 Keychain。
 - **逐行对齐**：每批 40 行，前后各带 8 行上下文（前文用已处理的结果）；回复的 id 必须与本批完全一致，不一致重试一次，仍缺的行保留原文；时间轴从不改动。
 - **术语表**：每行 `源 = 译`，写进系统提示。
 - **失败不丢结果**：LLM 步骤出错时仍写出机器字幕，任务标记完成并附警告。

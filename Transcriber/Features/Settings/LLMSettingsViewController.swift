@@ -2,12 +2,18 @@ import AppKit
 import LLMTranslation
 
 final class LLMSettingsViewController: SettingsPaneViewController {
-    private static let keyPageURL = URL(string: "https://openrouter.ai/keys")
     private static let suggestedLanguages = ["简体中文", "繁體中文", "English", "한국어", "日本語"]
 
     private let enabledSwitch = NSSwitch()
+    private lazy var providerPopUp = SettingsForm.popUp(
+        LLMProvider.allCases.map(\.displayName), target: self, action: #selector(providerChanged(_:))
+    )
+    private let baseURLField = NSTextField()
     private let apiKeyField = NSSecureTextField()
-    private lazy var modelPopUp = SettingsForm.popUp([], target: self, action: #selector(modelChanged(_:)))
+    private let apiKeyDescription = SettingsForm.descriptionLabel()
+    private var getKeyButton: NSButton?
+    /// Editable: any model id the server accepts, listed or not.
+    private let modelBox = NSComboBox()
     private let modelStatusLabel = SettingsForm.descriptionLabel()
     private let languageBox = NSComboBox()
     private let keepsOriginalSwitch = NSSwitch()
@@ -19,20 +25,33 @@ final class LLMSettingsViewController: SettingsPaneViewController {
         keepsOriginalSwitch.target = self
         keepsOriginalSwitch.action = #selector(keepsOriginalChanged(_:))
 
-        apiKeyField.placeholderString = "sk-or-…"
+        baseURLField.placeholderString = "https://example.com/v1"
+        baseURLField.target = self
+        baseURLField.action = #selector(baseURLChanged(_:))
+        baseURLField.delegate = self
+        baseURLField.widthAnchor.constraint(equalToConstant: 260).isActive = true
+
         apiKeyField.target = self
         apiKeyField.action = #selector(apiKeyChanged(_:))
-        apiKeyField.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        apiKeyField.delegate = self
+        apiKeyField.widthAnchor.constraint(equalToConstant: 200).isActive = true
         let getKeyButton = NSButton(title: String(localized: "Get a Key…"), target: self, action: #selector(openKeyPage(_:)))
+        self.getKeyButton = getKeyButton
         let apiKeyControls = NSStackView(views: [apiKeyField, getKeyButton])
 
-        modelPopUp.widthAnchor.constraint(equalToConstant: 240).isActive = true
+        modelBox.completes = true
+        modelBox.numberOfVisibleItems = 15
+        modelBox.target = self
+        modelBox.action = #selector(modelChanged(_:))
+        modelBox.delegate = self
+        modelBox.placeholderString = String(localized: "Model id")
+        modelBox.widthAnchor.constraint(equalToConstant: 240).isActive = true
         let refreshButton = NSButton(
             image: NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: String(localized: "Refresh")) ?? NSImage(),
             target: self, action: #selector(refreshModels(_:))
         )
         refreshButton.bezelStyle = .accessoryBarAction
-        let modelControls = NSStackView(views: [modelPopUp, refreshButton])
+        let modelControls = NSStackView(views: [modelBox, refreshButton])
 
         languageBox.addItems(withObjectValues: Self.suggestedLanguages)
         languageBox.completes = true
@@ -59,11 +78,13 @@ final class LLMSettingsViewController: SettingsPaneViewController {
         return SettingsForm.page([
             SettingsForm.section(String(localized: "Language Model"), rows: [
                 SettingsForm.row(String(localized: "Improve subtitles"), description: String(localized: "Polish Chinese or translate Japanese"), control: enabledSwitch),
-            ], footer: String(localized: "Runs on OpenRouter after transcription. Timing never changes.")),
-            SettingsForm.section(String(localized: "OpenRouter"), rows: [
-                SettingsForm.row(String(localized: "API key"), description: String(localized: "Stored in Keychain"), control: apiKeyControls),
+            ], footer: String(localized: "Runs after transcription. Timing never changes.")),
+            SettingsForm.section(String(localized: "Service"), rows: [
+                SettingsForm.row(String(localized: "Provider"), control: providerPopUp),
+                SettingsForm.row(String(localized: "Base URL"), control: baseURLField),
+                SettingsForm.row(String(localized: "API key"), descriptionLabel: apiKeyDescription, control: apiKeyControls),
                 SettingsForm.row(String(localized: "Model"), descriptionLabel: modelStatusLabel, control: modelControls),
-            ], footer: String(localized: "Only models with structured output are listed.")),
+            ], footer: String(localized: "Any OpenAI-compatible API. OpenRouter lists only models with structured output.")),
             SettingsForm.section(String(localized: "Translation"), rows: [
                 SettingsForm.row(String(localized: "Translate into"), description: String(localized: "For models whose output is translated"), control: languageBox),
                 SettingsForm.row(String(localized: "Keep the Japanese line"), description: String(localized: "Bilingual subtitles"), control: keepsOriginalSwitch),
@@ -85,9 +106,17 @@ final class LLMSettingsViewController: SettingsPaneViewController {
         let llm = viewModel.settings.llm
         enabledSwitch.state = llm.isEnabled ? .on : .off
         keepsOriginalSwitch.state = llm.keepsOriginalLine ? .on : .off
+        let provider = viewModel.llmProvider
+        providerPopUp.selectItem(at: LLMProvider.allCases.firstIndex(of: provider) ?? 0)
+        if baseURLField.currentEditor() == nil {
+            baseURLField.stringValue = llm.baseURL.absoluteString
+        }
         if apiKeyField.currentEditor() == nil {
             apiKeyField.stringValue = viewModel.apiKey
         }
+        apiKeyField.placeholderString = provider.needsAPIKey ? String(localized: "Required") : String(localized: "Not needed")
+        apiKeyDescription.stringValue = String(localized: "Stored in Keychain")
+        getKeyButton?.isHidden = provider.keysPage == nil
         if languageBox.currentEditor() == nil {
             languageBox.stringValue = llm.targetLanguage
         }
@@ -98,23 +127,18 @@ final class LLMSettingsViewController: SettingsPaneViewController {
     }
 
     private func renderModels(selectedID: String) {
-        modelPopUp.removeAllItems()
-        if selectedID.isEmpty {
-            modelPopUp.addItem(withTitle: String(localized: "Choose a model"))
-            modelPopUp.lastItem?.representedObject = ""
+        let ids = viewModel.availableModels.map(\.id)
+        if (modelBox.objectValues as? [String]) != ids {
+            modelBox.removeAllItems()
+            modelBox.addItems(withObjectValues: ids)
         }
-        for model in viewModel.modelChoices {
-            modelPopUp.addItem(withTitle: model.title)
-            modelPopUp.lastItem?.representedObject = model.id
-            modelPopUp.lastItem?.toolTip = model.id
-        }
-        if let index = modelPopUp.itemArray.firstIndex(where: { ($0.representedObject as? String) == selectedID }) {
-            modelPopUp.selectItem(at: index)
+        if modelBox.currentEditor() == nil {
+            modelBox.stringValue = selectedID
         }
 
         modelStatusLabel.stringValue = switch viewModel.modelListState {
         case .notLoaded, .loading: String(localized: "Loading…")
-        case .loaded: selectedID.isEmpty ? String(localized: "\(viewModel.availableModels.count) models") : selectedID
+        case .loaded: String(localized: "\(viewModel.availableModels.count) models")
         case .failed: String(localized: "Couldn't load models")
         }
         if case .failed(let message) = viewModel.modelListState {
@@ -139,9 +163,27 @@ final class LLMSettingsViewController: SettingsPaneViewController {
         viewModel.setAPIKey(sender.stringValue)
     }
 
-    @objc private func modelChanged(_ sender: NSPopUpButton) {
-        if let modelID = sender.selectedItem?.representedObject as? String, !modelID.isEmpty {
-            viewModel.setModel(modelID)
+    @objc private func modelChanged(_ sender: NSComboBox) {
+        viewModel.setModel(sender.stringValue)
+    }
+
+    @objc private func providerChanged(_ sender: NSPopUpButton) {
+        let provider = LLMProvider.allCases[sender.indexOfSelectedItem]
+        if provider == .custom {
+            view.window?.makeFirstResponder(baseURLField)  // the user types the URL
+        } else {
+            viewModel.setLLMProvider(provider)
+        }
+    }
+
+    @objc private func baseURLChanged(_ sender: NSTextField) {
+        commitBaseURL()
+    }
+
+    private func commitBaseURL() {
+        if !viewModel.setLLMBaseURL(text: baseURLField.stringValue) {
+            NSSound.beep()
+            baseURLField.stringValue = viewModel.settings.llm.baseURL.absoluteString
         }
     }
 
@@ -154,7 +196,7 @@ final class LLMSettingsViewController: SettingsPaneViewController {
     }
 
     @objc private func openKeyPage(_ sender: Any?) {
-        if let url = Self.keyPageURL {
+        if let url = viewModel.llmProvider.keysPage {
             NSWorkspace.shared.open(url)
         }
     }
@@ -166,7 +208,9 @@ extension LLMSettingsViewController: NSTextViewDelegate, NSComboBoxDelegate, NST
     }
 
     func comboBoxSelectionDidChange(_ notification: Notification) {
-        if let language = languageBox.objectValueOfSelectedItem as? String {
+        if (notification.object as? NSComboBox) === modelBox, let modelID = modelBox.objectValueOfSelectedItem as? String {
+            viewModel.setModel(modelID)
+        } else if let language = languageBox.objectValueOfSelectedItem as? String {
             viewModel.setTargetLanguage(language)
         }
     }
@@ -174,6 +218,10 @@ extension LLMSettingsViewController: NSTextViewDelegate, NSComboBoxDelegate, NST
     func controlTextDidEndEditing(_ notification: Notification) {
         if (notification.object as? NSSecureTextField) === apiKeyField {
             viewModel.setAPIKey(apiKeyField.stringValue)
+        } else if (notification.object as? NSTextField) === baseURLField {
+            commitBaseURL()
+        } else if (notification.object as? NSComboBox) === modelBox {
+            viewModel.setModel(modelBox.stringValue)
         } else if (notification.object as? NSComboBox) === languageBox {
             viewModel.setTargetLanguage(languageBox.stringValue)
         }

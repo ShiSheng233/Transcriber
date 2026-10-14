@@ -119,7 +119,7 @@ final class JobQueueViewModel {
     }
 
     func startQueue() {
-        let configuration = settingsStore.settings.queueConfiguration(apiKey: apiKeyStore.read())
+        let configuration = settingsStore.settings.queueConfiguration(apiKeys: apiKeyStore)
         Task { await queue.start(configuration: configuration) }
     }
 

@@ -20,29 +20,14 @@ final class SettingsViewModel {
     private let library: ModelLibrary
 
     private(set) var apiKey: String
-    private(set) var availableModels: [OpenRouterModel] = []
+    private(set) var availableModels: [LLMModel] = []
     private(set) var modelListState = ModelListState.notLoaded
-
-    struct ModelChoice: Equatable {
-        let id: String
-        let title: String
-    }
-
-    /// Menu entries: the loaded models, plus the chosen one if the list lacks it.
-    var modelChoices: [ModelChoice] {
-        var choices = availableModels.map { ModelChoice(id: $0.id, title: $0.name) }
-        let selectedID = settings.llm.model
-        if !selectedID.isEmpty, !choices.contains(where: { $0.id == selectedID }) {
-            choices.insert(ModelChoice(id: selectedID, title: selectedID), at: 0)
-        }
-        return choices
-    }
 
     init(store: SettingsStore, apiKeyStore: APIKeyStore, library: ModelLibrary) {
         self.store = store
         self.apiKeyStore = apiKeyStore
         self.library = library
-        self.apiKey = apiKeyStore.read()
+        self.apiKey = apiKeyStore.read(for: store.settings.llm.baseURL)
     }
 
     var settings: AppSettings {
@@ -134,12 +119,52 @@ final class SettingsViewModel {
 
     func setAPIKey(_ key: String) {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        apiKeyStore.save(trimmed)
+        apiKeyStore.save(trimmed, for: settings.llm.baseURL)
         apiKey = trimmed
+        reloadLLMModels()
     }
 
     func setModel(_ modelID: String) {
-        store.update { $0.llm.model = modelID }
+        store.update { $0.llm.model = modelID.trimmingCharacters(in: .whitespacesAndNewlines) }
+    }
+
+    var llmProvider: LLMProvider {
+        settings.llm.provider
+    }
+
+    /// Picks a preset service; `.custom` keeps the current URL for editing.
+    func setLLMProvider(_ provider: LLMProvider) {
+        if let url = provider.baseURL {
+            setLLMBaseURL(url)
+        }
+    }
+
+    /// Returns false for text that is not an http(s) URL.
+    @discardableResult
+    func setLLMBaseURL(text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed),
+              ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host() != nil else {
+            return false
+        }
+        setLLMBaseURL(url)
+        return true
+    }
+
+    private func setLLMBaseURL(_ url: URL) {
+        guard url != settings.llm.baseURL else {
+            return
+        }
+        store.update { $0.llm.baseURL = url }
+        apiKey = apiKeyStore.read(for: url)
+        reloadLLMModels()
+    }
+
+    /// The model list belongs to the service and key it was loaded with.
+    private func reloadLLMModels() {
+        availableModels = []
+        modelListState = .notLoaded
+        loadModels()
     }
 
     func setTargetLanguage(_ language: String) {
@@ -155,17 +180,28 @@ final class SettingsViewModel {
         store.update { $0.llm.glossary = glossary }
     }
 
-    /// Fetches the models that support structured output (no API key needed).
+    /// Fetches the models the service offers. A result that arrives after
+    /// the service or key changed is dropped.
     func loadModels() {
-        guard modelListState != .loading else {
-            return
-        }
+        let baseURL = settings.llm.baseURL
+        let key = apiKey
         modelListState = .loading
         Task {
+            let result: Result<[LLMModel], any Error>
             do {
-                availableModels = try await OpenRouterClient.structuredOutputModels()
-                modelListState = .loaded
+                result = .success(try await ChatCompletionsClient(baseURL: baseURL, apiKey: key).models())
             } catch {
+                result = .failure(error)
+            }
+            guard baseURL == settings.llm.baseURL, key == apiKey else {
+                return
+            }
+            switch result {
+            case .success(let models):
+                availableModels = models
+                modelListState = .loaded
+            case .failure(let error):
+                availableModels = []
                 modelListState = .failed(message: error.localizedDescription)
             }
         }

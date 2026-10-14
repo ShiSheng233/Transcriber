@@ -43,8 +43,10 @@ struct TranscribeCommand: AsyncParsableCommand {
     @Option(help: "Chunks decoded at the same time.")
     var concurrency: Int = TranscriptionPipeline.Settings.chickenRice.concurrentChunkCount
 
-    @Option(help: "OpenRouter model id: polishes or translates the output, as the model's llm_mode says. Key from OPENROUTER_API_KEY.")
+    @Option(help: "LLM model id: polishes or translates the output, as the model's llm_mode says.")
     var llmModel: String?
+
+    @OptionGroup var llmEndpoint: LLMEndpointOptions
 
     @Option(help: "Target language when the LLM translates.")
     var llmTargetLanguage: String = "简体中文"
@@ -124,10 +126,7 @@ struct TranscribeCommand: AsyncParsableCommand {
     }
 
     private func refineWithLLM(_ segments: [TimedText], recognitionModel: RecognitionModel, model: String) async throws -> [TimedText] {
-        guard let apiKey = ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"], !apiKey.isEmpty else {
-            throw ValidationError("--llm-model needs OPENROUTER_API_KEY in the environment")
-        }
-        let refiner = SubtitleRefiner(client: OpenRouterClient(apiKey: apiKey), configuration: .init(model: model))
+        let refiner = SubtitleRefiner(client: try llmEndpoint.makeClient(), configuration: .init(model: model))
         let job: SubtitleRefiner.Job = recognitionModel.llmMode == .polish ? .polishChinese : .translate(targetLanguage: llmTargetLanguage)
         let start = ContinuousClock.now
         let refined = try await refiner.refine(segments, job: job) { completed, total in

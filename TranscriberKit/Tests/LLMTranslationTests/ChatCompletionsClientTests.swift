@@ -43,15 +43,25 @@ final class MockURLProtocol: URLProtocol, @unchecked Sendable {
 }
 
 @Suite(.serialized)
-struct OpenRouterClientTests {
-    private func client(_ responses: [MockURLProtocol.Response]) -> OpenRouterClient {
+struct ChatCompletionsClientTests {
+    private func client(
+        _ responses: [MockURLProtocol.Response],
+        baseURL: URL = LLMProvider.openRouter.baseURL!,
+        apiKey: String = "sk-test"
+    ) -> ChatCompletionsClient {
         MockURLProtocol.state.withLock { $0 = (responses, []) }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [MockURLProtocol.self]
-        return OpenRouterClient(apiKey: "sk-test", session: URLSession(configuration: configuration), retryDelays: [.zero, .zero])
+        return ChatCompletionsClient(baseURL: baseURL, apiKey: apiKey, session: URLSession(configuration: configuration), retryDelays: [.zero, .zero])
     }
 
-    private func complete(_ client: OpenRouterClient) async throws -> Data {
+    private func requestBodies() throws -> [[String: Any]] {
+        try MockURLProtocol.state.withLock { $0.requests }.map {
+            try #require(try JSONSerialization.jsonObject(with: $0.httpBody ?? Data()) as? [String: Any])
+        }
+    }
+
+    private func complete(_ client: ChatCompletionsClient) async throws -> Data {
         try await client.completeJSON(
             model: "test/model",
             messages: [ChatMessage(role: .user, content: "hi")],
@@ -89,17 +99,50 @@ struct OpenRouterClientTests {
     }
 
     @Test func mapsAuthenticationAndCreditErrors() async throws {
-        await #expect(throws: OpenRouterError.invalidAPIKey) {
+        await #expect(throws: LLMServiceError.invalidAPIKey) {
             try await complete(client([.init(status: 401, body: #"{"error":{"message":"bad key"}}"#)]))
         }
-        await #expect(throws: OpenRouterError.insufficientCredits) {
+        await #expect(throws: LLMServiceError.insufficientCredits) {
             try await complete(client([.init(status: 402, body: #"{"error":{"message":"no credits"}}"#)]))
         }
     }
 
-    @Test func reportsProviderErrorMessages() async throws {
-        await #expect(throws: OpenRouterError.requestFailed(status: 400, message: "schema not supported")) {
-            try await complete(client([.init(status: 400, body: #"{"error":{"message":"schema not supported","code":400}}"#)]))
+    @Test func reportsServerErrorMessages() async throws {
+        await #expect(throws: LLMServiceError.requestFailed(status: 404, message: "no such model")) {
+            try await complete(client([.init(status: 404, body: #"{"error":{"message":"no such model","code":404}}"#)]))
         }
+    }
+
+    @Test func stepsDownWhenTheServerRejectsJSONSchemas() async throws {
+        let ok = #"{"choices":[{"message":{"content":"```json\n{\"lines\":[]}\n```"}}]}"#
+        let client = client([
+            .init(status: 400, body: #"{"error":{"message":"response_format json_schema not supported"}}"#),
+            .init(status: 400, body: #"{"error":{"message":"json_object not supported"}}"#),
+            .init(status: 200, body: ok),
+            .init(status: 200, body: ok),
+        ], baseURL: LLMProvider.ollama.baseURL!, apiKey: "")
+
+        #expect(String(decoding: try await complete(client), as: UTF8.self) == #"{"lines":[]}"#)
+        _ = try await complete(client)  // remembers the mode that worked
+
+        let bodies = try requestBodies()
+        #expect(bodies.count == 4)
+        #expect((bodies[0]["response_format"] as? [String: Any])?["type"] as? String == "json_schema")
+        #expect((bodies[1]["response_format"] as? [String: Any])?["type"] as? String == "json_object")
+        #expect(bodies[2]["response_format"] == nil && bodies[3]["response_format"] == nil)
+        // The schema moves into the prompt; no OpenRouter-only fields elsewhere.
+        #expect((bodies[2]["messages"] as? [[String: Any]])?.contains { ($0["content"] as? String)?.contains("JSON schema") == true } == true)
+        #expect(bodies.allSatisfy { $0["provider"] == nil })
+        let request = try #require(MockURLProtocol.state.withLock { $0.requests.first })
+        #expect(request.url?.absoluteString == "http://localhost:11434/v1/chat/completions")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+    }
+
+    @Test func listsModelsAndFiltersOpenRouterToStructuredOutput() async throws {
+        let openRouter = client([.init(status: 200, body: #"{"data":[{"id":"a/x","name":"X","supported_parameters":["structured_outputs"]},{"id":"b/y","name":"Y","supported_parameters":[]}]}"#)])
+        #expect(try await openRouter.models().map(\.id) == ["a/x"])
+
+        let local = client([.init(status: 200, body: #"{"object":"list","data":[{"id":"qwen3:8b","object":"model"}]}"#)], baseURL: LLMProvider.ollama.baseURL!, apiKey: "")
+        #expect(try await local.models() == [LLMModel(id: "qwen3:8b", name: "qwen3:8b")])
     }
 }

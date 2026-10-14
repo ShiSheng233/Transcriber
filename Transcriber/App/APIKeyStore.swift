@@ -1,13 +1,13 @@
 import Foundation
 import Security
 
-/// Keeps the OpenRouter API key in the login Keychain rather than in settings.
+/// Keeps LLM API keys in the login Keychain rather than in settings, one per
+/// service (base URL host and port), so switching services keeps each key.
 final class APIKeyStore {
     private let service = "dev.shisheng.Transcriber"
-    private let account = "openrouter"
 
-    func read() -> String {
-        var query = baseQuery
+    func read(for baseURL: URL) -> String {
+        var query = baseQuery(for: baseURL)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
@@ -18,21 +18,29 @@ final class APIKeyStore {
     }
 
     /// An empty key deletes the stored one.
-    func save(_ key: String) {
-        SecItemDelete(baseQuery as CFDictionary)
+    func save(_ key: String, for baseURL: URL) {
+        SecItemDelete(baseQuery(for: baseURL) as CFDictionary)
         guard !key.isEmpty else {
             return
         }
-        var item = baseQuery
+        var item = baseQuery(for: baseURL)
         item[kSecValueData as String] = Data(key.utf8)
         SecItemAdd(item as CFDictionary, nil)
     }
 
-    private var baseQuery: [String: Any] {
+    /// OpenRouter keeps the account name it had before other services existed.
+    private static func account(for baseURL: URL) -> String {
+        guard let host = baseURL.host(), !host.hasSuffix("openrouter.ai") else {
+            return "openrouter"
+        }
+        return baseURL.port.map { "\(host):\($0)" } ?? host
+    }
+
+    private func baseQuery(for baseURL: URL) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: Self.account(for: baseURL),
         ]
     }
 }

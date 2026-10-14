@@ -28,13 +28,14 @@ public actor JobQueue {
             self.apiKey = apiKey
         }
 
+        /// Local servers need no key; a missing one shows up as a rejected request.
         var isUsable: Bool {
-            settings.isEnabled && !settings.model.isEmpty && !apiKey.isEmpty
+            settings.isEnabled && !settings.model.isEmpty
         }
     }
 
     private let engine: TranscriptionEngine
-    private let makeChatClient: @Sendable (_ apiKey: String) -> any StructuredChatCompleting
+    private let makeChatClient: @Sendable (_ baseURL: URL, _ apiKey: String) -> any StructuredChatCompleting
     private var jobs: [Job] = []
     private var runningTask: Task<Void, Never>?
     private var runningJobID: UUID?
@@ -48,7 +49,7 @@ public actor JobQueue {
 
     public init(
         engine: TranscriptionEngine = TranscriptionEngine(),
-        makeChatClient: @escaping @Sendable (_ apiKey: String) -> any StructuredChatCompleting = { OpenRouterClient(apiKey: $0) }
+        makeChatClient: @escaping @Sendable (_ baseURL: URL, _ apiKey: String) -> any StructuredChatCompleting = { ChatCompletionsClient(baseURL: $0, apiKey: $1) }
     ) {
         self.engine = engine
         self.makeChatClient = makeChatClient
@@ -229,7 +230,7 @@ public actor JobQueue {
     /// The model's configuration says whether its output is polished or translated.
     private func refine(_ segments: [TimedText], of job: Job, with llm: LLMConfiguration) async throws -> [TimedText] {
         let refiner = SubtitleRefiner(
-            client: makeChatClient(llm.apiKey),
+            client: makeChatClient(llm.settings.baseURL, llm.apiKey),
             configuration: SubtitleRefiner.Configuration(model: llm.settings.model)
         )
         let refinerJob: SubtitleRefiner.Job = job.model.llmMode == .polish

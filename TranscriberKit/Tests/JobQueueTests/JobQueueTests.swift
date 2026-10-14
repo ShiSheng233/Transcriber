@@ -11,7 +11,7 @@ struct StubChat: StructuredChatCompleting {
 
     func completeJSON(model: String, messages: [ChatMessage], schemaName: String, schema: [String: any Sendable], temperature: Double) async throws -> Data {
         if fails {
-            throw OpenRouterError.insufficientCredits
+            throw LLMServiceError.insufficientCredits
         }
         let payload = try JSONSerialization.jsonObject(with: Data(messages[1].content.utf8)) as? [String: Any]
         let lines = (payload?["lines"] as? [[String: Any]] ?? []).map { ["id": $0["id"] ?? 0, "text": "EN: \($0["text"] ?? "")"] }
@@ -115,7 +115,7 @@ struct JobQueueTests {
     private func runTranscribeJob(llm: JobQueue.LLMConfiguration, failingModel: Bool) async throws -> Job {
         let outputDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: outputDirectory) }
-        let queue = JobQueue(makeChatClient: { _ in StubChat(fails: failingModel) })
+        let queue = JobQueue(makeChatClient: { _, _ in StubChat(fails: failingModel) })
         let configuration = JobQueue.Configuration(
             engine: EngineSettings(modelsDirectory: Self.models, backend: .whisperCpp, concurrentChunkCount: 4),
             output: OutputSettings(formats: [.srt], directory: outputDirectory),
