@@ -19,8 +19,10 @@ public struct AudioTime: Hashable, Comparable, Sendable, Codable {
         self.samples = milliseconds * Self.samplesPerMillisecond
     }
 
+    /// Rounds half to even, like Python's `round()`, which the original uses
+    /// for every seconds-to-samples conversion.
     public init(seconds: Double) {
-        self.samples = Int((seconds * Double(Self.sampleRate)).rounded())
+        self.samples = Int((seconds * Double(Self.sampleRate)).rounded(.toNearestOrEven))
     }
 
     public var milliseconds: Int {

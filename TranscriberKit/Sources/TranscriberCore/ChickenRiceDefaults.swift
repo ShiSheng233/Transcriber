@@ -13,4 +13,18 @@ public enum ChickenRiceDefaults {
         minimumSilenceDuration: AudioTime(milliseconds: 100),
         speechPadding: AudioTime(milliseconds: 200)
     )
+
+    /// `infer.py` → `SmartSplitOptions` defaults (`MAX_SMART_CHUNK_DURATION_S` = 30).
+    public static let chunking = ChunkingSettings(
+        isEnabled: true,
+        targetChunkDurationSeconds: 30,
+        splitWindowFactor: 0.4
+    )
+
+    /// `infer.py` → `SegmentMergeOptions` defaults.
+    public static let merge = MergeSettings(
+        isEnabled: true,
+        maximumGap: AudioTime(milliseconds: 2_000),
+        maximumSegmentDuration: AudioTime(milliseconds: 20_000)
+    )
 }

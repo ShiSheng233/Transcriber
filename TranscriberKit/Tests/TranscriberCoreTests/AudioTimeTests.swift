@@ -14,6 +14,12 @@ struct AudioTimeTests {
         #expect(AudioTime(seconds: 0.00004).samples == 1)
     }
 
+    @Test func roundsHalfToEvenLikePython() {
+        #expect(AudioTime(seconds: 0.5 / 16_000).samples == 0)
+        #expect(AudioTime(seconds: 1.5 / 16_000).samples == 2)
+        #expect(AudioTime(seconds: 2.5 / 16_000).samples == 2)
+    }
+
     @Test func supportsArithmeticAndOrdering() {
         let start = AudioTime(seconds: 2)
         let duration = AudioTime(milliseconds: 500)
