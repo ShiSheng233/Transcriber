@@ -6,7 +6,8 @@ public struct Job: Identifiable, Hashable, Sendable {
     public let sourceURL: URL
     public var model: RecognitionModel
     public var status: JobStatus
-    /// Final segments once transcription finished.
+    /// While transcribing, each finished chunk's subtitles (a preview); the
+    /// final subtitles once the job completed; empty if it failed.
     public var segments: [TimedText]
     /// Subtitle files written for this job.
     public var outputURLs: [URL]

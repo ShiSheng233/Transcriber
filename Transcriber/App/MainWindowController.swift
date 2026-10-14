@@ -172,7 +172,7 @@ extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [ItemID.add, ItemID.model, ItemID.start, ItemID.clear, .flexibleSpace, ItemID.player]
+        [.flexibleSpace, ItemID.model, .space, ItemID.add, ItemID.start, ItemID.clear, .space, ItemID.player]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -190,7 +190,7 @@ extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
         case ItemID.clear:
             configure(item, label: String(localized: "Clear Finished"), symbol: "checklist.checked", action: #selector(clearFinished(_:)))
         case ItemID.player:
-            configure(item, label: String(localized: "Player"), symbol: "play.rectangle", action: #selector(togglePlayer(_:)))
+            configure(item, label: String(localized: "Player"), symbol: "video", action: #selector(togglePlayer(_:)))
         case ItemID.model:
             // Task-specific, so it lives here rather than in Settings (HIG).
             item.label = String(localized: "Model")
@@ -208,7 +208,7 @@ extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
             let label = detailViewModel.showsPlayer ? String(localized: "Hide Player") : String(localized: "Show Player")
             item.toolTip = label
             item.image = NSImage(
-                systemSymbolName: detailViewModel.showsPlayer ? "play.rectangle.fill" : "play.rectangle",
+                systemSymbolName: detailViewModel.showsPlayer ? "video" : "video.slash",
                 accessibilityDescription: label
             )
         }

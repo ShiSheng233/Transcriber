@@ -32,6 +32,13 @@ final class JobDetailViewModel {
         mediaURL != nil
     }
 
+    private static let audioExtensions: Set<String> = ["mp3", "wav", "flac", "m4a", "aac", "ogg", "opus", "wma"]
+
+    /// Audio files get only the playback controls, no picture area.
+    var isAudioOnly: Bool {
+        mediaURL.map { Self.audioExtensions.contains($0.pathExtension.lowercased()) } ?? false
+    }
+
     /// What the player should load: nothing while it is hidden.
     var playerURL: URL? {
         showsPlayer ? mediaURL : nil
@@ -62,7 +69,7 @@ final class JobDetailViewModel {
         subtitlesPlaceholder = switch job.status {
         case .completed: lines.isEmpty ? String(localized: "No speech was found in this file.") : nil
         case .failed, .cancelled: String(localized: "No subtitles.")
-        default: String(localized: "Subtitles appear here when the file is done.")
+        default: lines.isEmpty ? String(localized: "Subtitles appear here as they are transcribed.") : nil
         }
     }
 
@@ -76,7 +83,7 @@ final class JobDetailViewModel {
 
     private static func line(for segment: TimedText) -> Line {
         Line(
-            timeText: "\(clock(segment.start)) → \(clock(segment.end))",
+            timeText: "\(clock(segment.start)) – \(clock(segment.end))",
             text: segment.text,
             startSeconds: segment.start.seconds,
             endSeconds: segment.end.seconds
@@ -88,8 +95,9 @@ final class JobDetailViewModel {
         let hours = total / 3_600_000
         let minutes = total % 3_600_000 / 60_000
         let seconds = total % 60_000 / 1_000
-        let fraction = total % 1_000 / 10
-        let minutesAndSeconds = String(format: "%02d:%02d.%02d", minutes, seconds, fraction)
-        return hours > 0 ? "\(hours):\(minutesAndSeconds)" : minutesAndSeconds
+        let tenths = total % 1_000 / 100
+        return hours > 0
+            ? String(format: "%d:%02d:%02d.%d", hours, minutes, seconds, tenths)
+            : String(format: "%d:%02d.%d", minutes, seconds, tenths)
     }
 }

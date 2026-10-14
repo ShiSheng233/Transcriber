@@ -182,10 +182,16 @@ public actor JobQueue {
             }
             log(.info, job.id, "\(fileName): done in \(ActivityFormatting.seconds(ContinuousClock.now - jobStart)), \(segments.count) subtitles")
         } catch is CancellationError {
-            update(job.id) { $0.status = .cancelled }
+            update(job.id) {
+                $0.status = .cancelled
+                $0.segments = []
+            }
             log(.warning, job.id, "\(fileName): cancelled")
         } catch {
-            update(job.id) { $0.status = .failed(message: error.localizedDescription) }
+            update(job.id) {
+                $0.status = .failed(message: error.localizedDescription)
+                $0.segments = []
+            }
             log(.error, job.id, "\(fileName): \(error.localizedDescription)")
         }
     }
@@ -259,15 +265,14 @@ public actor JobQueue {
         case .plannedChunks(let count):
             update(jobID) { $0.status = .transcribing(completedChunks: 0, totalChunks: count) }
             log(.info, jobID, "Transcribing \(count) chunk(s)…")
-        case .transcribedChunk(let completed, let count, let chunk, let segmentCount):
+        case .transcribedChunk(let completed, let count, let chunk, let segments):
             update(jobID) { job in
-                // Progress messages can arrive after the job moved on.
-                if case .transcribing = job.status {
-                    job.status = .transcribing(completedChunks: completed, totalChunks: count)
-                }
+                job.status = .transcribing(completedChunks: completed, totalChunks: count)
+                // A preview while the file runs; replaced by the final subtitles.
+                job.segments = (job.segments + segments).sorted { $0.start < $1.start }
             }
             log(.detail, jobID, "Chunk \(completed)/\(count) "
-                + "(\(ActivityFormatting.clock(chunk.startSeconds))–\(ActivityFormatting.clock(chunk.endSeconds))): \(segmentCount) segment(s)")
+                + "(\(ActivityFormatting.clock(chunk.startSeconds))–\(ActivityFormatting.clock(chunk.endSeconds))): \(segments.count) segment(s)")
         case .postProcessed(let segmentCount):
             log(.detail, jobID, "Merged into \(segmentCount) subtitle(s)")
         }

@@ -69,8 +69,9 @@ public struct TranscriptionPipeline: Sendable {
         /// The outer VAD pass: speech spans and their total length.
         case detectedSpeech(spanCount: Int, speechDuration: AudioTime)
         case plannedChunks(count: Int)
-        /// `completed` chunks of `count` are done; `chunk` is the one that just finished.
-        case transcribedChunk(completed: Int, count: Int, chunk: AudioChunk, segmentCount: Int)
+        /// `completed` chunks of `count` are done; `chunk` is the one that just
+        /// finished, with its subtitles before merging and cleanup (a preview).
+        case transcribedChunk(completed: Int, count: Int, chunk: AudioChunk, segments: [TimedText])
         /// Subtitles after merging.
         case postProcessed(segmentCount: Int)
     }
@@ -185,7 +186,7 @@ public struct TranscriptionPipeline: Sendable {
             while let (index, segments) = try await group.next() {
                 segmentsByChunk[index] = segments
                 finishedCount += 1
-                progress(.transcribedChunk(completed: finishedCount, count: chunks.count, chunk: chunks[index], segmentCount: segments.count))
+                progress(.transcribedChunk(completed: finishedCount, count: chunks.count, chunk: chunks[index], segments: segments))
                 if nextChunk < chunks.count {
                     startNextChunk()
                 }

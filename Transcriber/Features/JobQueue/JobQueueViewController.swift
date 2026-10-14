@@ -28,7 +28,7 @@ final class JobQueueViewController: NSViewController {
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("Job"))
         tableView.addTableColumn(column)
         tableView.headerView = nil
-        tableView.rowHeight = 54
+        tableView.rowHeight = 46
         tableView.style = .sourceList
         tableView.dataSource = self
         tableView.delegate = self
@@ -38,6 +38,8 @@ final class JobQueueViewController: NSViewController {
         let scrollView = NSScrollView()
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
         scrollView.drawsBackground = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 

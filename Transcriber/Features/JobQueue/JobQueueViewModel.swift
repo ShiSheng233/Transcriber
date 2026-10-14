@@ -7,10 +7,21 @@ import TranscriberCore
 @Observable
 final class JobQueueViewModel {
     struct Row: Identifiable, Equatable {
+        enum Outcome: Equatable {
+            case none
+            case done
+            case warning
+            case failed
+        }
+
         let id: UUID
         let fileName: String
         let modelName: String
+        /// Full status, for the tooltip.
         let statusText: String
+        /// Fits the sidebar: "whisper-ja-1.5B · 49%".
+        let shortStatus: String
+        let outcome: Outcome
         let fractionCompleted: Double?
         let canCancel: Bool
         let sourceURL: URL
@@ -129,11 +140,35 @@ final class JobQueueViewModel {
             fileName: job.sourceURL.lastPathComponent,
             modelName: job.model.displayName,
             statusText: statusText(for: job),
+            shortStatus: "\(job.model.displayName) · \(shortStatus(for: job))",
+            outcome: outcome(of: job),
             fractionCompleted: job.status.fractionCompleted,
             canCancel: !job.status.isFinished,
             sourceURL: job.sourceURL,
             outputURLs: job.outputURLs
         )
+    }
+
+    private static func shortStatus(for job: Job) -> String {
+        switch job.status {
+        case .queued: String(localized: "Waiting")
+        case .loadingModel: String(localized: "Loading model")
+        case .decodingAudio: String(localized: "Reading audio")
+        case .detectingSpeech: String(localized: "Finding speech")
+        case .transcribing, .refining, .exporting:
+            (job.status.fractionCompleted ?? 0).formatted(.percent.precision(.fractionLength(0)))
+        case .completed: job.warning == nil ? String(localized: "Done") : String(localized: "Done with warning")
+        case .failed: String(localized: "Failed")
+        case .cancelled: String(localized: "Cancelled")
+        }
+    }
+
+    private static func outcome(of job: Job) -> Row.Outcome {
+        switch job.status {
+        case .completed: job.warning == nil ? .done : .warning
+        case .failed: .failed
+        default: .none
+        }
     }
 
     private static func statusText(for job: Job) -> String {

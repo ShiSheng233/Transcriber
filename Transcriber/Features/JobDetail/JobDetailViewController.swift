@@ -19,6 +19,10 @@ final class JobDetailViewController: NSViewController {
     private var timeObserver: Any?
     private var displayedPlayerURL: URL?
     private var displayedLines: [JobDetailViewModel.Line] = []
+    /// Video needs room for the picture; audio only the control bar.
+    private static let audioPlayerHeight: CGFloat = 64
+    private lazy var playerMinimumHeight = playerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 160)
+    private var displayedAsAudio: Bool?
 
     init(viewModel: JobDetailViewModel) {
         self.viewModel = viewModel
@@ -39,7 +43,7 @@ final class JobDetailViewController: NSViewController {
 
         let timeColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("Time"))
         timeColumn.title = String(localized: "Time")
-        timeColumn.width = 170
+        timeColumn.width = 150
         timeColumn.resizingMask = []
         let textColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("Text"))
         textColumn.title = String(localized: "Subtitle")
@@ -47,7 +51,8 @@ final class JobDetailViewController: NSViewController {
         tableView.addTableColumn(timeColumn)
         tableView.addTableColumn(textColumn)
         tableView.usesAutomaticRowHeights = true
-        tableView.style = .inset
+        tableView.style = .fullWidth
+        tableView.intercellSpacing = NSSize(width: 12, height: 6)
         tableView.dataSource = self
         tableView.delegate = self
         tableView.target = self
@@ -56,6 +61,8 @@ final class JobDetailViewController: NSViewController {
         let scrollView = NSScrollView()
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
 
         placeholderLabel.textColor = .secondaryLabelColor
         placeholderLabel.alignment = .center
@@ -83,7 +90,7 @@ final class JobDetailViewController: NSViewController {
             emptyState.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             emptyState.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             emptyState.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            playerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 160),
+            playerMinimumHeight,
             scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 160),
             placeholderLabel.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
             placeholderLabel.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor, constant: 14),
@@ -121,6 +128,13 @@ final class JobDetailViewController: NSViewController {
             player.replaceCurrentItem(with: viewModel.playerURL.map { AVPlayerItem(url: $0) })
         }
         playerView.isHidden = !viewModel.showsPlayer
+        if displayedAsAudio != viewModel.isAudioOnly, viewModel.hasSelection {
+            displayedAsAudio = viewModel.isAudioOnly
+            playerMinimumHeight.constant = viewModel.isAudioOnly ? Self.audioPlayerHeight : 160
+            view.layoutSubtreeIfNeeded()
+            let height = viewModel.isAudioOnly ? Self.audioPlayerHeight : splitView.bounds.height * 0.55
+            splitView.setPosition(height, ofDividerAt: 0)
+        }
         if viewModel.lines != displayedLines {
             displayedLines = viewModel.lines
             tableView.reloadData()
@@ -161,8 +175,9 @@ extension JobDetailViewController: NSTableViewDataSource, NSTableViewDelegate {
         let isTimeColumn = tableColumn?.identifier.rawValue == "Time"
         let label = NSTextField(wrappingLabelWithString: isTimeColumn ? line.timeText : line.text)
         if isTimeColumn {
-            label.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+            label.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
             label.textColor = .secondaryLabelColor
+            label.maximumNumberOfLines = 1
         }
         label.isSelectable = false
         return label

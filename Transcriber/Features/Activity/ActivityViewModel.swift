@@ -14,6 +14,16 @@ final class ActivityViewModel {
     private(set) var isBusy = false
     /// "2 of 5" while several files are queued.
     private(set) var queuePositionText: String?
+    /// The running job's step and file, e.g. "Transcribing" and "movie.mp4".
+    private(set) var stepText: String?
+    private(set) var runningFileName: String?
+    /// 0…1 while a step with known progress runs.
+    private(set) var fractionCompleted: Double?
+    /// "153/309 · about 4 min left".
+    private(set) var progressDetailText: String?
+
+    /// When the running job's current counted step began, for the estimate.
+    @ObservationIgnored private var stepStart: (jobID: UUID, step: String, date: Date)?
 
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
     @ObservationIgnored private let dateFormatter: DateFormatter = {
@@ -39,21 +49,13 @@ final class ActivityViewModel {
         tasks.forEach { $0.cancel() }
     }
 
-    /// For the status bar: while working, the latest entry (details too, so it
-    /// keeps moving); when idle, the outcome of the last main step.
-    var statusText: String {
-        guard let latest = statusEntry else {
-            return String(localized: "Ready")
-        }
-        return isBusy || latest.level != .info ? latest.message : String(localized: "Ready · \(latest.message)")
+    /// The status bar's first line when idle: the outcome of the last main step.
+    var idleText: String {
+        entries.last { $0.level != .detail }?.message ?? String(localized: "Ready")
     }
 
     var latestLevel: LogEntry.Level? {
-        statusEntry?.level
-    }
-
-    private var statusEntry: LogEntry? {
-        isBusy ? entries.last : entries.last { $0.level != .detail }
+        entries.last { $0.level != .detail }?.level
     }
 
     var visibleEntries: [LogEntry] {
@@ -90,12 +92,68 @@ final class ActivityViewModel {
     }
 
     private func apply(_ jobs: [Job]) {
-        isBusy = jobs.contains { !$0.status.isFinished && $0.status != .queued }
+        let running = jobs.first { !$0.status.isFinished && $0.status != .queued }
+        isBusy = running != nil
         if isBusy, jobs.count > 1 {
             let finished = jobs.filter(\.status.isFinished).count
             queuePositionText = String(localized: "\(finished + 1) of \(jobs.count)")
         } else {
             queuePositionText = nil
         }
+        guard let running else {
+            stepText = nil
+            runningFileName = nil
+            fractionCompleted = nil
+            progressDetailText = nil
+            stepStart = nil
+            return
+        }
+        runningFileName = running.sourceURL.lastPathComponent
+        let counted: (step: String, completed: Int, total: Int)? = switch running.status {
+        case .transcribing(let completed, let total): (String(localized: "Transcribing"), completed, total)
+        case .refining(let completed, let total): (String(localized: "Improving with LLM"), completed, total)
+        default: nil
+        }
+        let uncountedStep: String = switch running.status {
+        case .loadingModel: String(localized: "Loading \(running.model.displayName)")
+        case .decodingAudio: String(localized: "Reading audio")
+        case .detectingSpeech: String(localized: "Finding speech")
+        case .exporting: String(localized: "Writing subtitles")
+        default: String(localized: "Working")
+        }
+        stepText = counted?.step ?? uncountedStep
+        fractionCompleted = running.status.fractionCompleted
+        guard let counted else {
+            progressDetailText = nil
+            return
+        }
+        if stepStart?.jobID != running.id || stepStart?.step != counted.step {
+            stepStart = (running.id, counted.step, Date())
+        }
+        var detail = "\(counted.completed)/\(counted.total)"
+        if let remaining = remainingTime(completed: counted.completed, total: counted.total) {
+            detail += " · " + remaining
+        }
+        progressDetailText = detail
+    }
+
+    /// From the pace so far; nothing until there is enough to go on.
+    private func remainingTime(completed: Int, total: Int) -> String? {
+        guard let stepStart, completed >= 2, completed < total else {
+            return nil
+        }
+        let elapsed = Date().timeIntervalSince(stepStart.date)
+        guard elapsed >= 3 else {
+            return nil
+        }
+        let remaining = elapsed / Double(completed) * Double(total - completed)
+        if remaining < 60 {
+            return String(localized: "less than a minute left")
+        }
+        let formatter = DateComponentsFormatter()
+        formatter.unitsStyle = .short
+        formatter.allowedUnits = remaining >= 3600 ? [.hour, .minute] : [.minute]
+        formatter.maximumUnitCount = 2
+        return String(localized: "about \(formatter.string(from: remaining) ?? "") left")
     }
 }
