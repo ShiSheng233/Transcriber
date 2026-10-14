@@ -1,5 +1,6 @@
 import ArgumentParser
 import Foundation
+import LLMTranslation
 import SpeechDetection
 import Synchronization
 import SubtitleExport
@@ -41,6 +42,12 @@ struct TranscribeCommand: AsyncParsableCommand {
 
     @Option(help: "Chunks decoded at the same time.")
     var concurrency: Int = TranscriptionPipeline.Settings.chickenRice.concurrentChunkCount
+
+    @Option(help: "OpenRouter model id: polish (translate task) or translate (transcribe task) afterwards. Key from OPENROUTER_API_KEY.")
+    var llmModel: String?
+
+    @Option(help: "Target language when the LLM translates.")
+    var llmTargetLanguage: String = "简体中文"
 
     @Argument(help: "Media files.")
     var inputs: [String]
@@ -86,7 +93,7 @@ struct TranscribeCommand: AsyncParsableCommand {
             let start = ContinuousClock.now
             let fileName = inputURL.lastPathComponent
             let decodedDuration = Mutex(AudioTime.zero)
-            let segments = try await pipeline.transcribe(fileAt: inputURL) { progress in
+            var segments = try await pipeline.transcribe(fileAt: inputURL) { progress in
                 switch progress {
                 case .decodedAudio(let duration): decodedDuration.withLock { $0 = duration }
                 case .plannedChunks(let count): print("\(fileName): \(count) chunk(s)")
@@ -99,6 +106,10 @@ struct TranscribeCommand: AsyncParsableCommand {
             print(String(format: "  %d segments, %.1f s audio in %.1f s (%.1fx realtime)",
                          segments.count, audioDuration.seconds, seconds, audioDuration.seconds / seconds))
 
+            if let llmModel {
+                segments = try await refineWithLLM(segments, task: task, model: llmModel)
+            }
+
             let directory = outputDirectory.map { URL(fileURLWithPath: $0) } ?? inputURL.deletingLastPathComponent()
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let stem = inputURL.deletingPathExtension().lastPathComponent
@@ -108,5 +119,19 @@ struct TranscribeCommand: AsyncParsableCommand {
                 print("  wrote \(outputURL.path)")
             }
         }
+    }
+
+    private func refineWithLLM(_ segments: [TimedText], task: TranscriptionTask, model: String) async throws -> [TimedText] {
+        guard let apiKey = ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"], !apiKey.isEmpty else {
+            throw ValidationError("--llm-model needs OPENROUTER_API_KEY in the environment")
+        }
+        let refiner = SubtitleRefiner(client: OpenRouterClient(apiKey: apiKey), configuration: .init(model: model))
+        let job: SubtitleRefiner.Job = task == .translate ? .polishChinese : .translate(targetLanguage: llmTargetLanguage)
+        let start = ContinuousClock.now
+        let refined = try await refiner.refine(segments, job: job) { completed, total in
+            print("  LLM batch \(completed)/\(total)")
+        }
+        print("  LLM (\(model)) finished in \(ContinuousClock.now - start)")
+        return refined
     }
 }

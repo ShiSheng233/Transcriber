@@ -11,7 +11,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = MainMenuBuilder.makeMainMenu()
 
-        let queueViewModel = JobQueueViewModel(queue: environment.jobQueue, settingsStore: environment.settingsStore)
+        let queueViewModel = JobQueueViewModel(
+            queue: environment.jobQueue, settingsStore: environment.settingsStore, apiKeyStore: environment.apiKeyStore
+        )
         queueViewModel.addFiles(pendingOpenedURLs)
         pendingOpenedURLs = []
         self.queueViewModel = queueViewModel
@@ -54,7 +56,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showSettings(_ sender: Any?) {
         if settingsWindowController == nil {
-            settingsWindowController = SettingsWindowController(viewModel: SettingsViewModel(store: environment.settingsStore))
+            settingsWindowController = SettingsWindowController(
+                viewModel: SettingsViewModel(store: environment.settingsStore, apiKeyStore: environment.apiKeyStore)
+            )
         }
         settingsWindowController?.showWindow(nil)
         settingsWindowController?.window?.center()

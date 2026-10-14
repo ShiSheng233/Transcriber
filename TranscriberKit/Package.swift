@@ -83,6 +83,7 @@ let package = Package(
             dependencies: [
                 "TranscriberCore",
                 "AudioFeatures",
+                "LLMTranslation",
                 "MediaDecoding",
                 "SpeechDetection",
                 "SubtitleExport",

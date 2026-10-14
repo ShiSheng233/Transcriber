@@ -10,6 +10,7 @@ final class SettingsWindowController: NSWindowController {
             (GeneralSettingsViewController(viewModel: viewModel, title: String(localized: "General")), "gearshape"),
             (OutputSettingsViewController(viewModel: viewModel, title: String(localized: "Output")), "doc.text"),
             (ModelsSettingsViewController(viewModel: viewModel, title: String(localized: "Models")), "shippingbox"),
+            (LLMSettingsViewController(viewModel: viewModel, title: String(localized: "LLM")), "sparkles"),
         ]
         for (pane, symbol) in panes {
             let item = NSTabViewItem(viewController: pane)

@@ -1,5 +1,6 @@
 import Foundation
 import JobQueue
+import LLMTranslation
 import SubtitleExport
 import TranscriberCore
 
@@ -12,6 +13,7 @@ struct AppSettings: Codable, Equatable {
     var formats: [SubtitleFormat]
     /// `nil`: next to each source file, like the original.
     var outputDirectory: URL?
+    var llm: LLMSettings
 
     static let defaults = AppSettings(
         modelsDirectory: URL.applicationSupportDirectory.appendingPathComponent("Transcriber/Models", isDirectory: true),
@@ -19,13 +21,30 @@ struct AppSettings: Codable, Equatable {
         backend: .whisperCpp,
         concurrentChunkCount: 4,
         formats: [.srt, .vtt, .lrc],
-        outputDirectory: nil
+        outputDirectory: nil,
+        llm: .defaults
     )
 
-    var queueConfiguration: JobQueue.Configuration {
+    func queueConfiguration(apiKey: String) -> JobQueue.Configuration {
         JobQueue.Configuration(
             engine: EngineSettings(modelsDirectory: modelsDirectory, backend: backend, concurrentChunkCount: concurrentChunkCount),
-            output: OutputSettings(formats: formats, directory: outputDirectory)
+            output: OutputSettings(formats: formats, directory: outputDirectory),
+            llm: JobQueue.LLMConfiguration(settings: llm, apiKey: apiKey)
         )
+    }
+}
+
+extension AppSettings {
+    /// Settings saved before a field existed decode with that field's default.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = AppSettings.defaults
+        modelsDirectory = try container.decodeIfPresent(URL.self, forKey: .modelsDirectory) ?? defaults.modelsDirectory
+        task = try container.decodeIfPresent(TranscriptionTask.self, forKey: .task) ?? defaults.task
+        backend = try container.decodeIfPresent(EngineSettings.Backend.self, forKey: .backend) ?? defaults.backend
+        concurrentChunkCount = try container.decodeIfPresent(Int.self, forKey: .concurrentChunkCount) ?? defaults.concurrentChunkCount
+        formats = try container.decodeIfPresent([SubtitleFormat].self, forKey: .formats) ?? defaults.formats
+        outputDirectory = try container.decodeIfPresent(URL.self, forKey: .outputDirectory)
+        llm = try container.decodeIfPresent(LLMSettings.self, forKey: .llm) ?? defaults.llm
     }
 }

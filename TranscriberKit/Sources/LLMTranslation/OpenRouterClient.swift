@@ -86,13 +86,15 @@ public struct OpenRouterClient: StructuredChatCompleting {
         return try Self.messageContent(from: data)
     }
 
-    /// Models whose providers support structured output, cheapest first.
+    /// Interactive models whose providers support structured output, by name.
+    /// ":batch" variants are left out: they answer asynchronously.
     public static func structuredOutputModels(session: URLSession = .shared, baseURL: URL = defaultBaseURL) async throws -> [OpenRouterModel] {
         let (data, response) = try await session.data(from: baseURL.appendingPathComponent("models"))
         try check(response, data: data)
         let catalog = try JSONDecoder().decode(ModelCatalog.self, from: data)
         return catalog.data
             .filter { $0.supportedParameters?.contains("structured_outputs") ?? false }
+            .filter { !$0.id.hasSuffix(":batch") }
             .map { OpenRouterModel(id: $0.id, name: $0.name, contextLength: $0.contextLength ?? 0) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }

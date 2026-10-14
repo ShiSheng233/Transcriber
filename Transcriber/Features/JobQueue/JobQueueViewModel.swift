@@ -27,11 +27,13 @@ final class JobQueueViewModel {
 
     private let queue: JobQueue
     private let settingsStore: SettingsStore
+    private let apiKeyStore: APIKeyStore
     private var snapshotTask: Task<Void, Never>?
 
-    init(queue: JobQueue, settingsStore: SettingsStore) {
+    init(queue: JobQueue, settingsStore: SettingsStore, apiKeyStore: APIKeyStore) {
         self.queue = queue
         self.settingsStore = settingsStore
+        self.apiKeyStore = apiKeyStore
         snapshotTask = Task { [weak self] in
             for await jobs in await queue.snapshots() {
                 self?.apply(jobs)
@@ -64,7 +66,7 @@ final class JobQueueViewModel {
     }
 
     func startQueue() {
-        let configuration = settingsStore.settings.queueConfiguration
+        let configuration = settingsStore.settings.queueConfiguration(apiKey: apiKeyStore.read())
         Task { await queue.start(configuration: configuration) }
     }
 
@@ -99,7 +101,7 @@ final class JobQueueViewModel {
             id: job.id,
             fileName: job.sourceURL.lastPathComponent,
             taskName: job.task == .translate ? String(localized: "Translate") : String(localized: "Transcribe"),
-            statusText: statusText(for: job.status),
+            statusText: statusText(for: job),
             fractionCompleted: job.status.fractionCompleted,
             canCancel: !job.status.isFinished,
             sourceURL: job.sourceURL,
@@ -107,12 +109,16 @@ final class JobQueueViewModel {
         )
     }
 
-    private static func statusText(for status: JobStatus) -> String {
-        switch status {
+    private static func statusText(for job: Job) -> String {
+        if job.status == .completed, let warning = job.warning {
+            return String(localized: "Done · \(warning)")
+        }
+        return switch job.status {
         case .queued: String(localized: "Waiting")
         case .loadingModel: String(localized: "Loading model…")
         case .decodingAudio: String(localized: "Reading audio…")
         case .transcribing(let completed, let total): String(localized: "Transcribing \(completed)/\(total)")
+        case .refining(let completed, let total): String(localized: "Improving with LLM \(completed)/\(total)")
         case .exporting: String(localized: "Writing subtitles…")
         case .completed: String(localized: "Done")
         case .failed(let message): String(localized: "Failed: \(message)")

@@ -11,6 +11,7 @@
 		D0E21944307F219000FC9FC3 /* WhisperCpp in Frameworks */ = {isa = PBXBuildFile; productRef = D0E21942307F219000FC9FC3 /* WhisperCpp */; };
 		D0E21946307F219000FC9FC3 /* JobQueue in Frameworks */ = {isa = PBXBuildFile; productRef = D0E21945307F219000FC9FC3 /* JobQueue */; };
 		D0E21948307F219000FC9FC3 /* SubtitleExport in Frameworks */ = {isa = PBXBuildFile; productRef = D0E21947307F219000FC9FC3 /* SubtitleExport */; };
+		D0E2194A307F219000FC9FC3 /* LLMTranslation in Frameworks */ = {isa = PBXBuildFile; productRef = D0E21949307F219000FC9FC3 /* LLMTranslation */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -31,6 +32,7 @@
 			files = (
 				D0E21943307F219000FC9FC3 /* TranscriberCore in Frameworks */,
 				D0E21944307F219000FC9FC3 /* WhisperCpp in Frameworks */,
+				D0E2194A307F219000FC9FC3 /* LLMTranslation in Frameworks */,
 				D0E21948307F219000FC9FC3 /* SubtitleExport in Frameworks */,
 				D0E21946307F219000FC9FC3 /* JobQueue in Frameworks */,
 			);
@@ -74,6 +76,7 @@
 			packageProductDependencies = (
 				D0E21941307F219000FC9FC3 /* TranscriberCore */,
 				D0E21942307F219000FC9FC3 /* WhisperCpp */,
+				D0E21949307F219000FC9FC3 /* LLMTranslation */,
 				D0E21945307F219000FC9FC3 /* JobQueue */,
 			);
 			productName = Transcriber;
@@ -362,6 +365,10 @@
 		D0E21947307F219000FC9FC3 /* SubtitleExport */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SubtitleExport;
+		};
+		D0E21949307F219000FC9FC3 /* LLMTranslation */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LLMTranslation;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
