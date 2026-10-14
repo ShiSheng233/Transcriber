@@ -6,6 +6,11 @@
 	objectVersion = 110;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		D0E21943307F219000FC9FC3 /* TranscriberCore in Frameworks */ = {isa = PBXBuildFile; productRef = D0E21941307F219000FC9FC3 /* TranscriberCore */; };
+		D0E21944307F219000FC9FC3 /* WhisperCpp in Frameworks */ = {isa = PBXBuildFile; productRef = D0E21942307F219000FC9FC3 /* WhisperCpp */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		D0E2192B307F218E00FC9FC3 /* Transcriber.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Transcriber.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -22,6 +27,8 @@
 		D0E21928307F218E00FC9FC3 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				D0E21943307F219000FC9FC3 /* TranscriberCore in Frameworks */,
+				D0E21944307F219000FC9FC3 /* WhisperCpp in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -60,6 +67,10 @@
 				D0E2192D307F218E00FC9FC3 /* Transcriber */,
 			);
 			name = Transcriber;
+			packageProductDependencies = (
+				D0E21941307F219000FC9FC3 /* TranscriberCore */,
+				D0E21942307F219000FC9FC3 /* WhisperCpp */,
+			);
 			productName = Transcriber;
 			productReference = D0E2192B307F218E00FC9FC3 /* Transcriber.app */;
 			productType = "com.apple.product-type.application";
@@ -88,6 +99,9 @@
 			);
 			mainGroup = D0E21922307F218E00FC9FC3;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				D0E21940307F219000FC9FC3 /* XCLocalSwiftPackageReference "TranscriberKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = D0E2192C307F218E00FC9FC3 /* Products */;
 			projectDirPath = "";
@@ -169,7 +183,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -227,7 +241,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
@@ -238,18 +252,19 @@
 		D0E21937307F218F00FC9FC3 /* Debug configuration for PBXNativeTarget "Transcriber" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = K43V8XURBW;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
-				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -257,31 +272,31 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.shisheng.Transcriber;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
 		D0E21938307F218F00FC9FC3 /* Release configuration for PBXNativeTarget "Transcriber" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = K43V8XURBW;
-				ENABLE_APP_SANDBOX = YES;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
-				ENABLE_PREVIEWS = YES;
-				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -289,13 +304,12 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.shisheng.Transcriber;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};
@@ -319,6 +333,24 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		D0E21940307F219000FC9FC3 /* XCLocalSwiftPackageReference "TranscriberKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = TranscriberKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		D0E21941307F219000FC9FC3 /* TranscriberCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TranscriberCore;
+		};
+		D0E21942307F219000FC9FC3 /* WhisperCpp */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = WhisperCpp;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = D0E21923307F218E00FC9FC3 /* Project object */;
 	validationLevel = 1;
