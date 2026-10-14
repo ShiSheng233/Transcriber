@@ -102,13 +102,14 @@ final class SubtitleEditorView: NSView {
             if let width {
                 column.width = width
                 column.resizingMask = []
+                column.headerCell.alignment = .right  // over right-aligned numbers
             } else {
                 column.resizingMask = .autoresizingMask
             }
             tableView.addTableColumn(column)
         }
         tableView.style = .fullWidth
-        tableView.rowHeight = 22
+        tableView.rowHeight = 24
         tableView.usesAlternatingRowBackgroundColors = true
         tableView.allowsMultipleSelection = true
         tableView.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
@@ -256,41 +257,24 @@ extension SubtitleEditorView: NSTableViewDataSource, NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let rowData = displayedRows[row]
         let identifier = tableColumn?.identifier ?? Column.text
-        let label = (tableView.makeView(withIdentifier: identifier, owner: nil) as? NSTextField) ?? {
-            let label = NSTextField(labelWithString: "")
-            label.identifier = identifier
-            label.lineBreakMode = .byTruncatingTail
-            return label
-        }()
-        label.font = identifier == Column.text ? .systemFont(ofSize: NSFont.systemFontSize) : .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
-        label.textColor = rowData.overlapsActiveLine ? .systemRed : identifier == Column.text ? .labelColor : .secondaryLabelColor
-        label.alignment = identifier == Column.text ? .natural : .right
-        label.drawsBackground = false
+        let cell = (tableView.makeView(withIdentifier: identifier, owner: nil) as? SubtitleGridCellView)
+            ?? SubtitleGridCellView(identifier: identifier)
+        let overlapping = rowData.overlapsActiveLine
         switch identifier {
         case Column.number:
-            label.stringValue = rowData.isPlaying ? "▶ \(rowData.number)" : "\(rowData.number)"
-            if rowData.isPlaying {
-                label.textColor = .controlAccentColor
-            }
+            cell.configure(text: rowData.isPlaying ? "▶ \(rowData.number)" : "\(rowData.number)", role: .number, alignment: .right, isPlaying: rowData.isPlaying)
         case Column.start:
-            label.stringValue = rowData.start
+            cell.configure(text: rowData.start, role: .time, alignment: .right, isOverlapping: overlapping)
         case Column.end:
-            label.stringValue = rowData.end
+            cell.configure(text: rowData.end, role: .time, alignment: .right, isOverlapping: overlapping)
         case Column.duration:
-            label.stringValue = rowData.duration
+            cell.configure(text: rowData.duration, role: .time, alignment: .right)
         case Column.speed:
-            label.stringValue = rowData.charactersPerSecond
-            // Aegisub: from 15 CPS the cell turns red, fully at 30.
-            if rowData.readingSpeedWarning > 0 {
-                label.drawsBackground = true
-                label.backgroundColor = NSColor.systemRed.withAlphaComponent(0.15 + 0.55 * rowData.readingSpeedWarning)
-                label.textColor = .labelColor
-            }
+            cell.configure(text: rowData.charactersPerSecond, role: .time, alignment: .right, readingSpeedWarning: rowData.readingSpeedWarning)
         default:
-            label.stringValue = rowData.text
-            label.toolTip = rowData.text
+            cell.configure(text: rowData.text, role: .text, alignment: .natural, isOverlapping: overlapping)
         }
-        return label
+        return cell
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
