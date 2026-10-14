@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             showSettings(nil)
             if let settingsWindowController {
+                DebugSnapshotRenderer.checkKeyEntry(settings: settingsWindowController, keys: environment.apiKeyStore, store: environment.settingsStore)
                 DebugSnapshotRenderer.render(settings: settingsWindowController, main: windowController, to: directory)
             }
             NSApp.terminate(nil)

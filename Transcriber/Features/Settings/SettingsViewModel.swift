@@ -30,6 +30,7 @@ final class SettingsViewModel {
         self.apiKeyStore = apiKeyStore
         self.library = library
         self.apiKey = apiKeyStore.read(for: store.settings.llm.baseURL)
+        self.apiKeyProblem = Self.problem(withStoredKey: apiKey)
     }
 
     var settings: AppSettings {
@@ -123,7 +124,7 @@ final class SettingsViewModel {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         // An address in the key field (pasted, or AutoFilled from the Base
         // URL) is sent as "Bearer https://…" and rejected by every server.
-        if trimmed.lowercased().hasPrefix("http://") || trimmed.lowercased().hasPrefix("https://") {
+        if Self.looksLikeURL(trimmed) {
             apiKeyProblem = String(localized: "That is a URL, not an API key")
             return
         }
@@ -134,6 +135,17 @@ final class SettingsViewModel {
         apiKeyStore.save(trimmed, for: settings.llm.baseURL)
         apiKey = trimmed
         reloadLLMModels()
+    }
+
+    private static func looksLikeURL(_ text: String) -> Bool {
+        let lowercased = text.lowercased()
+        return lowercased.hasPrefix("http://") || lowercased.hasPrefix("https://")
+    }
+
+    /// A key saved before URLs were refused is still flagged: the field shows
+    /// only dots, so it would otherwise look fine.
+    private static func problem(withStoredKey key: String) -> String? {
+        looksLikeURL(key) ? String(localized: "The saved key is a URL; paste your API key") : nil
     }
 
     func setModel(_ modelID: String) {
@@ -169,7 +181,7 @@ final class SettingsViewModel {
         }
         store.update { $0.llm.baseURL = url }
         apiKey = apiKeyStore.read(for: url)
-        apiKeyProblem = nil
+        apiKeyProblem = Self.problem(withStoredKey: apiKey)
         reloadLLMModels()
     }
 
