@@ -46,13 +46,14 @@ WHISPER_CMAKE_FLAGS := \
 	-DGGML_NATIVE=OFF \
 	-DGGML_OPENMP=OFF
 
-.PHONY: help whisper-xcframework ffmpeg-xcframeworks whisper-models whisper-models-q8_0 vad-model parity-fixtures build test clean-tools
+.PHONY: help whisper-xcframework ffmpeg-xcframeworks whisper-models whisper-models-q8_0 mlx-models vad-model parity-fixtures build test clean-tools
 
 help:
 	@echo "make whisper-xcframework  Build whisper.cpp $(WHISPER_VERSION) into $(WHISPER_XCFRAMEWORK)"
 	@echo "make ffmpeg-xcframeworks  Build FFmpeg $(FFMPEG_VERSION) (LGPL, audio decoding only) into TranscriberKit/Vendor"
 	@echo "make whisper-models       Download and convert the Whisper models into $(MODELS_DIR)/whisper"
 	@echo "make whisper-models-q8_0  Optional: q8_0 variants (not built by default)"
+	@echo "make mlx-models           Convert the Whisper models to MLX float16 into $(MODELS_DIR)/mlx"
 	@echo "make vad-model            Convert the ASMR VAD to Core ML into $(MODELS_DIR)/vad"
 	@echo "make parity-fixtures      Regenerate test fixtures from the original Python pipeline"
 	@echo "make build                Build TranscriberKit and transcriber-cli"
@@ -222,6 +223,33 @@ whisper-models: $(WHISPER_MODEL_FILES)
 	cd $(MODELS_DIR)/whisper && shasum -a 256 $(notdir $(WHISPER_MODEL_FILES)) > SHA256SUMS
 
 whisper-models-q8_0: $(foreach model,$(WHISPER_MODELS),$(MODELS_DIR)/whisper/$(model)-q8_0.bin)
+
+# MLX models -------------------------------------------------------------------
+#
+# Converted with mlx-whisper's own convert.py (hf_to_pt path) at a pinned
+# mlx-examples commit. It drops proj_out like whisper.cpp does; our ggml
+# converter has already verified it is tied for both models.
+
+MLX_EXAMPLES_COMMIT := 796f5b53cab69a3d48a44233ce21aae889e94a08
+# mlx-whisper itself comes from the same commit: PyPI's 0.4.3 still loads
+# weights.safetensors while convert.py at this commit writes model.safetensors.
+MLX_WHISPER_PACKAGE := mlx-whisper @ git+https://github.com/ml-explore/mlx-examples@$(MLX_EXAMPLES_COMMIT)\#subdirectory=whisper
+MLX_CONVERTER       := $(DOWNLOADS_DIR)/mlx-examples-$(MLX_EXAMPLES_COMMIT)/convert.py
+MLX_MODEL_FILES     := $(foreach model,$(WHISPER_MODELS),$(MODELS_DIR)/mlx/$(model)/model.safetensors)
+
+$(MLX_CONVERTER):
+	mkdir -p $(@D)
+	curl -fsSL -o $@ https://raw.githubusercontent.com/ml-explore/mlx-examples/$(MLX_EXAMPLES_COMMIT)/whisper/convert.py
+
+define mlx_model
+$(MODELS_DIR)/mlx/$(1)/model.safetensors: $(MLX_CONVERTER) $(DOWNLOADS_DIR)/$(1)/config.json $(DOWNLOADS_DIR)/$(1)/model.safetensors
+	uv run --no-project --python 3.12 --with "$(MLX_WHISPER_PACKAGE)" \
+		python $(MLX_CONVERTER) --torch-name-or-path $(DOWNLOADS_DIR)/$(1) --mlx-path $$(@D) --dtype float16
+endef
+
+$(foreach model,$(WHISPER_MODELS),$(eval $(call mlx_model,$(model))))
+
+mlx-models: $(MLX_MODEL_FILES)
 
 # VAD model --------------------------------------------------------------------
 #
