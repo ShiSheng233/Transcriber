@@ -34,7 +34,19 @@ public actor TranscriptionEngine {
     /// Frees the loaded model. ggml's Metal device checks at process exit
     /// that every buffer was freed, so call this before quitting.
     public func unload() {
+        guard let unloaded = loaded else {
+            return
+        }
         loaded = nil
+        // Only after MLX ran: touching MLX otherwise would start it up.
+        if unloaded.key.settings.backend == .mlx {
+            WhisperMLXMemory.releaseCachedBuffers()
+        }
+    }
+
+    /// Whether any model is loaded.
+    public var isLoaded: Bool {
+        loaded != nil
     }
 
     /// Whether `pipeline(for:settings:)` would return without loading.

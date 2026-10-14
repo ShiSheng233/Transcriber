@@ -218,3 +218,47 @@ struct JobQueueStopTests {
         #expect(finished.map(\.status) == [.cancelled, .completed])
     }
 }
+
+/// The process's memory footprint, as Activity Monitor's "Memory" column.
+private func physicalFootprint() -> UInt64 {
+    var info = task_vm_info_data_t()
+    var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+    let result = withUnsafeMutablePointer(to: &info) {
+        $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+            task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+        }
+    }
+    return result == KERN_SUCCESS ? info.phys_footprint : 0
+}
+
+struct JobQueueMemoryTests {
+    private static let repository = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    private static let models = repository.appendingPathComponent("Models")
+    private static let sample = repository.appendingPathComponent("ParityMedia/tts-long.wav")
+    private static let whisperJa = ModelCatalog.scan(models).model(withID: "whisper-ja-1.5b")
+    private static let isAvailable = whisperJa != nil && FileManager.default.fileExists(atPath: sample.path)
+
+    /// whisper.cpp only: `swift test` has no Metal library for MLX.
+    @Test(.enabled(if: isAvailable), .timeLimit(.minutes(5)))
+    func freesTheModelWhenTheQueueIsDone() async throws {
+        let backend = EngineSettings.Backend.whisperCpp
+        let engine = TranscriptionEngine()
+        let queue = JobQueue(engine: engine)
+        await queue.add([Self.sample], model: try #require(Self.whisperJa))
+        await queue.start(configuration: JobQueue.Configuration(
+            engine: EngineSettings(modelsDirectory: Self.models, backend: backend, concurrentChunkCount: 4),
+            output: OutputSettings(formats: [], directory: FileManager.default.temporaryDirectory)
+        ))
+        var peak: UInt64 = 0
+        while await queue.isRunning {
+            peak = max(peak, physicalFootprint())
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let idle = physicalFootprint()
+
+        #expect(await engine.isLoaded == false)
+        // The 1.5B model alone is about 3 GB; most of the peak must be gone.
+        #expect(peak > idle + 2_000_000_000, "peak \(peak / 1_000_000) MB, idle \(idle / 1_000_000) MB")
+    }
+}

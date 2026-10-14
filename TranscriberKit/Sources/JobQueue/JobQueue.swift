@@ -157,6 +157,12 @@ public actor JobQueue {
             currentJobTask = nil
             runningJobID = nil
         }
+        // Gigabytes of weights and buffers: free them while idle. The next
+        // start loads the model again (memory-mapped, about half a second).
+        if await engine.isLoaded {
+            await engine.unload()
+            log(.detail, nil, "Model unloaded")
+        }
         runningTask = nil
         isStopping = false
     }
