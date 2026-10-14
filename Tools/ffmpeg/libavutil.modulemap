@@ -1,0 +1,10 @@
+framework module libavutil {
+    header "avutil.h"
+    header "channel_layout.h"
+    header "error.h"
+    header "frame.h"
+    header "mem.h"
+    header "opt.h"
+    header "samplefmt.h"
+    export *
+}

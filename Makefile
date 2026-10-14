@@ -41,10 +41,11 @@ WHISPER_CMAKE_FLAGS := \
 	-DGGML_NATIVE=OFF \
 	-DGGML_OPENMP=OFF
 
-.PHONY: help whisper-xcframework whisper-models whisper-models-q8_0 vad-model parity-fixtures build test clean-tools
+.PHONY: help whisper-xcframework ffmpeg-xcframeworks whisper-models whisper-models-q8_0 vad-model parity-fixtures build test clean-tools
 
 help:
 	@echo "make whisper-xcframework  Build whisper.cpp $(WHISPER_VERSION) into $(WHISPER_XCFRAMEWORK)"
+	@echo "make ffmpeg-xcframeworks  Build FFmpeg $(FFMPEG_VERSION) (LGPL, audio decoding only) into TranscriberKit/Vendor"
 	@echo "make whisper-models       Download and convert the Whisper models into $(MODELS_DIR)/whisper"
 	@echo "make whisper-models-q8_0  Optional: q8_0 variants (not built by default)"
 	@echo "make vad-model            Convert the ASMR VAD to Core ML into $(MODELS_DIR)/vad"
@@ -68,6 +69,90 @@ $(WHISPER_XCFRAMEWORK): Tools/whisper-cpp/module.modulemap | $(WHISPER_SOURCE)
 	cp Tools/whisper-cpp/module.modulemap $(WHISPER_STAGING)/include/
 	rm -rf $@
 	xcodebuild -create-xcframework -library $(WHISPER_STAGING)/libwhisper.a -headers $(WHISPER_STAGING)/include -output $@
+
+# FFmpeg -----------------------------------------------------------------------
+#
+# Audio is decoded and resampled with FFmpeg, like the original (PyAV): the
+# same libswresample conversion to 16 kHz mono s16 keeps samples identical.
+# LGPL build (no --enable-gpl), dynamic frameworks, audio decoding only.
+
+FFMPEG_VERSION      := 9.0.2
+FFMPEG_SOURCE       := $(TOOLS_DIR)/ffmpeg-$(FFMPEG_VERSION)
+FFMPEG_INSTALL      := $(TOOLS_DIR)/ffmpeg-install
+FFMPEG_FRAMEWORKS   := $(TOOLS_DIR)/ffmpeg-frameworks
+FFMPEG_LIBRARIES    := avutil swresample avcodec avformat
+FFMPEG_XCFRAMEWORKS := $(foreach library,$(FFMPEG_LIBRARIES),TranscriberKit/Vendor/lib$(library).xcframework)
+
+comma := ,
+empty :=
+space := $(empty) $(empty)
+comma_separated = $(subst $(space),$(comma),$(strip $(1)))
+
+FFMPEG_DEMUXERS := aac ac3 aiff amr ape asf avi caf dts eac3 flac flv matroska mov mp3 mpegps mpegts ogg tta w64 wav wv
+FFMPEG_DECODERS := aac aac_latm ac3 alac amrnb amrwb ape dca eac3 flac mlp mp1 mp1float mp2 mp2float mp3 mp3float opus \
+	pcm_alaw pcm_f32be pcm_f32le pcm_f64be pcm_f64le pcm_mulaw pcm_s16be pcm_s16le pcm_s24be pcm_s24le pcm_s32be pcm_s32le pcm_u8 \
+	truehd tta vorbis wavpack wmalossless wmapro wmav1 wmav2
+FFMPEG_PARSERS  := aac aac_latm ac3 dca flac mlp mpegaudio opus vorbis
+
+FFMPEG_CONFIGURE_FLAGS := \
+	--prefix=$(abspath $(FFMPEG_INSTALL)) \
+	--arch=arm64 --target-os=darwin --cc=clang \
+	--extra-cflags=-mmacosx-version-min=$(DEPLOYMENT_TARGET) \
+	--extra-ldflags="-mmacosx-version-min=$(DEPLOYMENT_TARGET) -Wl,-headerpad_max_install_names" \
+	--install-name-dir=@rpath \
+	--enable-shared --disable-static --enable-pic \
+	--disable-programs --disable-doc --disable-network --disable-autodetect --enable-zlib \
+	--disable-everything --disable-avdevice --disable-avfilter --disable-swscale \
+	--enable-protocol=file \
+	--enable-demuxer=$(call comma_separated,$(FFMPEG_DEMUXERS)) \
+	--enable-decoder=$(call comma_separated,$(FFMPEG_DECODERS)) \
+	--enable-parser=$(call comma_separated,$(FFMPEG_PARSERS))
+
+ffmpeg-xcframeworks: $(FFMPEG_XCFRAMEWORKS)
+
+$(FFMPEG_SOURCE):
+	mkdir -p $(TOOLS_DIR)
+	curl -fsSL https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n$(FFMPEG_VERSION).tar.gz | tar -xz -C $(TOOLS_DIR)
+	mv $(TOOLS_DIR)/FFmpeg-n$(FFMPEG_VERSION) $@
+
+$(FFMPEG_INSTALL)/.installed: | $(FFMPEG_SOURCE)
+	cd $(FFMPEG_SOURCE) && ./configure $(FFMPEG_CONFIGURE_FLAGS)
+	$(MAKE) -C $(FFMPEG_SOURCE) -j $(NCPU) install
+	touch $@
+
+# Packages lib$(1).dylib as a versioned macOS framework and repoints its
+# references to the other FFmpeg libraries at their frameworks.
+define ffmpeg_framework
+$(FFMPEG_FRAMEWORKS)/lib$(1).framework: $(FFMPEG_INSTALL)/.installed Tools/ffmpeg/lib$(1).modulemap
+	rm -rf $$@
+	mkdir -p $$@/Versions/A/Headers $$@/Versions/A/Modules $$@/Versions/A/Resources
+	cp -L $(FFMPEG_INSTALL)/lib/lib$(1).dylib $$@/Versions/A/lib$(1)
+	cp -R $(FFMPEG_INSTALL)/include/lib$(1)/. $$@/Versions/A/Headers/
+	cp Tools/ffmpeg/lib$(1).modulemap $$@/Versions/A/Modules/module.modulemap
+	plutil -create xml1 $$@/Versions/A/Resources/Info.plist
+	plutil -insert CFBundleExecutable -string lib$(1) $$@/Versions/A/Resources/Info.plist
+	plutil -insert CFBundleIdentifier -string org.ffmpeg.lib$(1) $$@/Versions/A/Resources/Info.plist
+	plutil -insert CFBundlePackageType -string FMWK $$@/Versions/A/Resources/Info.plist
+	plutil -insert CFBundleShortVersionString -string $(FFMPEG_VERSION) $$@/Versions/A/Resources/Info.plist
+	plutil -insert CFBundleVersion -string $(FFMPEG_VERSION) $$@/Versions/A/Resources/Info.plist
+	install_name_tool -id @rpath/lib$(1).framework/Versions/A/lib$(1) $$@/Versions/A/lib$(1)
+	for dependency in $(filter-out $(1),$(FFMPEG_LIBRARIES)); do \
+		old=$$$$(otool -L $$@/Versions/A/lib$(1) | awk "/@rpath\/lib$$$$dependency\./ {print \$$$$1}"); \
+		[ -z "$$$$old" ] || install_name_tool -change $$$$old @rpath/lib$$$$dependency.framework/Versions/A/lib$$$$dependency $$@/Versions/A/lib$(1) || exit 1; \
+	done
+	ln -s A $$@/Versions/Current
+	ln -s Versions/Current/lib$(1) $$@/lib$(1)
+	ln -s Versions/Current/Headers $$@/Headers
+	ln -s Versions/Current/Modules $$@/Modules
+	ln -s Versions/Current/Resources $$@/Resources
+	codesign --force --sign - $$@
+
+TranscriberKit/Vendor/lib$(1).xcframework: $(FFMPEG_FRAMEWORKS)/lib$(1).framework
+	rm -rf $$@
+	xcodebuild -create-xcframework -framework $$(abspath $$<) -output $$@
+endef
+
+$(foreach library,$(FFMPEG_LIBRARIES),$(eval $(call ffmpeg_framework,$(library))))
 
 # Whisper models ---------------------------------------------------------------
 #
@@ -173,6 +258,7 @@ parity-fixtures: | $(CHICKENRICE_SOURCE) $(VAD_ONNX)
 		$(TEST_FIXTURES)/SubtitlePostProcessingTests/Fixtures/postprocessing-cases.json
 	uv run --script Tools/parity/make_subtitle_fixture.py $(CHICKENRICE_PACKAGE)/infer.py \
 		$(TEST_FIXTURES)/SubtitleExportTests/Fixtures
+	uv run --script Tools/parity/make_decode_fixture.py $(TEST_FIXTURES)/MediaDecodingTests/Fixtures
 
 # TranscriberKit ---------------------------------------------------------------
 
