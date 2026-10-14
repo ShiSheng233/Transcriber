@@ -11,6 +11,11 @@ CMAKE             ?= $(shell command -v cmake 2>/dev/null || echo uvx cmake)
 export UV_CACHE_DIR          := $(abspath $(TOOLS_DIR))/uv-cache
 export UV_PYTHON_INSTALL_DIR := $(abspath $(TOOLS_DIR))/uv-python
 
+# Large downloads resume after dropped connections (-C - with retries on every
+# error); verify_sha256 then checks the assembled file before it is used.
+DOWNLOAD := curl -fL --retry 20 --retry-all-errors --retry-delay 5 -C -
+verify_sha256 = echo "$(1)  $(2)" | shasum -a 256 -c -
+
 # whisper.cpp ------------------------------------------------------------------
 #
 # Built ourselves instead of using the official xcframework, because the
@@ -183,11 +188,18 @@ $(WHISPER_QUANTIZE): | $(WHISPER_SOURCE)
 	$(CMAKE) -S $(WHISPER_SOURCE) -B $(WHISPER_TOOLS_BUILD) -DCMAKE_BUILD_TYPE=Release -DGGML_METAL=OFF -DWHISPER_BUILD_TESTS=OFF
 	$(CMAKE) --build $(WHISPER_TOOLS_BUILD) --config Release --target whisper-quantize -j $(NCPU)
 
-# $(1): model name, $(2): Hugging Face repo, $(3): pinned revision
+# $(1): model name, $(2): Hugging Face repo, $(3): pinned revision,
+# $(4): SHA-256 of model.safetensors at that revision
 define whisper_model
 $(DOWNLOADS_DIR)/$(1)/%:
 	mkdir -p $$(@D)
-	curl -fL --retry 3 -C - -o $$@.partial $(HUGGING_FACE)/$(2)/resolve/$(3)/$$*
+	$(DOWNLOAD) -o $$@.partial $(HUGGING_FACE)/$(2)/resolve/$(3)/$$*
+	mv $$@.partial $$@
+
+$(DOWNLOADS_DIR)/$(1)/model.safetensors:
+	mkdir -p $$(@D)
+	$(DOWNLOAD) -o $$@.partial $(HUGGING_FACE)/$(2)/resolve/$(3)/model.safetensors
+	$$(call verify_sha256,$(4),$$@.partial)
 	mv $$@.partial $$@
 
 $(MODELS_DIR)/whisper/$(1).bin: $(GGML_CONVERTER) $(MEL_FILTERS) \
@@ -198,8 +210,8 @@ $(MODELS_DIR)/whisper/$(1)-q8_0.bin: $(MODELS_DIR)/whisper/$(1).bin $(WHISPER_QU
 	$(WHISPER_QUANTIZE) $$< $$@ q8_0
 endef
 
-$(eval $(call whisper_model,chickenrice-v0.2,chickenrice0721/whisper-large-v2-translate-zh-v0.2-st,cc6f01704d188c6ed2d1ab84b83734f964c9a45a))
-$(eval $(call whisper_model,whisper-ja-1.5b,efwkjn/whisper-ja-1.5B,72c13fb7b6cc2a831780cdd79cd1a829e77bab02))
+$(eval $(call whisper_model,chickenrice-v0.2,chickenrice0721/whisper-large-v2-translate-zh-v0.2-st,cc6f01704d188c6ed2d1ab84b83734f964c9a45a,0abdde18518f3902913e4e2124145fb7d4635ebba88fd5c035b71819ec328ad0))
+$(eval $(call whisper_model,whisper-ja-1.5b,efwkjn/whisper-ja-1.5B,72c13fb7b6cc2a831780cdd79cd1a829e77bab02,0bf92cf794ebb2cef2699c24dc71184be6a1ac133cc3c64f228ea08173d0155f))
 
 WHISPER_MODEL_FILES := $(foreach model,$(WHISPER_MODELS),$(MODELS_DIR)/whisper/$(model).bin)
 
@@ -215,13 +227,15 @@ whisper-models-q8_0: $(foreach model,$(WHISPER_MODELS),$(MODELS_DIR)/whisper/$(m
 
 VAD_REPO        := TransWithAI/Whisper-Vad-EncDec-ASMR-onnx
 VAD_REVISION    := 6ac29e2cbf2f4f8e9b639861766a8639dd666e9c
+VAD_SHA256      := cd47513515766d57f740e3094440dbbca9ab87e026b9cf21540d7ad588c0e047
 VAD_ONNX        := $(DOWNLOADS_DIR)/whisper-vad-asmr/model.onnx
 VAD_CONVERTER   := Tools/model-conversion/convert_vad_to_coreml.py
 VAD_MLPACKAGE   := $(MODELS_DIR)/vad/whisper-vad-asmr.mlpackage
 
 $(VAD_ONNX):
 	mkdir -p $(@D)
-	curl -fL --retry 3 -C - -o $@.partial $(HUGGING_FACE)/$(VAD_REPO)/resolve/$(VAD_REVISION)/model.onnx
+	$(DOWNLOAD) -o $@.partial $(HUGGING_FACE)/$(VAD_REPO)/resolve/$(VAD_REVISION)/model.onnx
+	$(call verify_sha256,$(VAD_SHA256),$@.partial)
 	mv $@.partial $@
 
 $(VAD_MLPACKAGE): $(VAD_CONVERTER) $(VAD_ONNX)
