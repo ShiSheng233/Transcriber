@@ -64,3 +64,27 @@ struct SegmenterFixture: Decodable {
         return try decoder.decode(SegmenterFixture.self, from: Data(contentsOf: url))
     }
 }
+
+struct ProbabilityDipTests {
+    @Test func cutsOverlongSpeechAtTheLeastLikelyFrameAndContinues() {
+        // 20 ms frames; 1 s limit = 50 frames. Speech throughout, with a
+        // dip at frame 40 (inside the last 70% of the limit).
+        var probabilities = [Float](repeating: 0.9, count: 80)
+        probabilities[40] = 0.4
+        var settings = ChickenRiceDefaults.vad
+        settings.maximumSpeechDuration = AudioTime(milliseconds: 1_000)
+        settings.speechPadding = .zero
+        settings.minimumSpeechDuration = .zero
+
+        settings.splitsAtProbabilityDip = true
+        let split = SpeechSegmenter.speechSpans(in: probabilities, settings: settings)
+        #expect(split.map(\.start.milliseconds) == [0, 800])
+        #expect(split.map(\.end.milliseconds) == [800, 1_600])
+
+        // The original cuts at the limit and drops the rest of that speech
+        // until a frame starts speech again.
+        settings.splitsAtProbabilityDip = false
+        let hardCut = SpeechSegmenter.speechSpans(in: probabilities, settings: settings)
+        #expect(hardCut.first?.end.milliseconds == 1_000)
+    }
+}

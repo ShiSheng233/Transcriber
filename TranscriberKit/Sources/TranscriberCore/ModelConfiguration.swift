@@ -32,6 +32,7 @@ struct ModelConfiguration: Decodable {
         var maxSpeechDurationS: Double?
         var minSilenceDurationMs: Int?
         var speechPadMs: Int?
+        var splitAtDip: Bool?
     }
 
     struct Chunking: Decodable {
@@ -120,7 +121,8 @@ struct ModelConfiguration: Decodable {
                 minimumSpeechDuration: vad?.minSpeechDurationMs.map { AudioTime(milliseconds: $0) } ?? vadDefaults.minimumSpeechDuration,
                 maximumSpeechDuration: vad?.maxSpeechDurationS.map { AudioTime(seconds: $0) } ?? vadDefaults.maximumSpeechDuration,
                 minimumSilenceDuration: vad?.minSilenceDurationMs.map { AudioTime(milliseconds: $0) } ?? vadDefaults.minimumSilenceDuration,
-                speechPadding: vad?.speechPadMs.map { AudioTime(milliseconds: $0) } ?? vadDefaults.speechPadding
+                speechPadding: vad?.speechPadMs.map { AudioTime(milliseconds: $0) } ?? vadDefaults.speechPadding,
+                splitsAtProbabilityDip: vad?.splitAtDip ?? vadDefaults.splitsAtProbabilityDip
             ),
             chunking: ChunkingSettings(
                 isEnabled: chunking?.enabled ?? chunkingDefaults.isEnabled,

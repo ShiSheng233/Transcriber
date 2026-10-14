@@ -19,7 +19,8 @@
   "vad": {
     "threshold": 0.30,
     "max_speech_duration_s": 4.0,
-    "speech_pad_ms": 50
+    "speech_pad_ms": 50,
+    "split_at_dip": true
   },
   "segmentation": {
     "mode": "vad_groups",

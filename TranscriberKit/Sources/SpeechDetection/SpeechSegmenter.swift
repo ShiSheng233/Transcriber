@@ -37,8 +37,14 @@ public enum SpeechSegmenter {
             }
 
             if frame - start > maximumSpeechFrames {
-                spans.append(FrameSpan(start: start, end: start + maximumSpeechFrames))
-                speechStart = nil
+                if settings.splitsAtProbabilityDip {
+                    let cut = dip(in: probabilities, from: start + maximumSpeechFrames * 3 / 10, to: start + maximumSpeechFrames)
+                    spans.append(FrameSpan(start: start, end: cut))
+                    speechStart = cut  // still speaking: the rest is the next span
+                } else {
+                    spans.append(FrameSpan(start: start, end: start + maximumSpeechFrames))
+                    speechStart = nil
+                }
                 silenceStart = nil
                 continue
             }
@@ -66,6 +72,15 @@ public enum SpeechSegmenter {
         return spans.map { span in
             SpeechSpan(start: time(atFrame: span.start), end: time(atFrame: span.end))
         }
+    }
+
+    /// The least likely frame in `start..<end` (the first one on ties).
+    private static func dip(in probabilities: [Float], from start: Int, to end: Int) -> Int {
+        var best = start
+        for frame in start..<end where probabilities[frame] < probabilities[best] {
+            best = frame
+        }
+        return max(best, start + 1)
     }
 
     /// Pads in order, so each span's start is clamped to its predecessor's
