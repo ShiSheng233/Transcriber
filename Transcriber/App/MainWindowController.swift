@@ -1,4 +1,5 @@
 import AppKit
+import JobQueue
 import TranscriberCore
 import UniformTypeIdentifiers
 
@@ -71,6 +72,9 @@ final class MainWindowController: NSWindowController {
         if queueViewModel.isMissingModels {
             showMissingModelsAlert()
         }
+        if let intake = queueViewModel.pendingSubtitleChoice {
+            askAboutExistingSubtitles(count: intake.mediaWithSubtitles.count, example: intake.mediaWithSubtitles.first?.subtitleURL)
+        }
     }
 
     private func renderModelMenu() {
@@ -100,6 +104,30 @@ final class MainWindowController: NSWindowController {
         }
     }
 
+    /// Media files that already have subtitles beside them: translate those,
+    /// or transcribe the media again.
+    private func askAboutExistingSubtitles(count: Int, example: URL?) {
+        guard let window, window.attachedSheet == nil else {
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = count == 1
+            ? String(localized: "This File Already Has Subtitles")
+            : String(localized: "\(count) Files Already Have Subtitles")
+        alert.informativeText = String(localized: "Translate the existing subtitles (such as \(example?.lastPathComponent ?? "")) with the language model, or transcribe the audio again?")
+        alert.addButton(withTitle: String(localized: "Translate Subtitles"))
+        alert.addButton(withTitle: String(localized: "Transcribe"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        alert.beginSheetModal(for: window) { [weak self] response in
+            let choice: JobQueueViewModel.SubtitleChoice = switch response {
+            case .alertFirstButtonReturn: .translateSubtitles
+            case .alertSecondButtonReturn: .transcribe
+            default: .cancel
+            }
+            self?.queueViewModel.resolveSubtitleChoice(choice)
+        }
+    }
+
     private func showMissingModelsAlert() {
         guard let window, window.attachedSheet == nil else {
             return
@@ -123,8 +151,9 @@ final class MainWindowController: NSWindowController {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = true
-        panel.allowedContentTypes = [.audiovisualContent, .folder]
-        panel.message = String(localized: "Choose audio or video files, or folders that contain them.")
+        let subtitleTypes = ["srt", "vtt"].compactMap { UTType(filenameExtension: $0) }
+        panel.allowedContentTypes = [.audiovisualContent, .folder] + subtitleTypes
+        panel.message = String(localized: "Choose audio or video files to transcribe, subtitle files (SRT, VTT) to translate, or folders.")
         guard let window else {
             return
         }

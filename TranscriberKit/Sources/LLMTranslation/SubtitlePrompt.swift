@@ -5,6 +5,7 @@ enum SubtitlePrompt {
     enum Job {
         case polishChinese
         case translate(targetLanguage: String)
+        case translateSubtitles(targetLanguage: String)
     }
 
     static let schemaName = "subtitle_lines"
@@ -44,6 +45,13 @@ enum SubtitlePrompt {
                 into \(targetLanguage). Write natural spoken subtitles, keep names and terms consistent, \
                 and keep the speaker's tone. Transcription can contain mistakes; translate what was most \
                 likely said.
+                """
+        case .translateSubtitles(let targetLanguage):
+            instructions = """
+                You translate existing subtitles into \(targetLanguage). Detect the source language \
+                yourself. Write natural spoken subtitles, keep names and terms consistent, and keep \
+                the speaker's tone. Lines already in \(targetLanguage) are kept, only corrected if \
+                clearly wrong.
                 """
         }
         instructions += """

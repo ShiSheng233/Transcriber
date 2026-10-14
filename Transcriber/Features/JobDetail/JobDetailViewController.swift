@@ -146,10 +146,10 @@ final class JobDetailViewController: NSViewController {
             displayedPlayerURL = viewModel.playerURL
             player.replaceCurrentItem(with: viewModel.playerURL.map { AVPlayerItem(url: $0) })
         }
-        if playerView.isHidden == viewModel.showsPlayer {
-            playerView.isHidden = !viewModel.showsPlayer
+        if playerView.isHidden == viewModel.showsPlayerArea {
+            playerView.isHidden = !viewModel.showsPlayerArea
             // A player that was hidden has no height yet: size it when shown.
-            if viewModel.showsPlayer {
+            if viewModel.showsPlayerArea {
                 needsPlayerResize = true
                 view.needsLayout = true
             }

@@ -1,5 +1,6 @@
 import Foundation
 import LLMTranslation
+import SubtitleExport
 import TranscriberCore
 import TranscriptionPipeline
 
@@ -99,6 +100,18 @@ public actor JobQueue {
         runningTask != nil
     }
 
+    /// Queues subtitle files for translation by the language model; `mediaURL`
+    /// is what the preview plays, if a media file sits next to the subtitles.
+    public func addSubtitleTranslations(_ files: [(subtitleURL: URL, mediaURL: URL?)]) {
+        let known = Set(jobs.filter { !$0.status.isFinished }.map(\.sourceURL))
+        let newJobs = files.filter { !known.contains($0.subtitleURL) }.map { Job(subtitlesAt: $0.subtitleURL, mediaURL: $0.mediaURL) }
+        jobs += newJobs
+        publish()
+        for job in newJobs {
+            log(.detail, job.id, "\(job.sourceURL.lastPathComponent): queued for translation")
+        }
+    }
+
     public func remove(_ jobID: UUID) {
         if jobID == runningJobID {
             currentJobTask?.cancel()
@@ -172,35 +185,22 @@ public actor JobQueue {
         let jobStart = ContinuousClock.now
         log(.info, job.id, "\(fileName): started")
         do {
-            update(job.id) { $0.status = .loadingModel }
-            let pipeline = try await loadPipeline(for: job, settings: configuration.engine)
-            update(job.id) { $0.status = .decodingAudio }
-            log(.info, job.id, "Reading audio…")
-
-            let jobID = job.id
-            transcriptionStart = ContinuousClock.now
-            audioDuration = nil
-            var segments = try await withOrderedProgress { queue, progress in
-                queue.record(progress, for: jobID)
-            } work: { report in
-                try await pipeline.transcribe(fileAt: job.sourceURL, progress: report)
-            }
-            try Task.checkCancellation()
-            logTranscriptionSpeed(for: job.id, segmentCount: segments.count)
-
-            if let llm = configuration.llm, llm.isUsable, !segments.isEmpty {
-                do {
-                    segments = try await refine(segments, of: job, with: llm)
-                } catch is CancellationError {
-                    throw CancellationError()
-                } catch {
-                    // The machine subtitles are still worth keeping.
-                    update(job.id) { $0.warning = "LLM step skipped: \(error.localizedDescription)" }
+            let segments: [TimedText]
+            var nameSuffix = ""
+            switch job.kind {
+            case .transcription(let model):
+                segments = try await transcribe(job, with: model, configuration: configuration)
+            case .subtitleTranslation:
+                guard let llm = configuration.llm, llm.isUsable else {
+                    throw JobQueueError.languageModelRequired
                 }
+                segments = try await translateSubtitles(of: job, with: llm)
+                // Never overwrite the file being translated: "movie.简体中文.srt".
+                nameSuffix = "." + SubtitleFileWriter.safeNamePart(llm.settings.targetLanguage)
             }
 
             update(job.id) { $0.status = .exporting }
-            let outputURLs = try SubtitleFileWriter.write(segments, for: job.sourceURL, settings: configuration.output)
+            let outputURLs = try SubtitleFileWriter.write(segments, for: job.sourceURL, settings: configuration.output, nameSuffix: nameSuffix)
             update(job.id) {
                 $0.segments = segments
                 $0.outputURLs = outputURLs
@@ -226,23 +226,66 @@ public actor JobQueue {
         }
     }
 
-    private func loadPipeline(for job: Job, settings: EngineSettings) async throws -> TranscriptionPipeline {
-        let model = job.model
+    /// Speech recognition, then (optionally) the language model.
+    private func transcribe(_ job: Job, with model: RecognitionModel, configuration: Configuration) async throws -> [TimedText] {
+        update(job.id) { $0.status = .loadingModel }
+        let pipeline = try await loadPipeline(model, for: job.id, settings: configuration.engine)
+        update(job.id) { $0.status = .decodingAudio }
+        log(.info, job.id, "Reading audio…")
+
+        let jobID = job.id
+        transcriptionStart = ContinuousClock.now
+        audioDuration = nil
+        var segments = try await withOrderedProgress { queue, progress in
+            queue.record(progress, for: jobID)
+        } work: { report in
+            try await pipeline.transcribe(fileAt: job.sourceURL, progress: report)
+        }
+        try Task.checkCancellation()
+        logTranscriptionSpeed(for: job.id, segmentCount: segments.count)
+
+        if let llm = configuration.llm, llm.isUsable, !segments.isEmpty {
+            let refinerJob: SubtitleRefiner.Job = model.llmMode == .polish
+                ? .polishChinese
+                : .translate(targetLanguage: llm.settings.targetLanguage)
+            do {
+                segments = try await refine(segments, jobID: job.id, as: refinerJob, with: llm)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // The machine subtitles are still worth keeping.
+                update(job.id) { $0.warning = "LLM step skipped: \(error.localizedDescription)" }
+            }
+        }
+        return segments
+    }
+
+    /// An existing subtitle file through the language model; here the
+    /// translation is the whole job, so its errors fail the job.
+    private func translateSubtitles(of job: Job, with llm: LLMConfiguration) async throws -> [TimedText] {
+        update(job.id) { $0.status = .readingSubtitles }
+        let original = try SubtitleParser.parse(fileAt: job.sourceURL)
+        log(.info, job.id, "Read \(original.count) subtitles")
+        update(job.id) { $0.segments = original }  // shown while translating
+        return try await refine(original, jobID: job.id, as: .translateSubtitles(targetLanguage: llm.settings.targetLanguage), with: llm)
+    }
+
+    private func loadPipeline(_ model: RecognitionModel, for jobID: UUID, settings: EngineSettings) async throws -> TranscriptionPipeline {
         let engineName = settings.backend.displayName
         if await engine.isLoaded(model, settings: settings) {
-            log(.detail, job.id, "\(model.displayName) is already loaded (\(engineName))")
+            log(.detail, jobID, "\(model.displayName) is already loaded (\(engineName))")
             return try await engine.pipeline(for: model, settings: settings)
         }
         let weights = settings.backend.weights(of: model)
         let size = weights.flatMap(ActivityFormatting.fileSize(of:)).map { ", \($0)" } ?? ""
-        log(.info, job.id, "Loading \(model.displayName) with \(engineName)…")
-        log(.detail, job.id, "Weights: \(weights?.path ?? "none")\(size)")
-        log(.detail, job.id, "Decoding: task \(model.decoding.task.rawValue), language \(model.decoding.languageCode), "
+        log(.info, jobID, "Loading \(model.displayName) with \(engineName)…")
+        log(.detail, jobID, "Weights: \(weights?.path ?? "none")\(size)")
+        log(.detail, jobID, "Decoding: task \(model.decoding.task.rawValue), language \(model.decoding.languageCode), "
             + "temperatures \(model.decoding.temperatures.map { String(format: "%.1f", $0) }.joined(separator: "/")), "
             + "\(settings.concurrentChunkCount) chunk(s) at once")
         let start = ContinuousClock.now
         let pipeline = try await engine.pipeline(for: model, settings: settings)
-        log(.info, job.id, "\(model.displayName) loaded in \(ActivityFormatting.seconds(ContinuousClock.now - start))")
+        log(.info, jobID, "\(model.displayName) loaded in \(ActivityFormatting.seconds(ContinuousClock.now - start))")
         return pipeline
     }
 
@@ -256,18 +299,15 @@ public actor JobQueue {
         log(.info, jobID, "Transcribed \(ActivityFormatting.clock(audioDuration.seconds)) of audio in \(ActivityFormatting.seconds(elapsed))\(speed)")
     }
 
-    /// The model's configuration says whether its output is polished or translated.
-    private func refine(_ segments: [TimedText], of job: Job, with llm: LLMConfiguration) async throws -> [TimedText] {
+    /// Runs the language model over `segments`; translations keep the
+    /// original line underneath when the settings ask for bilingual subtitles.
+    private func refine(_ segments: [TimedText], jobID: UUID, as refinerJob: SubtitleRefiner.Job, with llm: LLMConfiguration) async throws -> [TimedText] {
         let refiner = SubtitleRefiner(
             client: makeChatClient(llm.settings.baseURL, llm.apiKey),
             configuration: SubtitleRefiner.Configuration(model: llm.settings.model)
         )
-        let refinerJob: SubtitleRefiner.Job = job.model.llmMode == .polish
-            ? .polishChinese
-            : .translate(targetLanguage: llm.settings.targetLanguage)
-        let jobID = job.id
         update(jobID) { $0.status = .refining(completedBatches: 0, totalBatches: 1) }
-        let action = job.model.llmMode == .polish ? "Polishing" : "Translating"
+        let action = if case .polishChinese = refinerJob { "Polishing" } else { "Translating" }
         log(.info, jobID, "\(action) \(segments.count) subtitles with \(llm.settings.model)…")
         let start = ContinuousClock.now
         let refined = try await withOrderedProgress { (queue, batches: (completed: Int, total: Int)) in
@@ -277,10 +317,12 @@ public actor JobQueue {
             try await refiner.refine(segments, job: refinerJob, glossary: llm.settings.glossaryEntries) { report(($0, $1)) }
         }
         log(.info, jobID, "LLM step finished in \(ActivityFormatting.seconds(ContinuousClock.now - start))")
-        if case .translate = refinerJob, llm.settings.keepsOriginalLine {
-            return refined.withOriginalLines(from: segments)
+        switch refinerJob {
+        case .translate, .translateSubtitles:
+            return llm.settings.keepsOriginalLine ? refined.withOriginalLines(from: segments) : refined
+        case .polishChinese:
+            return refined
         }
-        return refined
     }
 
     private func record(_ progress: TranscriptionPipeline.Progress, for jobID: UUID) {
@@ -363,5 +405,15 @@ public actor JobQueue {
 
     private func removeObserver(_ observerID: UUID) {
         observers[observerID] = nil
+    }
+}
+
+public enum JobQueueError: LocalizedError, Equatable {
+    case languageModelRequired
+
+    public var errorDescription: String? {
+        switch self {
+        case .languageModelRequired: "Translating subtitles needs the language model: turn it on and choose a model in Settings › LLM."
+        }
     }
 }

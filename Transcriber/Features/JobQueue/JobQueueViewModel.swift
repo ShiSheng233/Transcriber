@@ -28,14 +28,14 @@ final class JobQueueViewModel {
         let outputURLs: [URL]
     }
 
-    static let supportedExtensions: Set<String> = [
-        "mp3", "wav", "flac", "m4a", "aac", "ogg", "opus", "wma", "mp4", "mkv", "avi", "mov", "webm", "flv", "wmv", "ts",
-    ]
 
     private(set) var rows: [Row] = []
     private(set) var jobs: [Job] = []
     private(set) var selectedJobID: UUID?
     private(set) var isMissingModels = false
+    /// Media files with subtitles next to them, waiting for the user to
+    /// choose between translating those subtitles and transcribing again.
+    private(set) var pendingSubtitleChoice: FileIntake?
 
     private let queue: JobQueue
     private let settingsStore: SettingsStore
@@ -67,9 +67,8 @@ final class JobQueueViewModel {
     /// "ChickenRice v0.2 · 412 subtitles", or how many files are queued.
     var windowSubtitle: String {
         if let job = selectedJob {
-            return job.segments.isEmpty
-                ? job.model.displayName
-                : String(localized: "\(job.model.displayName) · \(job.segments.count) subtitles")
+            let task = Self.taskName(for: job)
+            return job.segments.isEmpty ? task : String(localized: "\(task) · \(job.segments.count) subtitles")
         }
         return jobs.isEmpty ? "" : String(localized: "\(jobs.count) files")
     }
@@ -103,12 +102,52 @@ final class JobQueueViewModel {
         settingsStore.update { $0.modelID = id }
     }
 
-    /// Adds media files, and the media files inside folders, with the chosen
-    /// model. With no model installed, nothing is added and `isMissingModels`
-    /// asks the window to point the user to Settings.
+    enum SubtitleChoice {
+        case translateSubtitles
+        case transcribe
+        case cancel
+    }
+
+    /// Adds media files to transcribe with the chosen model and subtitle
+    /// files to translate, also from inside folders. Media files that already
+    /// have subtitles wait in `pendingSubtitleChoice` for the user. With no
+    /// speech model installed, `isMissingModels` asks the window to point to
+    /// Settings.
     func addFiles(_ urls: [URL]) {
-        let mediaFiles = urls.flatMap(Self.mediaFiles(in:))
-        guard !mediaFiles.isEmpty else {
+        let intake = FileIntake(urls)
+        if intake.mediaWithSubtitles.isEmpty {
+            enqueue(intake)
+        } else {
+            pendingSubtitleChoice = intake
+        }
+    }
+
+    func resolveSubtitleChoice(_ choice: SubtitleChoice) {
+        guard var intake = pendingSubtitleChoice else {
+            return
+        }
+        pendingSubtitleChoice = nil
+        switch choice {
+        case .translateSubtitles:
+            intake.subtitlesToTranslate += intake.mediaWithSubtitles.map {
+                FileIntake.SubtitleFile(subtitleURL: $0.subtitleURL, mediaURL: $0.mediaURL)
+            }
+        case .transcribe:
+            intake.mediaToTranscribe += intake.mediaWithSubtitles.map(\.mediaURL)
+        case .cancel:
+            return
+        }
+        intake.mediaWithSubtitles = []
+        enqueue(intake)
+    }
+
+    private func enqueue(_ intake: FileIntake) {
+        let subtitles = intake.subtitlesToTranslate.map { (subtitleURL: $0.subtitleURL, mediaURL: $0.mediaURL) }
+        if !subtitles.isEmpty {
+            Task { await queue.addSubtitleTranslations(subtitles) }
+        }
+        let media = intake.mediaToTranscribe
+        guard !media.isEmpty else {
             return
         }
         library.reloadIfFolderChanged()
@@ -116,7 +155,7 @@ final class JobQueueViewModel {
             isMissingModels = true
             return
         }
-        Task { await queue.add(mediaFiles, model: model) }
+        Task { await queue.add(media, model: model) }
     }
 
     func dismissMissingModels() {
@@ -163,9 +202,9 @@ final class JobQueueViewModel {
         Row(
             id: job.id,
             fileName: job.sourceURL.lastPathComponent,
-            modelName: job.model.displayName,
+            modelName: taskName(for: job),
             statusText: statusText(for: job),
-            shortStatus: "\(job.model.displayName) · \(shortStatus(for: job))",
+            shortStatus: "\(taskName(for: job)) · \(shortStatus(for: job))",
             outcome: outcome(of: job),
             fractionCompleted: job.status.fractionCompleted,
             canCancel: !job.status.isFinished,
@@ -174,9 +213,15 @@ final class JobQueueViewModel {
         )
     }
 
+    /// The speech model, or "Translation" for an imported subtitle file.
+    private static func taskName(for job: Job) -> String {
+        job.model?.displayName ?? String(localized: "Translation")
+    }
+
     private static func shortStatus(for job: Job) -> String {
         switch job.status {
         case .queued: String(localized: "Waiting")
+        case .readingSubtitles: String(localized: "Reading subtitles")
         case .loadingModel: String(localized: "Loading model")
         case .decodingAudio: String(localized: "Reading audio")
         case .detectingSpeech: String(localized: "Finding speech")
@@ -204,6 +249,7 @@ final class JobQueueViewModel {
         case .queued: String(localized: "Waiting")
         case .loadingModel: String(localized: "Loading model…")
         case .decodingAudio: String(localized: "Reading audio…")
+        case .readingSubtitles: String(localized: "Reading subtitles…")
         case .detectingSpeech: String(localized: "Detecting speech…")
         case .transcribing(let completed, let total): String(localized: "Transcribing \(completed)/\(total)")
         case .refining(let completed, let total): String(localized: "Improving with LLM \(completed)/\(total)")
@@ -212,20 +258,5 @@ final class JobQueueViewModel {
         case .failed(let message): String(localized: "Failed: \(message)")
         case .cancelled: String(localized: "Cancelled")
         }
-    }
-
-    private static func mediaFiles(in url: URL) -> [URL] {
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
-            return []
-        }
-        guard isDirectory.boolValue else {
-            return supportedExtensions.contains(url.pathExtension.lowercased()) ? [url] : []
-        }
-        let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
-        let files = (enumerator?.allObjects as? [URL]) ?? []
-        return files
-            .filter { supportedExtensions.contains($0.pathExtension.lowercased()) }
-            .sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
 }

@@ -14,16 +14,27 @@ public struct OutputSettings: Hashable, Sendable, Codable {
     }
 }
 
-/// Writes `<source name>.<format>` files, replacing existing ones.
+/// Writes `<source name><suffix>.<format>` files, replacing existing ones.
 enum SubtitleFileWriter {
-    static func write(_ segments: [TimedText], for sourceURL: URL, settings: OutputSettings) throws -> [URL] {
+    static func write(_ segments: [TimedText], for sourceURL: URL, settings: OutputSettings, nameSuffix: String = "") throws -> [URL] {
         let directory = settings.directory ?? sourceURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let stem = sourceURL.deletingPathExtension().lastPathComponent
         return try settings.formats.map { format in
-            let url = directory.appendingPathComponent("\(stem).\(format.fileExtension)")
+            let url = directory.appendingPathComponent("\(stem)\(nameSuffix).\(format.fileExtension)")
+            // A translation of movie.srt must never replace movie.srt itself.
+            guard url.standardizedFileURL != sourceURL.standardizedFileURL else {
+                throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: url.path])
+            }
             try SubtitleRenderer.render(segments, as: format).write(to: url, atomically: true, encoding: .utf8)
             return url
         }
+    }
+
+    /// Text usable in a file name ("简体中文" stays, "/" and ":" go).
+    static func safeNamePart(_ text: String) -> String {
+        let cleaned = text.components(separatedBy: CharacterSet(charactersIn: "/:\\")).joined(separator: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? "translated" : cleaned
     }
 }

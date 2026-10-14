@@ -8,7 +8,7 @@ final class JobQueueViewController: NSViewController {
     private let emptyState = EmptyStateView(
         symbolName: "waveform.badge.plus",
         title: String(localized: "No Files"),
-        message: String(localized: "Drop audio or video files or folders here, or click + to add them.")
+        message: String(localized: "Drop audio or video files to transcribe, or SRT/VTT subtitles to translate. Folders work too.")
     )
     private var binder: ObservationBinder?
     private var displayedRows: [JobQueueViewModel.Row] = []

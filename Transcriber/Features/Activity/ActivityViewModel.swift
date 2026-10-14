@@ -151,7 +151,8 @@ final class ActivityViewModel {
         default: nil
         }
         let uncountedStep: String = switch running.status {
-        case .loadingModel: String(localized: "Loading \(running.model.displayName)")
+        case .loadingModel: String(localized: "Loading \(running.model?.displayName ?? "")")
+        case .readingSubtitles: String(localized: "Reading subtitles")
         case .decodingAudio: String(localized: "Reading audio")
         case .detectingSpeech: String(localized: "Finding speech")
         case .exporting: String(localized: "Writing subtitles")

@@ -1,10 +1,21 @@
 import Foundation
 
-/// One media file to subtitle, as the queue reports it.
+/// One file to subtitle, as the queue reports it.
 public struct Job: Identifiable, Hashable, Sendable {
+    public enum Kind: Hashable, Sendable {
+        /// Transcribe a media file with a speech model.
+        case transcription(RecognitionModel)
+        /// Translate an existing subtitle file with the language model.
+        case subtitleTranslation
+    }
+
     public let id: UUID
+    /// The media file, or the subtitle file to translate.
     public let sourceURL: URL
-    public var model: RecognitionModel
+    public let kind: Kind
+    /// What the preview plays: the media file itself, or one found next to
+    /// the subtitle file.
+    public let mediaURL: URL?
     public var status: JobStatus
     /// While transcribing, each finished chunk's subtitles (a preview); the
     /// final subtitles once the job completed; empty if it failed.
@@ -15,9 +26,18 @@ public struct Job: Identifiable, Hashable, Sendable {
     public var warning: String?
 
     public init(id: UUID = UUID(), sourceURL: URL, model: RecognitionModel) {
+        self.init(id: id, sourceURL: sourceURL, kind: .transcription(model), mediaURL: sourceURL)
+    }
+
+    public init(id: UUID = UUID(), subtitlesAt subtitleURL: URL, mediaURL: URL?) {
+        self.init(id: id, sourceURL: subtitleURL, kind: .subtitleTranslation, mediaURL: mediaURL)
+    }
+
+    private init(id: UUID, sourceURL: URL, kind: Kind, mediaURL: URL?) {
         self.id = id
         self.sourceURL = sourceURL
-        self.model = model
+        self.kind = kind
+        self.mediaURL = mediaURL
         self.status = .queued
         self.segments = []
         self.outputURLs = []
@@ -25,8 +45,16 @@ public struct Job: Identifiable, Hashable, Sendable {
     }
 }
 
+extension Job {
+    /// The speech model of a transcription job.
+    public var model: RecognitionModel? {
+        if case .transcription(let model) = kind { model } else { nil }
+    }
+}
+
 public enum JobStatus: Hashable, Sendable {
     case queued
+    case readingSubtitles
     case loadingModel
     case decodingAudio
     case detectingSpeech
@@ -47,7 +75,7 @@ public enum JobStatus: Hashable, Sendable {
     /// 0...1 where it can be estimated.
     public var fractionCompleted: Double? {
         switch self {
-        case .queued, .loadingModel: 0
+        case .queued, .loadingModel, .readingSubtitles: 0
         case .decodingAudio: 0.02
         case .detectingSpeech: 0.04
         case .transcribing(let completed, let total): 0.05 + 0.8 * Double(completed) / Double(max(total, 1))

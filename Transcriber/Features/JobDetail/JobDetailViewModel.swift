@@ -28,15 +28,19 @@ final class JobDetailViewModel {
         showsPlayer = userDefaults.object(forKey: Self.showsPlayerKey) == nil || userDefaults.bool(forKey: Self.showsPlayerKey)
     }
 
-    var hasSelection: Bool {
-        mediaURL != nil
-    }
+    private(set) var hasSelection = false
+    private var shownJobID: UUID?
 
     private static let audioExtensions: Set<String> = ["mp3", "wav", "flac", "m4a", "aac", "ogg", "opus", "wma"]
 
     /// Audio files get only the playback controls, no picture area.
     var isAudioOnly: Bool {
         mediaURL.map { Self.audioExtensions.contains($0.pathExtension.lowercased()) } ?? false
+    }
+
+    /// Hidden by the user, or nothing to play (a subtitle file on its own).
+    var showsPlayerArea: Bool {
+        showsPlayer && mediaURL != nil
     }
 
     /// What the player should load: nothing while it is hidden.
@@ -51,15 +55,18 @@ final class JobDetailViewModel {
 
     /// Shows `job`, or nothing. Keeps the media when only its status changed.
     func show(_ job: Job?) {
+        hasSelection = job != nil
         guard let job else {
+            shownJobID = nil
             mediaURL = nil
             lines = []
             currentLineIndex = nil
             subtitlesPlaceholder = nil
             return
         }
-        if mediaURL != job.sourceURL {
-            mediaURL = job.sourceURL
+        if shownJobID != job.id {
+            shownJobID = job.id
+            mediaURL = job.mediaURL
             currentLineIndex = nil
         }
         let newLines = job.segments.map(Self.line(for:))
@@ -69,7 +76,7 @@ final class JobDetailViewModel {
         subtitlesPlaceholder = switch job.status {
         case .completed: lines.isEmpty ? String(localized: "No speech was found in this file.") : nil
         case .failed, .cancelled: String(localized: "No subtitles.")
-        default: lines.isEmpty ? String(localized: "Subtitles appear here as they are transcribed.") : nil
+        default: lines.isEmpty ? String(localized: "Subtitles appear here as they are made.") : nil
         }
     }
 

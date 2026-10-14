@@ -262,3 +262,85 @@ struct JobQueueMemoryTests {
         #expect(peak > idle + 2_000_000_000, "peak \(peak / 1_000_000) MB, idle \(idle / 1_000_000) MB")
     }
 }
+
+struct SubtitleTranslationJobTests {
+    private func run(llm: JobQueue.LLMConfiguration?) async throws -> (Job, original: String, folder: URL) {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let original = "1\n00:00:01,000 --> 00:00:02,000\nこんにちは\n\n2\n00:00:03,000 --> 00:00:04,000\nさようなら\n"
+        let subtitleURL = folder.appendingPathComponent("movie.srt")
+        try original.write(to: subtitleURL, atomically: true, encoding: .utf8)
+
+        let queue = JobQueue(makeChatClient: { _, _ in StubChat(fails: false) })
+        await queue.addSubtitleTranslations([(subtitleURL, nil)])
+        await queue.start(configuration: JobQueue.Configuration(
+            engine: EngineSettings(modelsDirectory: URL(fileURLWithPath: "/nonexistent"), backend: .whisperCpp, concurrentChunkCount: 1),
+            output: OutputSettings(formats: [.srt], directory: nil),
+            llm: llm
+        ))
+        for await jobs in await queue.snapshots() {
+            if let job = jobs.first, job.status.isFinished {
+                return (job, original, folder)
+            }
+        }
+        throw CancellationError()
+    }
+
+    @Test func translatesAnSRTIntoANewFileNextToIt() async throws {
+        var settings = LLMSettings.defaults
+        settings.isEnabled = true
+        settings.model = "test/model"
+        let (job, original, folder) = try await run(llm: .init(settings: settings, apiKey: "sk-test"))
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        #expect(job.status == .completed)
+        #expect(job.outputURLs.map(\.lastPathComponent) == ["movie.简体中文.srt"])
+        #expect(job.segments.map(\.text) == ["EN: こんにちは", "EN: さようなら"])
+        #expect(job.segments.map(\.start.milliseconds) == [1_000, 3_000])  // timing kept
+        #expect(try String(contentsOf: folder.appendingPathComponent("movie.srt"), encoding: .utf8) == original)
+    }
+
+    @Test func failsClearlyWithoutTheLanguageModel() async throws {
+        let (job, _, folder) = try await run(llm: nil)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        #expect(job.status == .failed(message: JobQueueError.languageModelRequired.errorDescription!))
+    }
+}
+
+struct FileIntakeTests {
+    private func folder(_ names: [String]) throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for name in names {
+            try Data().write(to: folder.appendingPathComponent(name))
+        }
+        return folder
+    }
+
+    @Test func sortsMediaSubtitlesAndPairs() throws {
+        let root = try folder(["a.mp4", "a.srt", "b.mkv", "c.srt", "c.wav", "d.vtt", "notes.txt"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let names = { (urls: [URL]) in urls.map(\.lastPathComponent) }
+
+        let intake = FileIntake([root])
+
+        #expect(names(intake.mediaToTranscribe) == ["b.mkv"])
+        // a.mp4 and c.wav have subtitles beside them: the user decides.
+        #expect(intake.mediaWithSubtitles.map { "\($0.mediaURL.lastPathComponent)+\($0.subtitleURL.lastPathComponent)" } == ["a.mp4+a.srt", "c.wav+c.srt"])
+        #expect(intake.subtitlesToTranslate.map(\.subtitleURL.lastPathComponent) == ["d.vtt"])
+        #expect(intake.subtitlesToTranslate.first?.mediaURL == nil)
+    }
+
+    @Test func aDroppedSubtitleFileFindsItsMediaAndSkipsEarlierTranslations() throws {
+        let root = try folder(["movie.mkv", "movie.srt", "movie.简体中文.srt"])
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let dropped = FileIntake([root.appendingPathComponent("movie.srt")])
+        #expect(dropped.subtitlesToTranslate == [.init(subtitleURL: root.appendingPathComponent("movie.srt"), mediaURL: root.appendingPathComponent("movie.mkv"))])
+
+        // In a folder, "movie.简体中文.srt" is our own earlier output, not a new file to translate.
+        let whole = FileIntake([root])
+        #expect(whole.subtitlesToTranslate.isEmpty)
+        #expect(whole.mediaWithSubtitles.map(\.subtitleURL.lastPathComponent) == ["movie.srt"])
+    }
+}

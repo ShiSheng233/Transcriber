@@ -11,6 +11,8 @@ public struct SubtitleRefiner: Sendable {
     public enum Job: Sendable {
         case polishChinese
         case translate(targetLanguage: String)
+        /// Existing subtitles in any language, e.g. imported from a file.
+        case translateSubtitles(targetLanguage: String)
     }
 
     public struct Configuration: Sendable {
@@ -45,6 +47,7 @@ public struct SubtitleRefiner: Sendable {
         let promptJob: SubtitlePrompt.Job = switch job {
         case .polishChinese: .polishChinese
         case .translate(let language): .translate(targetLanguage: language)
+        case .translateSubtitles(let language): .translateSubtitles(targetLanguage: language)
         }
         let system = ChatMessage(role: .system, content: SubtitlePrompt.systemMessage(for: promptJob, glossary: glossary))
 
