@@ -64,7 +64,10 @@ whisper-xcframework: $(WHISPER_XCFRAMEWORK)
 $(WHISPER_SOURCE):
 	git clone --quiet --depth 1 --branch $(WHISPER_VERSION) https://github.com/ggml-org/whisper.cpp $@
 
-$(WHISPER_XCFRAMEWORK): Tools/whisper-cpp/module.modulemap | $(WHISPER_SOURCE)
+# The source is fetched inside the recipe, so deleting $(TOOLS_DIR) does not
+# make an existing xcframework look out of date.
+$(WHISPER_XCFRAMEWORK): Tools/whisper-cpp/module.modulemap
+	$(MAKE) $(WHISPER_SOURCE)
 	$(CMAKE) -S $(WHISPER_SOURCE) -B $(WHISPER_BUILD) $(WHISPER_CMAKE_FLAGS)
 	$(CMAKE) --build $(WHISPER_BUILD) --config Release -j $(NCPU)
 	rm -rf $(WHISPER_STAGING)
