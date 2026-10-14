@@ -33,6 +33,9 @@ final class JobDetailViewController: NSViewController {
     override func loadView() {
         playerView.player = player
         playerView.controlsStyle = .inline
+        // No Live Text over video: not needed here, and it runs a background
+        // analysis service whose overlay logs Auto Layout conflicts.
+        playerView.allowsVideoFrameAnalysis = false
 
         let timeColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("Time"))
         timeColumn.title = String(localized: "Time")

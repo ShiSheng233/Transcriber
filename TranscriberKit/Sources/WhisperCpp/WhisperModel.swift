@@ -23,6 +23,7 @@ public final class WhisperModel: @unchecked Sendable {
         guard FileManager.default.fileExists(atPath: modelURL.path) else {
             throw .fileNotFound(modelURL)
         }
+        WhisperRuntime.reduceLoggingToErrors()
 
         var parameters = whisper_context_default_params()
         parameters.use_gpu = usesGPU

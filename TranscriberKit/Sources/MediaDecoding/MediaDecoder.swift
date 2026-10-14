@@ -8,7 +8,15 @@ import libavutil
 /// frames that fail with invalid data are skipped, and the resampler is
 /// flushed at the end.
 public struct MediaDecoder: Sendable {
-    public init() {}
+    public init() {
+        _ = Self.loggingConfigured
+    }
+
+    /// FFmpeg warns about recoverable stream details (e.g. trimming AAC
+    /// priming samples); only errors are worth showing.
+    private static let loggingConfigured: Void = {
+        av_log_set_level(AV_LOG_ERROR)
+    }()
 
     public func decodeAudio(at url: URL) throws -> [Float] {
         let input = try MediaInput(url: url)
