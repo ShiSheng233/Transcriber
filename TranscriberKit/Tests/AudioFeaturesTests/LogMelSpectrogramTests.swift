@@ -19,6 +19,20 @@ struct LogMelSpectrogramTests {
         #expect(largestError < Self.tolerance, "largest error \(largestError)")
     }
 
+    @Test(arguments: [80, 128])
+    func matchesFasterWhisperFeatureExtractor(melBandCount: Int) throws {
+        let samples = try Self.loadFloats("input-samples")
+        let expected = try Self.loadFloats("faster-whisper-mel-\(melBandCount)")
+
+        let features = LogMelSpectrogram(melBandCount: melBandCount, framing: .wholeSignal).features(for: samples)
+
+        #expect(features.melBandCount == melBandCount)
+        #expect(features.frameCount == samples.count / LogMelSpectrogram.hopLength + 1)
+        #expect(features.values.count == expected.count)
+        let largestError = zip(features.values, expected).map { abs($0 - $1) }.max() ?? .infinity
+        #expect(largestError < Self.tolerance, "largest error \(largestError)")
+    }
+
     @Test func trimsInputLongerThanThirtySeconds() {
         let spectrogram = LogMelSpectrogram()
         let window = [Float](repeating: 0.1, count: LogMelSpectrogram.windowSampleCount)

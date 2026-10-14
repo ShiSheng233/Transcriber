@@ -1,25 +1,36 @@
 import Accelerate
 import Foundation
 
-/// Whisper's audio front end, numerically matching Hugging Face
-/// `WhisperFeatureExtractor` (the NumPy path the original pipeline uses for its VAD).
+/// Whisper's audio front end. The original pipeline uses it in two framings:
 ///
-/// Steps: zero-pad or trim to 30 s, reflect-pad by half a window, 400-point STFT
-/// with a periodic Hann window and hop 160, power spectrum, Slaney mel filters,
-/// log10 with a 1e-10 floor, drop the last frame, clamp to (max - 8), then
-/// scale with (x + 4) / 4.
+/// - `.thirtySecondWindow`: Hugging Face `WhisperFeatureExtractor`, which feeds
+///   the VAD. Input is zero-padded or trimmed to 30 s; 3000 frames.
+/// - `.wholeSignal`: faster-whisper's `FeatureExtractor`, which feeds
+///   recognition. 160 zero samples are appended to input of any length;
+///   `samples / 160 + 1` frames, normalized over the whole signal.
+///
+/// Common steps: reflect-pad by half a window, 400-point STFT with a periodic
+/// Hann window and hop 160, power spectrum, Slaney mel filters, log10 with a
+/// 1e-10 floor, drop the last frame, clamp to (max - 8), scale with (x + 4) / 4.
 public struct LogMelSpectrogram: Sendable {
+    public enum Framing: Sendable {
+        case thirtySecondWindow
+        case wholeSignal
+    }
+
     public static let sampleRate = 16_000
     public static let windowSampleCount = 30 * sampleRate
-    public static let frameCount = 3_000
+    public static let windowFrameCount = 3_000
+    public static let hopLength = 160
 
     private static let fftLength = 400
-    private static let hopLength = 160
+    private static let wholeSignalPaddingSampleCount = 160
     private static let frequencyBinCount = fftLength / 2 + 1
     private static let powerFloor = 1e-10
     private static let dynamicRangeLog10 = 8.0
 
     public let melBandCount: Int
+    public let framing: Framing
 
     private let window: [Double]
     /// `fftLength x (2 * frequencyBinCount)`: cosine columns, then sine columns.
@@ -27,8 +38,9 @@ public struct LogMelSpectrogram: Sendable {
     /// `frequencyBinCount x melBandCount`.
     private let melFilters: [Double]
 
-    public init(melBandCount: Int = 80) {
+    public init(melBandCount: Int = 80, framing: Framing = .thirtySecondWindow) {
         self.melBandCount = melBandCount
+        self.framing = framing
         self.window = Self.periodicHannWindow(length: Self.fftLength)
         self.dftBasis = Self.realDFTBasis(length: Self.fftLength, binCount: Self.frequencyBinCount)
         self.melFilters = MelFilterBank.make(
@@ -39,9 +51,11 @@ public struct LogMelSpectrogram: Sendable {
         )
     }
 
-    /// Features for one 30 s window. Shorter input is zero-padded, longer input is trimmed.
     public func features(for samples: some Collection<Float>) -> LogMelFeatures {
-        let paddedSamples = Self.fitToWindow(samples)
+        let paddedSamples = switch framing {
+        case .thirtySecondWindow: Self.fitToWindow(samples)
+        case .wholeSignal: Self.withTrailingSilence(samples)
+        }
         let frames = framedAndWindowed(Self.reflectPadded(paddedSamples))
         let stftFrameCount = frames.count / Self.fftLength
 
@@ -54,6 +68,10 @@ public struct LogMelSpectrogram: Sendable {
     }
 
     // MARK: - Steps
+
+    private static func withTrailingSilence(_ samples: some Collection<Float>) -> [Double] {
+        samples.map(Double.init) + repeatElement(0, count: wholeSignalPaddingSampleCount)
+    }
 
     private static func fitToWindow(_ samples: some Collection<Float>) -> [Double] {
         var window = samples.prefix(windowSampleCount).map(Double.init)
@@ -102,7 +120,7 @@ public struct LogMelSpectrogram: Sendable {
     }
 
     private func normalizedLogMel(_ melEnergies: [Double], stftFrameCount: Int) -> LogMelFeatures {
-        let frameCount = Self.frameCount  // the last STFT frame is dropped
+        let frameCount = stftFrameCount - 1  // the last STFT frame is dropped
         var logMel = [Double](repeating: 0, count: melBandCount * frameCount)
         for band in 0..<melBandCount {
             for frame in 0..<frameCount {

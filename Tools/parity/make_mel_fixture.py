@@ -1,16 +1,18 @@
 # /// script
 # requires-python = ">=3.11,<3.14"
-# dependencies = ["numpy>=1.24", "transformers>=4.45,<5"]
+# dependencies = ["av>=11,<16", "faster-whisper==1.2.1", "numpy>=1.24", "transformers>=4.45,<5"]
 # ///
-"""Write a reference log-mel spectrogram for AudioFeaturesTests.
+"""Write reference log-mel spectrograms for AudioFeaturesTests.
 
-Runs Hugging Face's WhisperFeatureExtractor (the front end the original
-pipeline uses for its VAD) on a deterministic 10 s signal, which the extractor
-zero-pads to 30 s like the VAD does for a short last chunk.
+The original pipeline uses two Whisper front ends on a deterministic 10 s signal:
+  - Hugging Face WhisperFeatureExtractor for its VAD, which zero-pads to 30 s;
+  - faster-whisper's FeatureExtractor for recognition, which appends 160 zero
+    samples and normalizes over the whole signal (80 and 128 mel bands).
 
-Output (little-endian float32, no header):
-    input-samples.f32   160000 samples at 16 kHz
-    whisper-base-mel.f32  80 x 3000 log-mel features, mel band major
+Output (little-endian float32, no header, mel band major):
+    input-samples.f32        160000 samples at 16 kHz
+    whisper-base-mel.f32     80 x 3000
+    faster-whisper-mel-80.f32, faster-whisper-mel-128.f32   bands x 1001
 
 Usage:
     uv run --script make_mel_fixture.py OUTPUT_DIR
@@ -20,6 +22,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from faster_whisper.feature_extractor import FeatureExtractor
 from transformers import WhisperFeatureExtractor
 
 SAMPLE_RATE = 16_000
@@ -50,6 +53,9 @@ def main() -> None:
 
     samples.astype("<f4").tofile(output_dir / "input-samples.f32")
     features.astype("<f4").tofile(output_dir / "whisper-base-mel.f32")
+    for mel_band_count in [80, 128]:
+        recognition_features = FeatureExtractor(feature_size=mel_band_count)(samples)
+        recognition_features.astype("<f4").tofile(output_dir / f"faster-whisper-mel-{mel_band_count}.f32")
     print(f"wrote {output_dir} (features min {features.min():.4f}, max {features.max():.4f})")
 
 

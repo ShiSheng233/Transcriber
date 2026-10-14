@@ -19,7 +19,7 @@ public final class WhisperVADModel: @unchecked Sendable {
     private static let melBandCount = 80
 
     private let model: MLModel
-    private let spectrogram = LogMelSpectrogram(melBandCount: melBandCount)
+    private let spectrogram = LogMelSpectrogram(melBandCount: melBandCount, framing: .thirtySecondWindow)
 
     public init(compiledModelAt modelURL: URL, computeUnits: MLComputeUnits = .all) throws {
         let configuration = MLModelConfiguration()
