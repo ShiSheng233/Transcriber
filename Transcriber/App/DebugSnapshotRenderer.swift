@@ -91,6 +91,18 @@ enum DebugSnapshotRenderer {
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         let testBaseURL = URL(string: testURL)!
         print("KEYCHECK stored for test host: \(keys.read(for: testBaseURL))")
+        // Paste a new key, then switch tabs and close the window without Return.
+        type("sk-changed-456", into: keyField, window: window)
+        tabs.selectedTabViewItemIndex = 0
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        print("KEYCHECK after switching tabs: \(keys.read(for: testBaseURL))")
+        tabs.selectedTabViewItemIndex = llmIndex
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        type("sk-closed-789", into: keyField, window: window)
+        window.performClose(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        print("KEYCHECK after closing the window: \(keys.read(for: testBaseURL))")
+        window.makeKeyAndOrderFront(nil)
         print("KEYCHECK base URL setting: \(store.settings.llm.baseURL.absoluteString)")
         keys.save("", for: testBaseURL)
         store.update { $0.llm.baseURL = previousURL }

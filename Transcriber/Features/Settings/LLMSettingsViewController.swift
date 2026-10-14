@@ -207,6 +207,14 @@ extension LLMSettingsViewController: NSTextViewDelegate, NSComboBoxDelegate, NST
         viewModel.setGlossary(glossaryView.string)
     }
 
+    /// The key is saved as it is typed, so closing the window right after
+    /// pasting it cannot lose it.
+    func controlTextDidChange(_ notification: Notification) {
+        if (notification.object as? NSSecureTextField) === apiKeyField {
+            viewModel.setAPIKey(apiKeyField.stringValue)
+        }
+    }
+
     func comboBoxSelectionDidChange(_ notification: Notification) {
         if (notification.object as? NSComboBox) === modelBox, let modelID = modelBox.objectValueOfSelectedItem as? String {
             viewModel.setModel(modelID)

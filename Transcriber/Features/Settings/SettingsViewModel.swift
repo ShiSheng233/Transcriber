@@ -18,6 +18,8 @@ final class SettingsViewModel {
     private let store: SettingsStore
     private let apiKeyStore: APIKeyStore
     private let library: ModelLibrary
+    /// Reloads the model list once the key stops changing.
+    @ObservationIgnored private var pendingModelReload: Task<Void, Never>?
 
     private(set) var apiKey: String
     /// Why the last API key entered was not saved.
@@ -134,7 +136,14 @@ final class SettingsViewModel {
         }
         apiKeyStore.save(trimmed, for: settings.llm.baseURL)
         apiKey = trimmed
-        reloadLLMModels()
+        // Saved on every keystroke; ask the server only once typing pauses.
+        pendingModelReload?.cancel()
+        pendingModelReload = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(800))
+            if !Task.isCancelled {
+                self?.reloadLLMModels()
+            }
+        }
     }
 
     private static func looksLikeURL(_ text: String) -> Bool {

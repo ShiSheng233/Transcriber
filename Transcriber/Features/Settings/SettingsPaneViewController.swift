@@ -36,6 +36,13 @@ class SettingsPaneViewController: NSViewController {
         view = container
     }
 
+    /// Finish an edit in progress (Base URL, model, language…) before the
+    /// pane goes away: closing the window does not end editing by itself.
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        view.window?.makeFirstResponder(nil)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         binder = ObservationBinder { [weak self] in
