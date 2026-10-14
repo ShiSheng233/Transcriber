@@ -6,6 +6,9 @@ import AppKit
 /// the right.
 enum SettingsForm {
     static let pageWidth: CGFloat = 540
+    /// Text fields, combo boxes and field+button groups all get this width,
+    /// so their left and right edges line up down a page.
+    static let fieldWidth: CGFloat = 300
     private static let pageInset: CGFloat = 20
     private static let rowInsets = NSEdgeInsets(top: 11, left: 14, bottom: 11, right: 14)
     private static let minimumRowHeight: CGFloat = 44
@@ -59,6 +62,10 @@ enum SettingsForm {
         labelStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
         control.setContentCompressionResistancePriority(.required, for: .horizontal)
         control.setContentHuggingPriority(.required, for: .horizontal)
+        // A stack view sizes itself by its own hugging priority, not the content
+        // hugging one; without this a field+button group stretches and leaves
+        // its content short of the trailing edge.
+        (control as? NSStackView)?.setHuggingPriority(.required, for: .horizontal)
 
         let row = NSStackView(views: [labelStack, control])
         row.orientation = .horizontal
@@ -89,6 +96,28 @@ enum SettingsForm {
         row.edgeInsets = rowInsets
         row.heightAnchor.constraint(greaterThanOrEqualToConstant: minimumRowHeight).isActive = true
         return row
+    }
+
+    /// A text field or combo box at `fieldWidth`.
+    static func field<Field: NSControl>(_ field: Field) -> Field {
+        field.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+        return field
+    }
+
+    /// A field followed by buttons, `fieldWidth` wide in total: the field
+    /// takes what the buttons leave.
+    static func fieldGroup(_ field: NSView, buttons: [NSView]) -> NSStackView {
+        let group = NSStackView(views: [field] + buttons)
+        group.orientation = .horizontal
+        group.spacing = 8
+        group.distribution = .fill
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for button in buttons {
+            button.setContentHuggingPriority(.required, for: .horizontal)
+        }
+        group.widthAnchor.constraint(equalToConstant: fieldWidth).isActive = true
+        return group
     }
 
     /// A folder icon and an abbreviated path ("~/…"), truncated in the middle.

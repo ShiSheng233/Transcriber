@@ -29,15 +29,13 @@ final class LLMSettingsViewController: SettingsPaneViewController {
         baseURLField.target = self
         baseURLField.action = #selector(baseURLChanged(_:))
         baseURLField.delegate = self
-        baseURLField.widthAnchor.constraint(equalToConstant: 260).isActive = true
 
         apiKeyField.target = self
         apiKeyField.action = #selector(apiKeyChanged(_:))
         apiKeyField.delegate = self
-        apiKeyField.widthAnchor.constraint(equalToConstant: 200).isActive = true
         let getKeyButton = NSButton(title: String(localized: "Get a Key…"), target: self, action: #selector(openKeyPage(_:)))
         self.getKeyButton = getKeyButton
-        let apiKeyControls = NSStackView(views: [apiKeyField, getKeyButton])
+        let apiKeyControls = SettingsForm.fieldGroup(apiKeyField, buttons: [getKeyButton])
 
         modelBox.completes = true
         modelBox.numberOfVisibleItems = 15
@@ -45,20 +43,18 @@ final class LLMSettingsViewController: SettingsPaneViewController {
         modelBox.action = #selector(modelChanged(_:))
         modelBox.delegate = self
         modelBox.placeholderString = String(localized: "Model id")
-        modelBox.widthAnchor.constraint(equalToConstant: 240).isActive = true
         let refreshButton = NSButton(
             image: NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: String(localized: "Refresh")) ?? NSImage(),
             target: self, action: #selector(refreshModels(_:))
         )
         refreshButton.bezelStyle = .accessoryBarAction
-        let modelControls = NSStackView(views: [modelBox, refreshButton])
+        let modelControls = SettingsForm.fieldGroup(modelBox, buttons: [refreshButton])
 
         languageBox.addItems(withObjectValues: Self.suggestedLanguages)
         languageBox.completes = true
         languageBox.target = self
         languageBox.action = #selector(languageChanged(_:))
         languageBox.delegate = self
-        languageBox.widthAnchor.constraint(equalToConstant: 160).isActive = true
 
         glossaryView.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         glossaryView.isRichText = false
@@ -68,6 +64,8 @@ final class LLMSettingsViewController: SettingsPaneViewController {
         let glossaryScroll = NSScrollView()
         glossaryScroll.documentView = glossaryView
         glossaryScroll.hasVerticalScroller = true
+        glossaryScroll.autohidesScrollers = true
+        glossaryScroll.scrollerStyle = .overlay
         glossaryScroll.borderType = .noBorder
         glossaryScroll.drawsBackground = false
         glossaryView.drawsBackground = false
@@ -81,12 +79,12 @@ final class LLMSettingsViewController: SettingsPaneViewController {
             ], footer: String(localized: "Runs after transcription. Timing never changes.")),
             SettingsForm.section(String(localized: "Service"), rows: [
                 SettingsForm.row(String(localized: "Provider"), control: providerPopUp),
-                SettingsForm.row(String(localized: "Base URL"), control: baseURLField),
+                SettingsForm.row(String(localized: "Base URL"), control: SettingsForm.field(baseURLField)),
                 SettingsForm.row(String(localized: "API key"), descriptionLabel: apiKeyDescription, control: apiKeyControls),
                 SettingsForm.row(String(localized: "Model"), descriptionLabel: modelStatusLabel, control: modelControls),
             ], footer: String(localized: "Any OpenAI-compatible API. OpenRouter lists only models with structured output.")),
             SettingsForm.section(String(localized: "Translation"), rows: [
-                SettingsForm.row(String(localized: "Translate into"), description: String(localized: "For models whose output is translated"), control: languageBox),
+                SettingsForm.row(String(localized: "Translate into"), description: String(localized: "When the LLM translates"), control: SettingsForm.field(languageBox)),
                 SettingsForm.row(String(localized: "Keep the Japanese line"), description: String(localized: "Bilingual subtitles"), control: keepsOriginalSwitch),
             ]),
             SettingsForm.section(String(localized: "Glossary"), rows: [
