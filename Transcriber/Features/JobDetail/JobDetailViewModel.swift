@@ -25,7 +25,7 @@ final class JobDetailViewModel {
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
-        showsPlayer = userDefaults.object(forKey: Self.showsPlayerKey) as? Bool ?? true
+        showsPlayer = userDefaults.object(forKey: Self.showsPlayerKey) == nil || userDefaults.bool(forKey: Self.showsPlayerKey)
     }
 
     var hasSelection: Bool {

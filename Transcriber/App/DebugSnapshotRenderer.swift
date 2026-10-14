@@ -47,6 +47,11 @@ enum DebugSnapshotRenderer {
         }
         queueViewModel.select(jobID: queueViewModel.jobs.first?.id)
         RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        // -SnapshotTogglePlayer: one click on the Player button, as a user would.
+        if ProcessInfo.processInfo.arguments.contains("-SnapshotTogglePlayer") {
+            main.togglePlayer(nil)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        }
     }
 
     static func renderActivity(_ activity: ActivityWindowController, to directory: URL) {

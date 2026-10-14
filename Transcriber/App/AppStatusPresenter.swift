@@ -60,18 +60,20 @@ final class AppStatusPresenter {
         guard !NSApp.isActive, run.completed + run.failed > 0 else {
             return
         }
-        let content = UNMutableNotificationContent()
-        content.title = run.failed == 0 ? String(localized: "Subtitles Ready") : String(localized: "Transcription Finished")
-        content.body = run.failed == 0
+        let title = run.failed == 0 ? String(localized: "Subtitles Ready") : String(localized: "Transcription Finished")
+        let body = run.failed == 0
             ? String(localized: "\(run.completed) files done.")
             : String(localized: "\(run.completed) done, \(run.failed) failed.")
-        content.sound = .default
-        let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            guard granted else {
+        Task {
+            let center = UNUserNotificationCenter.current()
+            guard (try? await center.requestAuthorization(options: [.alert, .sound])) == true else {
                 return
             }
-            center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            content.sound = .default
+            try? await center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
         }
     }
 }

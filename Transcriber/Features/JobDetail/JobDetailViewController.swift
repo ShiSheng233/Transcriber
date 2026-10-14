@@ -146,7 +146,14 @@ final class JobDetailViewController: NSViewController {
             displayedPlayerURL = viewModel.playerURL
             player.replaceCurrentItem(with: viewModel.playerURL.map { AVPlayerItem(url: $0) })
         }
-        playerView.isHidden = !viewModel.showsPlayer
+        if playerView.isHidden == viewModel.showsPlayer {
+            playerView.isHidden = !viewModel.showsPlayer
+            // A player that was hidden has no height yet: size it when shown.
+            if viewModel.showsPlayer {
+                needsPlayerResize = true
+                view.needsLayout = true
+            }
+        }
         if displayedAsAudio != viewModel.isAudioOnly, viewModel.hasSelection {
             displayedAsAudio = viewModel.isAudioOnly
             playerMinimumHeight.constant = viewModel.isAudioOnly ? Self.audioPlayerHeight : 160
