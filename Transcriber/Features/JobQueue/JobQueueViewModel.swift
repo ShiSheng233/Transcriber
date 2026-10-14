@@ -56,7 +56,21 @@ final class JobQueueViewModel {
         jobs.contains { $0.status.isFinished }
     }
 
+    /// The models in the models folder, for the toolbar's model menu.
+    var models: [RecognitionModel] {
+        library.models
+    }
+
+    var selectedModelID: String? {
+        library.selectedModel?.id
+    }
+
     // MARK: Intents
+
+    /// Files added from now on use this model.
+    func selectModel(id: String) {
+        settingsStore.update { $0.modelID = id }
+    }
 
     /// Adds media files, and the media files inside folders, with the chosen
     /// model. With no model installed, nothing is added and `isMissingModels`

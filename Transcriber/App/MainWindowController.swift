@@ -1,4 +1,5 @@
 import AppKit
+import TranscriberCore
 import UniformTypeIdentifiers
 
 /// The queue on the left, the selected file's preview on the right, and a
@@ -11,6 +12,13 @@ final class MainWindowController: NSWindowController {
     private let detailViewModel = JobDetailViewModel()
     private let openSettings: () -> Void
     private var binder: ObservationBinder?
+    private lazy var modelPopUp: NSPopUpButton = {
+        let popUp = NSPopUpButton()
+        popUp.target = self
+        popUp.action = #selector(modelChanged(_:))
+        return popUp
+    }()
+    private var displayedModelIDs: [String] = []
 
     init(
         queueViewModel: JobQueueViewModel,
@@ -57,8 +65,36 @@ final class MainWindowController: NSWindowController {
         detailViewModel.show(queueViewModel.selectedJob)
         _ = detailViewModel.showsPlayer  // re-validate the Player item when it changes
         window?.toolbar?.validateVisibleItems()
+        renderModelMenu()
         if queueViewModel.isMissingModels {
             showMissingModelsAlert()
+        }
+    }
+
+    private func renderModelMenu() {
+        let models = queueViewModel.models
+        let ids = models.map(\.id)
+        if ids != displayedModelIDs {
+            displayedModelIDs = ids
+            modelPopUp.removeAllItems()
+            for model in models {
+                modelPopUp.addItem(withTitle: model.displayName)
+                modelPopUp.lastItem?.representedObject = model.id
+                modelPopUp.lastItem?.toolTip = model.summary
+            }
+            if models.isEmpty {
+                modelPopUp.addItem(withTitle: String(localized: "No Models"))
+            }
+            modelPopUp.isEnabled = !models.isEmpty
+        }
+        if let id = queueViewModel.selectedModelID, let index = ids.firstIndex(of: id) {
+            modelPopUp.selectItem(at: index)
+        }
+    }
+
+    @objc private func modelChanged(_ sender: NSPopUpButton) {
+        if let id = sender.selectedItem?.representedObject as? String {
+            queueViewModel.selectModel(id: id)
         }
     }
 
@@ -105,10 +141,6 @@ final class MainWindowController: NSWindowController {
         queueViewModel.clearFinished()
     }
 
-    @objc func showSettingsFromToolbar(_ sender: Any?) {
-        openSettings()
-    }
-
     @objc func togglePlayer(_ sender: Any?) {
         detailViewModel.togglePlayer()
     }
@@ -129,7 +161,7 @@ extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
         static let start = NSToolbarItem.Identifier("start")
         static let clear = NSToolbarItem.Identifier("clear")
         static let player = NSToolbarItem.Identifier("player")
-        static let settings = NSToolbarItem.Identifier("settings")
+        static let model = NSToolbarItem.Identifier("model")
     }
 
     private func makeToolbar() -> NSToolbar {
@@ -140,7 +172,7 @@ extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [ItemID.add, ItemID.start, ItemID.clear, .flexibleSpace, ItemID.player, ItemID.settings]
+        [ItemID.add, ItemID.model, ItemID.start, ItemID.clear, .flexibleSpace, ItemID.player]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -159,8 +191,12 @@ extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
             configure(item, label: String(localized: "Clear Finished"), symbol: "checklist.checked", action: #selector(clearFinished(_:)))
         case ItemID.player:
             configure(item, label: String(localized: "Player"), symbol: "play.rectangle", action: #selector(togglePlayer(_:)))
-        case ItemID.settings:
-            configure(item, label: String(localized: "Settings"), symbol: "gearshape", action: #selector(showSettingsFromToolbar(_:)))
+        case ItemID.model:
+            // Task-specific, so it lives here rather than in Settings (HIG).
+            item.label = String(localized: "Model")
+            item.toolTip = String(localized: "Model for files you add")
+            item.view = modelPopUp
+            renderModelMenu()
         default:
             return nil
         }

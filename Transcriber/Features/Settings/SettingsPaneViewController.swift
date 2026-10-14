@@ -17,8 +17,10 @@ class SettingsPaneViewController: NSViewController {
         fatalError("Settings panes are created in code")
     }
 
-    /// The form uses Auto Layout inside; pin it to a plain container so the
-    /// tab view controller can size and place it.
+    private var form: NSView?
+
+    /// The form uses Auto Layout inside; it hangs from the top of a plain
+    /// container, so it never stretches while the window changes height.
     override func loadView() {
         let form = makeForm()
         form.translatesAutoresizingMaskIntoConstraints = false
@@ -26,10 +28,11 @@ class SettingsPaneViewController: NSViewController {
         container.addSubview(form)
         NSLayoutConstraint.activate([
             form.topAnchor.constraint(equalTo: container.topAnchor),
-            form.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            form.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor),
             form.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             form.trailingAnchor.constraint(equalTo: container.trailingAnchor),
         ])
+        self.form = form
         view = container
     }
 
@@ -49,8 +52,15 @@ class SettingsPaneViewController: NSViewController {
     /// Subclasses copy the settings into their controls.
     func render() {}
 
+    /// Only a real change of the form's size resizes the window.
     private func fitWindowToForm() {
-        view.layoutSubtreeIfNeeded()
-        preferredContentSize = view.fittingSize
+        guard let form else {
+            return
+        }
+        form.layoutSubtreeIfNeeded()
+        let size = form.fittingSize
+        if abs(size.height - preferredContentSize.height) > 0.5 || abs(size.width - preferredContentSize.width) > 0.5 {
+            preferredContentSize = size
+        }
     }
 }

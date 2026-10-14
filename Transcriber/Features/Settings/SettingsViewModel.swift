@@ -49,15 +49,6 @@ final class SettingsViewModel {
         store.settings
     }
 
-    /// The speech models in the models folder, for the model menu.
-    var recognitionModels: [RecognitionModel] {
-        library.models
-    }
-
-    var selectedRecognitionModel: RecognitionModel? {
-        library.selectedModel
-    }
-
     struct ModelStatus: Equatable {
         let title: String
         let detail: String
@@ -109,9 +100,7 @@ final class SettingsViewModel {
         library.reload()
     }
 
-    func setRecognitionModel(_ id: String) {
-        store.update { $0.modelID = id }
-    }
+
 
     func setBackend(_ backend: EngineSettings.Backend) {
         store.update { $0.backend = backend }
