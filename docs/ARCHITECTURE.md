@@ -227,17 +227,33 @@ whisper.cpp 以 `WHISPER_COREML=ON` + `WHISPER_COREML_ALLOW_FALLBACK=ON` 自行�
 
 **App 里不写死任何模型。** 每个模型文件夹带一个 `model.json`，`ModelCatalog` 扫描模型目录列出所有模型；用户在设置里**选模型而不是选 task**——Whisper 的 task token（translate/transcribe）、语言、解码参数、VAD/分块/合并参数、LLM 步骤是润色还是翻译，都由配置决定。配置里没写的项取原 ChickenRice 管线的值（`ChickenRiceDefaults`）。格式见 `ModelConfigurations/README.md`。
 
-新增模型 = 在 `ModelConfigurations/` 加一个 JSON + Makefile 加转换规则，不改 Swift 代码（除非它需要管线里还没有的能力，例如无时间戳解码）。
+新增模型 = 在 `ModelConfigurations/` 加一个 JSON + Makefile 加转换规则，不改 Swift 代码（除非它需要管线里还没有的能力）。模型在主窗口工具栏里选（作用于之后添加的文件），不在设置里。
+
+### 6.4 无时间戳模型：anime-whisper（参照 WhisperJAV ChronosJAV）
+
+`litagin/anime-whisper`（kotoba-whisper-v2.0 微调，2 层解码器，128 mel，float32 发布，我们转 f16）训练数据没有时间戳 token，所以照 WhisperJAV 的 ChronosJAV 管线（balanced 档）走另一条路，全部由 `model.json` 开启：
+
+- **解码**：提示词末尾加 `<|notimestamps|>`，时间戳 token 全部屏蔽；贪心、无温度回退、不按 no_speech 跳过、repetition_penalty 1.0；可选 `no_repeat_ngram_size`（HF 语义，默认 0）。
+- **切分（`vad_groups`）**：ASMR VAD（阈值 0.30、最长 4 s、两端各补 50 ms）的语音段，间隔 < 250 ms 的合并成组，组长不超过 2.5 s；每组单独解码（前面补 200 ms 静音），一组 = 一条字幕，时间直接用 VAD 的。不做合并。
+- **清理**：删只有省略号的行、把重复 ≥3 次的 2–20 字片段压成一次（与 Python `re.sub` 一致），可选补句号。
+- **分词器**：模型只带 slow tokenizer 文件，借用 kotoba-whisper-v2.0 的 `tokenizer.json`，Makefile 先校验 51866 个 token 的 id 完全一致。
+- **许可**：模型 MIT，但训练数据集条款禁止商用基于它训练的模型——商业发行前要处理。
+
+未照搬：WhisperJAV 的场景切分（只为限制内存与对齐器）、“谷底”切分超长段、非语言行过滤、按 CPS 调整起点。
 
 ## 7. Job 状态机
 
 ```
-queued → decodingAudio → detectingSpeech → recognizing(progress)
-       → postProcessing → [refiningWithLLM(progress)] → exporting → completed
-任意阶段 → failed(JobError) | cancelled
+queued → loadingModel → decodingAudio → detectingSpeech → transcribing(progress)
+       → [refining(progress)] → exporting → completed
+任意阶段 → failed(message) | cancelled
 ```
 
 `JobStatus` 是 enum，ViewModel 把它映射为行标题、进度与按钮可用性。
+
+**活动日志**：`JobQueue.logs()` 先重放历史再推送新条目（模型载入的引擎/权重/大小/耗时、音频时长、VAD 语音段、每个 chunk、合并、速度、LLM 批次、写出的文件、失败）。管线进度按顺序处理完才继续，日志不会乱序。App 侧边栏底部是状态栏（转圈、最新一步、队列位置、日志按钮），Window ▸ Activity（⌥⌘L）显示完整日志。
+
+**退出**：退出前取消当前任务并释放模型——ggml 的 Metal 设备在进程退出时断言所有缓冲已释放，否则直接 abort。
 
 ## 8. App target 结构
 
@@ -325,13 +341,13 @@ JobQueue、JobDetail 预览、Settings（含后端选择、Core ML 编码器开�
 
 ### Phase 2：AppKit 应用（主体完成）
 
-✅ 文件队列（拖放、Open With、进度、取消/移除/在 Finder 中显示）、预览（播放器 + 字幕列表同步高亮、点击跳转）、设置（General / Output / Models / LLM 四个标签，System Settings 风格分组表单）。待做：中文本地化、Sparkle、通知。
+✅ 文件队列（拖放、Open With、进度、取消/移除/在 Finder 中显示）、预览（播放器 + 字幕列表同步高亮、点击跳转；可隐藏播放器，此时不加载媒体）、设置（General / Output / Models / LLM，按 HIG：切换无淡入淡出、只动画高度、记住上次的面板、工具栏不放设置按钮）、状态栏与活动日志、工具栏选模型。待做：中文本地化、Sparkle、通知。
 
 ### Phase 3：LLM（主体完成）
 
 ✅ `LLMTranslation` 模块与接入：
 
-- **模式由任务决定**：translate（海南鸡中文）→ 润色；transcribe（whisper-ja 日文）→ 翻译到目标语言（默认简体中文），可选双语（译文在上、原文在下）。
+- **模式由模型配置的 `llm_mode` 决定**：polish（海南鸡中文）→ 润色；translate（whisper-ja / anime-whisper 日文）→ 翻译到目标语言（默认简体中文），可选双语（译文在上、原文在下）。
 - **OpenRouter**：`response_format` 严格 JSON Schema（`{lines: [{id, text}]}`）+ `provider.require_parameters`；模型列表实时拉取（只列支持 structured output 的模型，排除 `:batch`），不在代码里写死模型名；429/5xx 退避重试，401/402 给出明确提示。API key 存 Keychain。
 - **逐行对齐**：每批 40 行，前后各带 8 行上下文（前文用已处理的结果）；回复的 id 必须与本批完全一致，不一致重试一次，仍缺的行保留原文；时间轴从不改动。
 - **术语表**：每行 `源 = 译`，写进系统提示。
