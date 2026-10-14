@@ -47,17 +47,19 @@ WHISPER_CMAKE_FLAGS := \
 	-DGGML_NATIVE=OFF \
 	-DGGML_OPENMP=OFF
 
-.PHONY: help whisper-xcframework ffmpeg-xcframeworks whisper-models whisper-models-q8_0 mlx-models vad-model parity-fixtures baseline-a build test clean-tools
+.PHONY: FORCE help whisper-xcframework ffmpeg-xcframeworks whisper-models whisper-models-q8_0 mlx-models vad-model parity-fixtures baseline-a ours parity-report build test clean-tools
 
 help:
 	@echo "make whisper-xcframework  Build whisper.cpp $(WHISPER_VERSION) into $(WHISPER_XCFRAMEWORK)"
 	@echo "make ffmpeg-xcframeworks  Build FFmpeg $(FFMPEG_VERSION) (LGPL, audio decoding only) into TranscriberKit/Vendor"
 	@echo "make whisper-models       Download and convert the Whisper models into $(MODELS_DIR)/whisper"
 	@echo "make whisper-models-q8_0  Optional: q8_0 variants (not built by default)"
-	@echo "make mlx-models           Convert the Whisper models to MLX float16 into $(MODELS_DIR)/mlx"
+	@echo "make mlx-models           Convert the Whisper models to MLX (original precision) into $(MODELS_DIR)/mlx"
 	@echo "make vad-model            Convert the ASMR VAD to Core ML into $(MODELS_DIR)/vad"
 	@echo "make parity-fixtures      Regenerate test fixtures from the original Python pipeline"
 	@echo "make baseline-a           Run the original Python pipeline on $(PARITY_MEDIA) into $(BASELINE_A_DIR)"
+	@echo "make ours                 Run our pipeline on $(PARITY_MEDIA) into $(OURS_DIR)"
+	@echo "make parity-report        Compare $(OURS_DIR) with $(BASELINE_A_DIR) (CER, BLEU, timing)"
 	@echo "make build                Build TranscriberKit and transcriber-cli"
 	@echo "make test                 Run TranscriberKit tests"
 	@echo "make clean-tools          Delete $(TOOLS_DIR) (downloads and intermediates)"
@@ -167,9 +169,10 @@ $(foreach library,$(FFMPEG_LIBRARIES),$(eval $(call ffmpeg_framework,$(library))
 
 # Whisper models ---------------------------------------------------------------
 #
-# Hugging Face checkpoints are converted to float16 ggml with our own converter
-# (see Tools/model-conversion/convert_whisper_to_ggml.py for why). The app uses
-# them at their original precision; whisper-models-q8_0 builds optional
+# Hugging Face checkpoints are converted to ggml at their original precision
+# with our own converter (see Tools/model-conversion/convert_whisper_to_ggml.py):
+# ChickenRice was trained and published in bfloat16, whisper-ja-1.5B in float16.
+# whisper-models-q8_0 builds optional
 # quantized variants with whisper.cpp's quantize tool and is not part of the
 # default build. A -q8_0 file shares its Core ML encoder name with the f16 file.
 
@@ -195,7 +198,7 @@ $(WHISPER_QUANTIZE): | $(WHISPER_SOURCE)
 	$(CMAKE) --build $(WHISPER_TOOLS_BUILD) --config Release --target whisper-quantize -j $(NCPU)
 
 # $(1): model name, $(2): Hugging Face repo, $(3): pinned revision,
-# $(4): SHA-256 of model.safetensors at that revision
+# $(4): SHA-256 of model.safetensors at that revision, $(5): ggml weight type
 define whisper_model
 $(DOWNLOADS_DIR)/$(1)/%:
 	mkdir -p $$(@D)
@@ -212,7 +215,7 @@ $(DOWNLOADS_DIR)/$(1)/model.safetensors:
 # conversion does not make the converted model look out of date.
 $(MODELS_DIR)/whisper/$(1).bin: $(GGML_CONVERTER)
 	$(MAKE) $(MEL_FILTERS) $(DOWNLOADS_DIR)/$(1)/config.json $(DOWNLOADS_DIR)/$(1)/vocab.json $(DOWNLOADS_DIR)/$(1)/model.safetensors
-	uv run --script $(GGML_CONVERTER) $(DOWNLOADS_DIR)/$(1) $(MEL_FILTERS) $$@
+	uv run --script $(GGML_CONVERTER) $(DOWNLOADS_DIR)/$(1) $(MEL_FILTERS) $$@ --weight-type $(5)
 
 # The Swift decoder reads token ids and text from the model's own tokenizer.json.
 $(MODELS_DIR)/whisper/$(1).tokenizer.json:
@@ -224,8 +227,8 @@ $(MODELS_DIR)/whisper/$(1)-q8_0.bin: $(MODELS_DIR)/whisper/$(1).bin $(WHISPER_QU
 	$(WHISPER_QUANTIZE) $$< $$@ q8_0
 endef
 
-$(eval $(call whisper_model,chickenrice-v0.2,chickenrice0721/whisper-large-v2-translate-zh-v0.2-st,cc6f01704d188c6ed2d1ab84b83734f964c9a45a,0abdde18518f3902913e4e2124145fb7d4635ebba88fd5c035b71819ec328ad0))
-$(eval $(call whisper_model,whisper-ja-1.5b,efwkjn/whisper-ja-1.5B,72c13fb7b6cc2a831780cdd79cd1a829e77bab02,0bf92cf794ebb2cef2699c24dc71184be6a1ac133cc3c64f228ea08173d0155f))
+$(eval $(call whisper_model,chickenrice-v0.2,chickenrice0721/whisper-large-v2-translate-zh-v0.2-st,cc6f01704d188c6ed2d1ab84b83734f964c9a45a,0abdde18518f3902913e4e2124145fb7d4635ebba88fd5c035b71819ec328ad0,bf16))
+$(eval $(call whisper_model,whisper-ja-1.5b,efwkjn/whisper-ja-1.5B,72c13fb7b6cc2a831780cdd79cd1a829e77bab02,0bf92cf794ebb2cef2699c24dc71184be6a1ac133cc3c64f228ea08173d0155f,f16))
 
 WHISPER_MODEL_FILES := $(foreach model,$(WHISPER_MODELS),$(MODELS_DIR)/whisper/$(model).bin $(MODELS_DIR)/whisper/$(model).tokenizer.json)
 
@@ -236,9 +239,10 @@ whisper-models-q8_0: $(foreach model,$(WHISPER_MODELS),$(MODELS_DIR)/whisper/$(m
 
 # MLX models -------------------------------------------------------------------
 #
-# Converted with mlx-whisper's own convert.py (hf_to_pt path) at a pinned
-# mlx-examples commit. It drops proj_out like whisper.cpp does; our ggml
-# converter has already verified it is tied for both models.
+# Converted with mlx-whisper's own convert() (hf_to_pt path) at a pinned
+# mlx-examples commit, through convert_whisper_to_mlx.py so ChickenRice can stay
+# bfloat16. It drops proj_out like whisper.cpp does; our ggml converter has
+# already verified it is tied for both models.
 
 MLX_EXAMPLES_COMMIT := 796f5b53cab69a3d48a44233ce21aae889e94a08
 # mlx-whisper itself comes from the same commit: PyPI's 0.4.3 still loads
@@ -251,18 +255,20 @@ $(MLX_CONVERTER):
 	mkdir -p $(@D)
 	curl -fsSL -o $@ https://raw.githubusercontent.com/ml-explore/mlx-examples/$(MLX_EXAMPLES_COMMIT)/whisper/convert.py
 
+# $(1): model name, $(2): MLX dtype (the checkpoint's own precision)
 define mlx_model
 $(MODELS_DIR)/mlx/$(1)/model.safetensors:
 	$(MAKE) $(MLX_CONVERTER) $(DOWNLOADS_DIR)/$(1)/config.json $(DOWNLOADS_DIR)/$(1)/model.safetensors
 	uv run --no-project --python 3.12 --with "$(MLX_WHISPER_PACKAGE)" \
-		python $(MLX_CONVERTER) --torch-name-or-path $(DOWNLOADS_DIR)/$(1) --mlx-path $$(@D) --dtype float16
+		python Tools/model-conversion/convert_whisper_to_mlx.py $(MLX_CONVERTER) $(DOWNLOADS_DIR)/$(1) $$(@D) $(2)
 
 $(MODELS_DIR)/mlx/$(1)/tokenizer.json: $(MODELS_DIR)/whisper/$(1).tokenizer.json
 	mkdir -p $$(@D)
 	cp $$< $$@
 endef
 
-$(foreach model,$(WHISPER_MODELS),$(eval $(call mlx_model,$(model))))
+$(eval $(call mlx_model,chickenrice-v0.2,bfloat16))
+$(eval $(call mlx_model,whisper-ja-1.5b,float16))
 
 mlx-models: $(MLX_MODEL_FILES)
 
@@ -341,6 +347,8 @@ parity-fixtures: | $(CHICKENRICE_SOURCE) $(VAD_ONNX)
 
 PARITY_MEDIA    ?= ParityMedia
 BASELINE_A_DIR  ?= Parity/baseline-a
+# float32 by default; e.g. int8_float32 (what CPU users get) measures the original's own variation.
+BASELINE_COMPUTE_TYPE ?= float32
 CT2_DIR         := $(TOOLS_DIR)/ct2
 BASELINE_TASKS  := translate transcribe
 CT2_MODEL_FILES := config.json preprocessor_config.json tokenizer.json vocabulary.json model.bin
@@ -348,7 +356,7 @@ CT2_MODEL_FILES := config.json preprocessor_config.json tokenizer.json vocabular
 ORIGINAL_DEPENDENCIES := --with faster-whisper==1.2.1 --with "av>=11,<16" --with ctranslate2 --with onnxruntime \
 	--with "transformers>=4.45,<5" --with pyjson5 --with librosa
 ORIGINAL_ARGUMENTS := --audio_suffixes="mp3,wav,flac,m4a,aac,ogg,wma,mp4,mkv,avi,mov,webm,flv,wmv" \
-	--sub_formats="srt,vtt,lrc" --device=cpu --compute_type=float32 --overwrite --log_level=INFO
+	--sub_formats="srt,vtt,lrc" --device=cpu --compute_type=$(BASELINE_COMPUTE_TYPE) --overwrite --log_level=INFO
 
 # $(1): local name, $(2): repo, $(3): revision, $(4): SHA-256 of model.bin
 define ct2_model
@@ -383,6 +391,29 @@ baseline-a: $(foreach task,$(BASELINE_TASKS),$(addprefix $(CT2_DIR)/$(task)/,$(C
 			--output_dir=$(abspath $(BASELINE_A_DIR))/$$task \
 			$(abspath $(PARITY_MEDIA)) || exit 1; \
 	done
+
+# Our pipeline on the same media, and the comparison --------------------------
+
+OURS_DIR        ?= Parity/ours
+TRANSCRIBER_CLI := TranscriberKit/.build/release/transcriber-cli
+MEDIA_SUFFIXES  := mp3 wav flac m4a aac ogg wma mp4 mkv avi mov webm flv wmv
+PARITY_FILES     = $(foreach suffix,$(MEDIA_SUFFIXES),$(shell find $(PARITY_MEDIA) -type f -iname '*.$(suffix)' 2>/dev/null))
+
+$(TRANSCRIBER_CLI): FORCE
+	swift build --package-path TranscriberKit -c release --product transcriber-cli
+
+ours: $(TRANSCRIBER_CLI)
+	for task in $(BASELINE_TASKS); do \
+		$(TRANSCRIBER_CLI) transcribe --task $$task --output-directory $(OURS_DIR)/$$task $(PARITY_FILES) 2>/dev/null || exit 1; \
+	done
+
+parity-report:
+	for task in $(BASELINE_TASKS); do \
+		echo "== $$task"; \
+		uv run --script Tools/parity/compare_subtitles.py $(BASELINE_A_DIR)/$$task $(OURS_DIR)/$$task || exit 1; \
+	done
+
+FORCE:
 
 # TranscriberKit ---------------------------------------------------------------
 

@@ -25,6 +25,15 @@ struct TranscribeCommand: ParsableCommand {
     @Option(help: "Write subtitles here instead of next to each input.")
     var outputDirectory: String?
 
+    @Flag(help: "Enable whisper.cpp flash attention (faster, less faithful timestamps).")
+    var flashAttention = false
+
+    @Flag(help: "Run whisper.cpp on the CPU instead of Metal.")
+    var cpu = false
+
+    @Option(help: "ggml model file name suffix, e.g. -f32 for chickenrice-v0.2-f32.bin.")
+    var modelSuffix: String = ""
+
     @Argument(help: "Media files.")
     var inputs: [String]
 
@@ -42,7 +51,11 @@ struct TranscribeCommand: ParsableCommand {
         let models = URL(fileURLWithPath: modelsDirectory)
         let modelName = task == .translate ? "chickenrice-v0.2" : "whisper-ja-1.5b"
         let tokenizer = try WhisperTokenizer(contentsOf: models.appendingPathComponent("whisper/\(modelName).tokenizer.json"))
-        let backend = WhisperCppBackend(model: try WhisperModel(contentsOf: models.appendingPathComponent("whisper/\(modelName).bin")))
+        let backend = WhisperCppBackend(model: try WhisperModel(
+            contentsOf: models.appendingPathComponent("whisper/\(modelName)\(modelSuffix).bin"),
+            usesGPU: !cpu,
+            usesFlashAttention: flashAttention
+        ))
         let vadModel = try WhisperVADModel(compiledModelAt: models.appendingPathComponent("vad/whisper-vad-asmr.mlmodelc"))
         let segmentGenerator = SegmentGenerator(
             backend: backend,

@@ -17,7 +17,8 @@ public final class WhisperModel: @unchecked Sendable {
     public init(
         contentsOf modelURL: URL,
         encoderBackend: WhisperEncoderBackend = .metal,
-        usesGPU: Bool = true
+        usesGPU: Bool = true,
+        usesFlashAttention: Bool = false
     ) throws(WhisperModelError) {
         guard FileManager.default.fileExists(atPath: modelURL.path) else {
             throw .fileNotFound(modelURL)
@@ -25,7 +26,10 @@ public final class WhisperModel: @unchecked Sendable {
 
         var parameters = whisper_context_default_params()
         parameters.use_gpu = usesGPU
-        parameters.flash_attn = usesGPU
+        // Off by default: Metal flash attention accumulates in f16, which moved
+        // ChickenRice's timestamp tokens enough to split segments differently
+        // from the original (see docs/ARCHITECTURE.md §9).
+        parameters.flash_attn = usesGPU && usesFlashAttention
 
         let loadedContext: OpaquePointer?
         switch encoderBackend {

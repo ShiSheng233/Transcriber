@@ -5,7 +5,7 @@
 """Convert a Hugging Face Whisper checkpoint (safetensors) to whisper.cpp's ggml format.
 
 Writes the same file layout as whisper.cpp's models/convert-h5-to-ggml.py, with
-three differences:
+these differences:
 
 - Reads safetensors directly with NumPy (including bfloat16), so PyTorch and
   transformers are not needed.
@@ -15,13 +15,17 @@ three differences:
 - Refuses checkpoints whose proj_out.weight differs from the token embedding.
   whisper.cpp always computes logits with the token embedding, so an untied
   proj_out cannot be represented and the official script drops it silently.
+- --weight-type picks the matrix precision: f16 (whisper.cpp's default), bf16
+  (lossless for bfloat16 checkpoints such as ChickenRice) or f32. whisper.cpp
+  keeps the convolution weights in f16 unless the whole model is f32.
 
 Usage:
-    uv run --script convert_whisper_to_ggml.py MODEL_DIR MEL_FILTERS_NPZ OUTPUT_FILE
+    uv run --script convert_whisper_to_ggml.py MODEL_DIR MEL_FILTERS_NPZ OUTPUT_FILE [--weight-type f16|bf16|f32]
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import struct
 import sys
@@ -31,8 +35,12 @@ from typing import BinaryIO, Dict, Tuple
 import numpy as np
 
 GGML_MAGIC = 0x67676D6C
-GGML_FTYPE_FLOAT32 = 0
-GGML_FTYPE_FLOAT16 = 1
+# Tensor types (ggml_type) and the file's weight type (ggml_ftype).
+GGML_TYPE_F32 = 0
+GGML_TYPE_F16 = 1
+GGML_TYPE_BF16 = 30
+FILE_TYPES = {"f32": 0, "f16": 1, "bf16": 24}
+MATRIX_TYPES = {"f32": GGML_TYPE_F32, "f16": GGML_TYPE_F16, "bf16": GGML_TYPE_BF16}
 
 # Hugging Face module names -> whisper.cpp tensor names, from convert-h5-to-ggml.py.
 LAYER_MODULE_NAMES = {
@@ -60,6 +68,7 @@ TOP_LEVEL_NAMES = {
     "decoder.embed_tokens.weight": "decoder.token_embedding.weight",
 }
 CONV_BIAS_NAMES = {"encoder.conv1.bias", "encoder.conv2.bias"}
+CONV_WEIGHT_NAMES = {"encoder.conv1.weight", "encoder.conv2.weight"}
 FLOAT32_TENSOR_NAMES = CONV_BIAS_NAMES | {
     "encoder.positional_embedding",
     "decoder.positional_embedding",
@@ -133,7 +142,7 @@ def bytes_to_unicode() -> Dict[int, str]:
     return dict(zip(printable, map(chr, characters)))
 
 
-def write_header(file: BinaryIO, config: dict) -> None:
+def write_header(file: BinaryIO, config: dict, weight_type: str) -> None:
     # n_text_ctx: the official script reads max_length, which is null in some
     # fine-tunes; max_target_positions is the actual decoder context.
     fields = [
@@ -148,7 +157,7 @@ def write_header(file: BinaryIO, config: dict) -> None:
         config["decoder_attention_heads"],
         config["decoder_layers"],
         config["num_mel_bins"],
-        GGML_FTYPE_FLOAT16,
+        FILE_TYPES[weight_type],
     ]
     file.write(struct.pack(f"{len(fields)}i", *fields))
 
@@ -167,27 +176,44 @@ def write_vocabulary(file: BinaryIO, vocabulary: Dict[str, int]) -> None:
         file.write(text)
 
 
-def write_tensor(file: BinaryIO, name: str, values: np.ndarray) -> None:
+def to_bfloat16_bits(values: np.ndarray) -> np.ndarray:
+    """float32 -> bfloat16 bit patterns, rounding to nearest even (exact for bf16 sources)."""
+    bits = values.astype(np.float32).view(np.uint32)
+    rounding = 0x7FFF + ((bits >> 16) & 1)
+    return ((bits + rounding) >> 16).astype(np.uint16)
+
+
+def tensor_type(name: str, values: np.ndarray, weight_type: str) -> int:
+    if values.ndim < 2 or name in FLOAT32_TENSOR_NAMES or weight_type == "f32":
+        return GGML_TYPE_F32
+    if name in CONV_WEIGHT_NAMES:
+        return GGML_TYPE_F16  # whisper.cpp's conv tensors are f16 unless the model is f32
+    return MATRIX_TYPES[weight_type]
+
+
+def write_tensor(file: BinaryIO, name: str, values: np.ndarray, weight_type: str) -> None:
     values = values.squeeze()
     if name in CONV_BIAS_NAMES:
         values = values.reshape(values.shape[0], 1)
 
-    keep_float32 = values.ndim < 2 or name in FLOAT32_TENSOR_NAMES
-    if keep_float32:
-        data, ftype = values.astype(np.float32), GGML_FTYPE_FLOAT32
-    else:
-        data, ftype = values.astype(np.float16), GGML_FTYPE_FLOAT16
+    ggml_type = tensor_type(name, values, weight_type)
+    if ggml_type == GGML_TYPE_F32:
+        data = values.astype(np.float32)
+    elif ggml_type == GGML_TYPE_F16:
+        data = values.astype(np.float16)
         if not np.isfinite(data).all():
             sys.exit(f"error: {name} overflows float16")
+    else:
+        data = to_bfloat16_bits(values)
 
     encoded_name = name.encode("utf-8")
-    file.write(struct.pack("iii", data.ndim, len(encoded_name), ftype))
+    file.write(struct.pack("iii", data.ndim, len(encoded_name), ggml_type))
     file.write(struct.pack(f"{data.ndim}i", *reversed(data.shape)))
     file.write(encoded_name)
     file.write(np.ascontiguousarray(data).tobytes())
 
 
-def convert(model_dir: Path, mel_filters_path: Path, output_path: Path) -> Tuple[int, int]:
+def convert(model_dir: Path, mel_filters_path: Path, output_path: Path, weight_type: str) -> Tuple[int, int]:
     config = json.loads((model_dir / "config.json").read_text(encoding="utf-8"))
     vocabulary = json.loads((model_dir / "vocab.json").read_text(encoding="utf-8"))
     mel_band_count = config["num_mel_bins"]
@@ -200,21 +226,24 @@ def convert(model_dir: Path, mel_filters_path: Path, output_path: Path) -> Tuple
     output_path.parent.mkdir(parents=True, exist_ok=True)
     partial_path = output_path.with_suffix(output_path.suffix + ".partial")
     with partial_path.open("wb") as file:
-        write_header(file, config)
+        write_header(file, config, weight_type)
         write_mel_filters(file, mel_filters)
         write_vocabulary(file, vocabulary)
         for hf_name, values in tensors.items():
-            write_tensor(file, ggml_tensor_name(hf_name), values)
+            write_tensor(file, ggml_tensor_name(hf_name), values, weight_type)
     partial_path.rename(output_path)
     return len(tensors), mel_band_count
 
 
 def main() -> None:
-    if len(sys.argv) != 4:
-        sys.exit(__doc__)
-    model_dir, mel_filters_path, output_path = map(Path, sys.argv[1:])
-    tensor_count, mel_band_count = convert(model_dir, mel_filters_path, output_path)
-    print(f"wrote {output_path} ({tensor_count} tensors, {mel_band_count} mel bands)")
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("model_dir", type=Path)
+    parser.add_argument("mel_filters", type=Path)
+    parser.add_argument("output", type=Path)
+    parser.add_argument("--weight-type", choices=sorted(FILE_TYPES), default="f16")
+    arguments = parser.parse_args()
+    tensor_count, mel_band_count = convert(arguments.model_dir, arguments.mel_filters, arguments.output, arguments.weight_type)
+    print(f"wrote {arguments.output} ({tensor_count} tensors, {mel_band_count} mel bands, {arguments.weight_type})")
 
 
 if __name__ == "__main__":
