@@ -8,6 +8,7 @@ let package = Package(
     products: [
         .library(name: "TranscriberCore", targets: ["TranscriberCore"]),
         .library(name: "AudioFeatures", targets: ["AudioFeatures"]),
+        .library(name: "SpeechDetection", targets: ["SpeechDetection"]),
         .library(name: "WhisperCpp", targets: ["WhisperCpp"]),
         .executable(name: "transcriber-cli", targets: ["transcriber-cli"]),
     ],
@@ -17,6 +18,10 @@ let package = Package(
     targets: [
         .target(name: "TranscriberCore"),
         .target(name: "AudioFeatures"),
+        .target(
+            name: "SpeechDetection",
+            dependencies: ["TranscriberCore", "AudioFeatures"]
+        ),
         .target(
             name: "WhisperCpp",
             dependencies: ["TranscriberCore", "whisper"]
@@ -36,6 +41,11 @@ let package = Package(
         .testTarget(
             name: "AudioFeaturesTests",
             dependencies: ["AudioFeatures"],
+            resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "SpeechDetectionTests",
+            dependencies: ["SpeechDetection"],
             resources: [.copy("Fixtures")]
         ),
         .testTarget(
