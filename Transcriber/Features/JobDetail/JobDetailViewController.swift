@@ -75,12 +75,8 @@ final class JobDetailViewController: NSViewController {
         modeControl.target = self
         modeControl.action = #selector(modeChanged(_:))
         modeControl.segmentStyle = .automatic
-        let modeHint = NSTextField(labelWithString: String(localized: "Translate writes a new file next to this one; the original stays."))
-        modeHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        modeHint.textColor = .secondaryLabelColor
-        modeHint.lineBreakMode = .byTruncatingTail
-        modeHint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        modeBar.setViews([modeControl, modeHint], in: .leading)
+        modeControl.setToolTip(String(localized: "Translate writes a new file next to this one; the original stays."), forSegment: 1)
+        modeBar.setViews([modeControl], in: .leading)
         modeBar.edgeInsets = NSEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
         let content = NSStackView(views: [modeBar, splitView])
         content.orientation = .vertical

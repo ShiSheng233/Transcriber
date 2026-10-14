@@ -69,6 +69,9 @@ final class JobQueueViewModel {
     /// "ChickenRice v0.2 · 412 subtitles", or how many files are queued.
     var windowSubtitle: String {
         if let job = selectedJob {
+            if job.kind == .subtitleEditing {
+                return String(localized: "\(job.segments.count) subtitles")
+            }
             let task = Self.taskName(for: job)
             return job.segments.isEmpty ? task : String(localized: "\(task) · \(job.segments.count) subtitles")
         }
