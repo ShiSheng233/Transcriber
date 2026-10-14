@@ -100,7 +100,7 @@ let package = Package(
         ),
         .testTarget(
             name: "WhisperDecodingTests",
-            dependencies: ["WhisperDecoding"],
+            dependencies: ["WhisperDecoding", "TranscriberCore"],
             resources: [.copy("Fixtures")]
         ),
         // whisper.cpp built by `make whisper-xcframework` (see the root Makefile).

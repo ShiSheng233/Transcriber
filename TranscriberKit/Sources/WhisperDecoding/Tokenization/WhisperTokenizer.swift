@@ -7,6 +7,8 @@ import Foundation
 public struct WhisperTokenizer: Sendable {
     public let specialTokens: WhisperSpecialTokens
     public let vocabularySize: Int
+    /// The single space token "Ġ", suppressed as the first token.
+    public let spaceToken: Int
     /// The bytes of each regular token, indexed by id (all ids below `<|endoftext|>`).
     private let tokenBytes: [[UInt8]]
 
@@ -28,6 +30,9 @@ public struct WhisperTokenizer: Sendable {
         }
 
         let specialTokens = try WhisperSpecialTokens(addedTokens: addedTokens)
+        guard let spaceToken = vocabulary["Ġ"] else {
+            throw .missingSpecialToken("Ġ")
+        }
         let unicodeToByte = ByteLevelAlphabet.unicodeToByte
         var tokenBytes = [[UInt8]](repeating: [], count: specialTokens.endOfText)
         for (token, id) in vocabulary where id < specialTokens.endOfText {
@@ -42,6 +47,7 @@ public struct WhisperTokenizer: Sendable {
         }
 
         self.specialTokens = specialTokens
+        self.spaceToken = spaceToken
         self.vocabularySize = max(vocabulary.count, (addedTokens.values.max() ?? 0) + 1)
         self.tokenBytes = tokenBytes
     }
