@@ -6,9 +6,9 @@ import AudioFeatures
 public protocol WhisperBackend: Sendable {
     var melBandCount: Int { get }
 
-    /// Encodes the 3000 frames of `features` starting at `frameOffset`; frames
-    /// past the end are zeros, like faster-whisper's `pad_or_trim`.
-    func makeSession(features: LogMelFeatures, frameOffset: Int) throws -> any WhisperDecoderSession
+    /// Encodes one 30 s window: exactly `LogMelSpectrogram.windowFrameCount`
+    /// frames, already padded (see `LogMelFeatures.paddedWindow`).
+    func makeSession(window: LogMelFeatures) throws -> any WhisperDecoderSession
 }
 
 /// One encoded 30 s window and the decoder's key/value cache.

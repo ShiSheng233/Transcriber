@@ -49,14 +49,16 @@ let package = Package(
         ),
         .target(
             name: "WhisperCpp",
-            dependencies: ["TranscriberCore", "whisper"]
+            dependencies: ["TranscriberCore", "AudioFeatures", "WhisperDecoding", "whisper"]
         ),
         .executableTarget(
             name: "transcriber-cli",
             dependencies: [
                 "TranscriberCore",
+                "AudioFeatures",
                 "MediaDecoding",
                 "WhisperCpp",
+                "WhisperDecoding",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ]
         ),
