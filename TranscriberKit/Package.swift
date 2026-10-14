@@ -41,7 +41,10 @@ let package = Package(
         ),
         .target(
             name: "TranscriptionPipeline",
-            dependencies: ["TranscriberCore"]
+            dependencies: [
+                "TranscriberCore", "AudioFeatures", "MediaDecoding", "SpeechDetection",
+                "SubtitlePostProcessing", "WhisperDecoding",
+            ]
         ),
         .target(
             name: "WhisperDecoding",
@@ -57,6 +60,9 @@ let package = Package(
                 "TranscriberCore",
                 "AudioFeatures",
                 "MediaDecoding",
+                "SpeechDetection",
+                "SubtitleExport",
+                "TranscriptionPipeline",
                 "WhisperCpp",
                 "WhisperDecoding",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),

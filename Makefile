@@ -277,6 +277,7 @@ VAD_SHA256      := cd47513515766d57f740e3094440dbbca9ab87e026b9cf21540d7ad588c0e
 VAD_ONNX        := $(DOWNLOADS_DIR)/whisper-vad-asmr/model.onnx
 VAD_CONVERTER   := Tools/model-conversion/convert_vad_to_coreml.py
 VAD_MLPACKAGE   := $(MODELS_DIR)/vad/whisper-vad-asmr.mlpackage
+VAD_MLMODELC    := $(MODELS_DIR)/vad/whisper-vad-asmr.mlmodelc
 
 $(VAD_ONNX):
 	mkdir -p $(@D)
@@ -288,7 +289,12 @@ $(VAD_MLPACKAGE): $(VAD_CONVERTER) $(VAD_ONNX)
 	mkdir -p $(@D)
 	uv run --script $(VAD_CONVERTER) $(VAD_ONNX) $@ | tee $(MODELS_DIR)/vad/conversion-report.json
 
-vad-model: $(VAD_MLPACKAGE)
+# Compiled once here for development; the app compiles the package on the user's Mac.
+$(VAD_MLMODELC): $(VAD_MLPACKAGE)
+	rm -rf $@
+	xcrun coremlcompiler compile $< $(@D) >/dev/null
+
+vad-model: $(VAD_MLMODELC)
 
 # Parity fixtures --------------------------------------------------------------
 #
