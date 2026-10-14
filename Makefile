@@ -168,6 +168,9 @@ parity-fixtures: | $(CHICKENRICE_SOURCE) $(VAD_ONNX)
 		$(CHICKENRICE_PACKAGE)/vad_manager.py $(TEST_FIXTURES)/SpeechDetectionTests/Fixtures/segmenter-cases.json
 	uv run --script Tools/parity/make_vad_fixture.py \
 		$(VAD_ONNX) $(TEST_FIXTURES)/SpeechDetectionTests/Fixtures
+	uv run --script Tools/parity/make_postprocessing_fixture.py $(CHICKENRICE_PACKAGE)/infer.py \
+		$(TEST_FIXTURES)/TranscriptionPipelineTests/Fixtures/chunk-cases.json \
+		$(TEST_FIXTURES)/SubtitlePostProcessingTests/Fixtures/postprocessing-cases.json
 
 # TranscriberKit ---------------------------------------------------------------
 
