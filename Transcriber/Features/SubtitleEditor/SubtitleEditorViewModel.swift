@@ -38,6 +38,9 @@ final class SubtitleEditorViewModel {
     private(set) var playingIndex: Int?
     private(set) var playbackTime = AudioTime.zero
 
+    /// The cursor is in the edit box: playback must not change the line.
+    @ObservationIgnored var isEditingInEditBox = false
+
     /// The window's undo manager; set by the view.
     @ObservationIgnored weak var undoManager: UndoManager?
     /// Edited lines, for the queue to keep.
@@ -115,11 +118,16 @@ final class SubtitleEditorViewModel {
         isEditable = editable
     }
 
-    func playbackTimeChanged(to time: AudioTime) {
+    /// While playing, the grid follows: the line being spoken becomes the
+    /// selected one (unless the user is typing in the edit box).
+    func playbackTimeChanged(to time: AudioTime, isPlaying: Bool) {
         playbackTime = time
         let index = lines.firstIndex { time >= $0.start && time < $0.end }
         if index != playingIndex {
             playingIndex = index
+            if isPlaying, let index, !isEditingInEditBox, selection != [index] {
+                select([index])
+            }
         }
     }
 

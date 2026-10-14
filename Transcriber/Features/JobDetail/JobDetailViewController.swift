@@ -136,7 +136,8 @@ final class JobDetailViewController: NSViewController {
         super.viewDidAppear()
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 10), queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
-                self?.viewModel.playbackTimeChanged(to: time.seconds)
+                guard let self else { return }
+                self.viewModel.playbackTimeChanged(to: time.seconds, isPlaying: self.player.rate > 0)
             }
         }
     }

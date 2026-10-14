@@ -195,10 +195,17 @@ final class SubtitleEditorView: NSView {
             tableView.selectRowIndexes(selection, byExtendingSelection: false)
             isApplyingSelection = false
             if let first = selection.first {
-                tableView.scrollRowToVisible(first)
+                scrollToShow(row: first)
             }
         }
         renderEditBox()
+    }
+
+    /// Keeps a few rows of context below the row, like Aegisub's margin, so
+    /// a followed line is never pinned to the bottom edge.
+    private func scrollToShow(row: Int) {
+        tableView.scrollRowToVisible(min(row + 3, tableView.numberOfRows - 1))
+        tableView.scrollRowToVisible(max(row - 1, 0))
     }
 
     private func renderEditBox() {
@@ -292,6 +299,18 @@ extension SubtitleEditorView: NSTextViewDelegate, NSTextFieldDelegate {
         viewModel.setText(textView.string)
     }
 
+    func textDidBeginEditing(_ notification: Notification) {
+        viewModel.isEditingInEditBox = true
+    }
+
+    func textDidEndEditing(_ notification: Notification) {
+        viewModel.isEditingInEditBox = false
+    }
+
+    func controlTextDidBeginEditing(_ notification: Notification) {
+        viewModel.isEditingInEditBox = true
+    }
+
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         guard commandSelector == #selector(NSResponder.insertNewline(_:)) else {
             return false
@@ -305,6 +324,7 @@ extension SubtitleEditorView: NSTextViewDelegate, NSTextFieldDelegate {
     }
 
     func controlTextDidEndEditing(_ notification: Notification) {
+        viewModel.isEditingInEditBox = false
         if let field = notification.object as? NSTextField, field === startField || field === endField {
             commit(timeField: field)
         }

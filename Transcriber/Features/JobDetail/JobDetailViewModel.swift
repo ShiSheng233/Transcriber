@@ -95,8 +95,8 @@ final class JobDetailViewModel {
         }
     }
 
-    func playbackTimeChanged(to seconds: Double) {
+    func playbackTimeChanged(to seconds: Double, isPlaying: Bool = false) {
         guard seconds.isFinite else { return }
-        editor.playbackTimeChanged(to: AudioTime(seconds: max(seconds, 0)))
+        editor.playbackTimeChanged(to: AudioTime(seconds: max(seconds, 0)), isPlaying: isPlaying)
     }
 }
