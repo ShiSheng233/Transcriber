@@ -47,7 +47,7 @@ WHISPER_CMAKE_FLAGS := \
 	-DGGML_NATIVE=OFF \
 	-DGGML_OPENMP=OFF
 
-.PHONY: FORCE help whisper-xcframework ffmpeg-xcframeworks whisper-models whisper-models-q8_0 mlx-models vad-model parity-fixtures baseline-a ours parity-report build test clean-tools
+.PHONY: FORCE help whisper-xcframework ffmpeg-xcframeworks whisper-models whisper-models-q8_0 mlx-models vad-model parity-fixtures baseline-a ours parity-report build test clean-tools release release-archive release-export release-notarize release-cask release-publish
 
 help:
 	@echo "make whisper-xcframework  Build whisper.cpp $(WHISPER_VERSION) into $(WHISPER_XCFRAMEWORK)"
@@ -63,6 +63,8 @@ help:
 	@echo "make build                Build TranscriberKit and transcriber-cli"
 	@echo "make test                 Run TranscriberKit tests"
 	@echo "make clean-tools          Delete $(TOOLS_DIR) (downloads and intermediates)"
+	@echo "make release              Archive, sign with Developer ID, notarize, zip and write the cask (docs/RELEASING.md)"
+	@echo "make release-publish      Push, create the GitHub release and update the Homebrew tap"
 
 whisper-xcframework: $(WHISPER_XCFRAMEWORK)
 
@@ -449,3 +451,85 @@ test: $(WHISPER_XCFRAMEWORK)
 
 clean-tools:
 	rm -rf $(TOOLS_DIR)
+
+# Release ----------------------------------------------------------------------
+#
+# Developer ID build for direct download and the Homebrew tap; the full
+# checklist is docs/RELEASING.md. The version is MARKETING_VERSION in the
+# Xcode project. Signing uses Xcode's cloud-managed Developer ID certificate
+# (-allowProvisioningUpdates), so none has to be in the keychain; notarization
+# uses the keychain profile saved once with
+# `xcrun notarytool store-credentials $(NOTARY_PROFILE)`.
+#
+# Archives get their own derived data folder: macOS stops Xcode from deleting
+# an app bundle that a command-line build made in Xcode's DerivedData.
+
+RELEASE_DIR      := build
+RELEASE_VERSION   = $(shell sed -n 's/.*MARKETING_VERSION = \(.*\);/\1/p' Transcriber.xcodeproj/project.pbxproj | sort -u)
+RELEASE_ARCHIVE  := $(RELEASE_DIR)/Transcriber.xcarchive
+RELEASE_APP      := $(RELEASE_DIR)/export/Transcriber.app
+RELEASE_ZIP       = $(RELEASE_DIR)/Transcriber-$(RELEASE_VERSION).zip
+RELEASE_CASK     := $(RELEASE_DIR)/transcriber.rb
+CASK_TEMPLATE    := Packaging/transcriber.rb.in
+NOTARY_PROFILE   ?= transcriber-notary
+NOTARY           := xcrun notarytool
+GITHUB_REPO      := ShiSheng233/Transcriber
+TAP_DIR          ?= ../homebrew-tap
+
+release:
+	@[ $$(echo "$(RELEASE_VERSION)" | wc -w) -eq 1 ] || { echo "Debug and Release disagree on MARKETING_VERSION: $(RELEASE_VERSION)"; exit 1; }
+	$(MAKE) release-archive
+	$(MAKE) release-export
+	$(MAKE) release-notarize
+	$(MAKE) release-cask
+
+# Only checks for the vendored frameworks: as prerequisites, FFmpeg's would be
+# rebuilt whenever .build-tools has been cleaned.
+release-archive:
+	@for framework in $(WHISPER_XCFRAMEWORK) $(FFMPEG_XCFRAMEWORKS); do \
+		[ -d $$framework ] || { echo "Missing $$framework; run make whisper-xcframework ffmpeg-xcframeworks"; exit 1; }; \
+	done
+	rm -rf $(RELEASE_ARCHIVE)
+	xcodebuild archive -project Transcriber.xcodeproj -scheme Transcriber -configuration Release \
+		-destination 'generic/platform=macOS' -archivePath $(RELEASE_ARCHIVE) \
+		-derivedDataPath $(RELEASE_DIR)/DerivedData -allowProvisioningUpdates
+
+# RELEASE_ARCHIVE can be overridden to export an archive made in Xcode's Organizer.
+release-export:
+	rm -rf $(RELEASE_DIR)/export
+	xcodebuild -exportArchive -archivePath "$(RELEASE_ARCHIVE)" -exportOptionsPlist ExportOptions.plist \
+		-exportPath $(RELEASE_DIR)/export -allowProvisioningUpdates
+
+# `notarytool submit --wait` can return before Apple finishes, so the status is
+# checked explicitly; on rejection Apple's log says which file failed.
+release-notarize:
+	rm -f $(RELEASE_DIR)/notarize.zip
+	ditto -c -k --keepParent $(RELEASE_APP) $(RELEASE_DIR)/notarize.zip
+	id=$$($(NOTARY) submit $(RELEASE_DIR)/notarize.zip --keychain-profile $(NOTARY_PROFILE) --output-format json | plutil -extract id raw -) && \
+	echo "Notarization submission $$id" && \
+	$(NOTARY) wait $$id --keychain-profile $(NOTARY_PROFILE) --timeout 2h; \
+	status=$$($(NOTARY) info $$id --keychain-profile $(NOTARY_PROFILE) --output-format json | plutil -extract status raw -); \
+	echo "Notarization status: $$status"; \
+	if [ "$$status" != Accepted ]; then $(NOTARY) log $$id --keychain-profile $(NOTARY_PROFILE); exit 1; fi
+	rm $(RELEASE_DIR)/notarize.zip
+	xcrun stapler staple $(RELEASE_APP)
+	spctl --assess --type execute -vv $(RELEASE_APP)
+	rm -f $(RELEASE_ZIP)
+	ditto -c -k --keepParent $(RELEASE_APP) $(RELEASE_ZIP)
+
+release-cask:
+	sed -e "s/@VERSION@/$(RELEASE_VERSION)/" -e "s/@SHA256@/$$(shasum -a 256 $(RELEASE_ZIP) | cut -d' ' -f1)/" \
+		$(CASK_TEMPLATE) > $(RELEASE_CASK)
+	@echo "Built $(RELEASE_ZIP) and $(RELEASE_CASK)"
+
+# Publishing: the GitHub release (tag v<version> on the pushed HEAD), then the cask in the tap.
+release-publish:
+	git diff --quiet HEAD || { echo "Commit the release changes first"; exit 1; }
+	git push origin HEAD
+	gh release create v$(RELEASE_VERSION) $(RELEASE_ZIP) --repo $(GITHUB_REPO) \
+		--target $$(git rev-parse HEAD) --title "Transcriber $(RELEASE_VERSION)" --generate-notes
+	mkdir -p $(TAP_DIR)/Casks
+	cp $(RELEASE_CASK) $(TAP_DIR)/Casks/transcriber.rb
+	git -C $(TAP_DIR) add Casks/transcriber.rb
+	git -C $(TAP_DIR) commit -m "transcriber $(RELEASE_VERSION)"
+	git -C $(TAP_DIR) push origin HEAD

@@ -23,3 +23,6 @@ __pycache__/
 # Parity media and outputs (user files, make baseline-a)
 /ParityMedia/
 /Parity/
+
+# Release archives and exports
+/build/
