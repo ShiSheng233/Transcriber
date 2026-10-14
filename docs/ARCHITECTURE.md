@@ -13,7 +13,7 @@ macOS 原生字幕生成工具。把 [Faster-Whisper-TransWithAI-ChickenRice](ht
 | VAD | **TransWithAI ASMR VAD 转 Core ML**；不使用 whisper.cpp 自带的 Silero VAD |
 | 链路 | 媒体解码、VAD、智能切块、语音拼接、时间戳映射、逐步 logits 处理、温度回退、分段、后处理全部在 Swift 中实现；后端只做张量计算 |
 | 模型 | **App 不内置模型**。我们自己转换（ggml、MLX、Core ML）并单独分发；App 下载到用户指定的模型目录。现阶段不公开，转换产物放在本仓库的 `Models/`（已 gitignore） |
-| 目标硬件 | 高端 Mac 优先，**模型保持原精度（f16），默认不量化**；量化目标保留在 Makefile 中但不构建。开发与性能基线机：**M5 Max / 64GB** |
+| 目标硬件 | 高端 Mac 优先，**模型保持训练时的原精度：海南鸡 bf16、whisper-ja f16，默认不量化**；量化目标保留在 Makefile 中但不构建。whisper.cpp **默认关闭 flash attention**（见 §9 实测）。开发与性能基线机：**M5 Max / 64GB** |
 | 移植策略 | 默认行为与原项目一致，可选改进项单独开关；用对拍集量化验证（见 §9） |
 | LLM | OpenRouter，两种模式：A 润色海南鸡中文输出 / B 日文转写 → 翻译到任意语言 |
 | 首版范围 | 批处理队列 + 进度 + 视频/音频与字幕对照预览 + 导出 |
@@ -195,14 +195,15 @@ whisper.cpp 以 `WHISPER_COREML=ON` + `WHISPER_COREML_ALLOW_FALLBACK=ON` 自行�
 
 | 产物 | 来源 | 转换方式 | 状态 |
 | --- | --- | --- | --- |
-| 海南鸡 v0.2 ggml f16 | `chickenrice0721/whisper-large-v2-translate-zh-v0.2-st`（HF safetensors，bf16） | `Tools/model-conversion/convert_whisper_to_ggml.py` | ✅ 已转换并在 whisper.cpp 中加载 |
-| whisper-ja-1.5B ggml f16 | `efwkjn/whisper-ja-1.5B`（f32/f16 混合，128 mel） | 同上 | 下载中 |
-| 海南鸡 / whisper-ja MLX f16 | 同上两个 HF 仓库 | mlx-whisper `convert.py`（`hf_to_pt`） | 待做 |
+| 海南鸡 v0.2 ggml **bf16** | `chickenrice0721/whisper-large-v2-translate-zh-v0.2-st`（HF safetensors，bf16） | `convert_whisper_to_ggml.py --weight-type bf16`（无损） | ✅ |
+| whisper-ja-1.5B ggml f16 | `efwkjn/whisper-ja-1.5B`（f32/f16 混合，128 mel） | 同上，`--weight-type f16` | ✅ |
+| 海南鸡 MLX bf16 / whisper-ja MLX f16 | 同上两个 HF 仓库 | mlx-whisper 的 `convert()`（经 `convert_whisper_to_mlx.py`，保留原精度） | ✅ |
 | ASMR VAD Core ML（fp16） | `TransWithAI/Whisper-Vad-EncDec-ASMR-onnx` | `convert_vad_to_coreml.py`：ONNX → onnx2torch → Core ML；与 ONNX Runtime 概率误差 0.0035 | ✅ |
 
 - 用自己写的转换器而不是 whisper.cpp 的 `convert-h5-to-ggml.py`：后者依赖 PyTorch，处理不了 bf16 的 `.numpy()`，会把小张量先压到 f16 再转回 f32，而且遇到不与词嵌入绑定的 `proj_out` 会静默丢弃。我们的转换器只依赖 NumPy，并且对未绑定的 `proj_out` 报错（海南鸡单独存了 `proj_out`，已验证与词嵌入完全相同）。
 - 都从 HF safetensors 版转换，不从 `-ct2` 版：CT2 是单向格式，权重相同。
 - 默认不量化；`make whisper-models-q8_0` 保留但不构建。
+- 每个模型旁附带自己的 `tokenizer.json`（Swift 解码器从中读取特殊 token 与词表）。
 
 转换由 Makefile 驱动（`make whisper-models`、`make vad-model`），所有上游版本钉死到提交哈希。产物进 `Models/`（gitignore），下载与缓存在 `.build-tools/`（`make clean-tools` 一次清空）。
 
@@ -260,26 +261,43 @@ ViewModel 的单元测试放在 `TranscriberTests`，用假的 Service 实现驱
 
 两个基准：
 
-- **基准 A（原版）：** 在本机用原 Python 项目（CTranslate2 CPU）对 10–20 个文件生成 SRT，覆盖 ASMR、动画、长静音、背景音乐、多人对话、mkv 等；同时保存中间结果（VAD 区间、切块边界、每个窗口的原始 segments）。
-- **基准 B（MLX 原型）：** mlx-whisper + 原项目的 VAD（onnxruntime）+ 原项目的切块与合并代码 + 约 10 行的 RepetitionPenalty LogitFilter。先确认“换了推理引擎质量没掉”（B 对 A），之后 Swift 版在本机就有参照；VAD 拼接、时间映射等逻辑也先在 Python 里调通再翻译成 Swift。
+- **基准 A（原版）：** `make baseline-a` 在本机用原 Python 项目（固定提交、官方 CT2 模型、CPU float32）跑 `ParityMedia/` 下的文件。`make ours` 跑我们的管线，`make parity-report` 输出对比。
+- **基准 B（MLX 原型）：** mlx-whisper + 原项目的 VAD + 切块与合并代码 + RepetitionPenalty。用于确认换引擎后质量不掉，并在 Python 中先调通逻辑。
+
+### 9.1 已有实测（64 s 日语 TTS 样本，M5 Max）
+
+“噪声底”是原版自己在两种合法配置（float32 与 int8）之间的差异，低于它的差异不视为移植问题。
+
+| 配置 | 任务 | CER | BLEU | 条数（原版/我们） | Δ起始 / Δ结束 | 速度 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 原版 float32 对 原版 int8（噪声底） | translate | 7.4% | 91.9 | 10/11 | 4 / 355 ms | — |
+| whisper.cpp f16 + flash attention | translate | 22.8% | 75.3 | 10/13 | 273 / 430 ms | 14.1× |
+| whisper.cpp f16，无 flash | translate | 11.8% | 87.0 | 10/10 | 2 / 46 ms | 10.8× |
+| whisper.cpp f32，无 flash | translate | 9.6% | 88.8 | 10/10 | 2 / 62 ms | 7.8× |
+| **whisper.cpp bf16，无 flash（默认）** | translate | **8.1%** | **90.1** | **10/10** | **2 / 162 ms** | **10.3×** |
+| **whisper.cpp f16，无 flash（默认）** | transcribe | **0.0%** | **100** | **6/6** | **0 / 0 ms** | **30.8×** |
+
+结论：Metal flash attention 用 f16 累加，改变了海南鸡的时间戳 token，导致分段不同，所以默认关闭；海南鸡用训练时的 bf16 最接近原版，f32 并不更好。whisper-ja 与原版完全一致，说明 VAD、切块、拼接、时间映射、解码规则、合并整条链路逻辑正确。
+
+单窗口对照（`transcriber-cli decode-window` 对 `capture_faster_whisper_windows.py`）：avg_logprob −0.5850 对 −0.5849，前 7 个 token（含 1.44 s 初始时间戳）完全相同。
 
 ## 10. 路线图
 
 ### Phase 0：去风险
 
 1. ✅ 工程调整：AppKit 生命周期、macOS 15、arm64、无沙盒、Swift 6；本地 Swift Package `TranscriberKit` 与 `transcriber-cli`。
-2. ✅ 自行构建依赖：whisper.cpp v1.9.5（Metal + Core ML fallback，`make whisper-xcframework`）、FFmpeg 9.0.2（`make ffmpeg-xcframeworks`）。
-3. 模型转换：✅ 海南鸡 ggml、✅ ASMR VAD Core ML；whisper-ja-1.5B ggml（下载中）；两个模型的 MLX 版本。
-4. ✅ 确定性模块，均已对原项目逐项验证：`AudioFeatures`（VAD 前端）、`SpeechDetection`、`ChunkPlanner`、`SubtitlePostProcessing`、`SubtitleExport`、`MediaDecoding`。
-5. 基准 A：在本机跑原 Python 项目，生成对拍基准。
-6. 基准 B：mlx-whisper Python 原型，对比基准 A；顺带测 M5 Max 上的 MLX 速度。
-7. `WhisperDecoding`：faster-whisper 版 mel、分词器、CTranslate2 版逐步 logits 处理、采样、回退、分段、seek、时间映射；先接 whisper.cpp 后端，单窗口与基准 A 比对。
+2. ✅ 自行构建依赖：whisper.cpp v1.9.5（Metal + Core ML fallback）、FFmpeg 9.0.2。
+3. ✅ 模型转换：ggml（海南鸡 bf16、whisper-ja f16）、MLX（同精度）、ASMR VAD Core ML；下载可断点续传并校验 SHA-256。
+4. ✅ 确定性模块逐项对原项目验证：`AudioFeatures`（两种前端）、`SpeechDetection`、`ChunkPlanner`、`SubtitlePostProcessing`、`SubtitleExport`、`MediaDecoding`。
+5. ✅ 基准 A 工具链（`make baseline-a` / `ours` / `parity-report`）；**等待真实测试媒体**放入 `ParityMedia/`。
+6. 基准 B：mlx-whisper Python 原型（模型已就绪并冒烟通过）。
+7. ✅ `WhisperDecoding`：分词器、CTranslate2 逐步 logits 处理、采样、回退、分段、seek、VAD 时间映射；whisper.cpp 后端；`TranscriptionPipeline` 端到端可用（`transcriber-cli transcribe`）。
 8. `WhisperMLX` 后端：先读 mlx-audio-swift 源码决定复用还是自己移植；跨 chunk batch 解码。
-9. 性能（M5 Max / 64GB）：whisper.cpp 并发 state 数 1 / 2 / 4 / 8 对比 MLX batch 1 / 4 / 8，测实时倍率与峰值内存，据此定默认后端与并发。
+9. 性能：whisper.cpp 多 state 并行 chunk 对比 MLX batch，定默认后端与并发。
 
 ### Phase 1：完整链路（CLI 可用）
 
-`TranscriptionPipeline` 串起全部模块；`transcriber-cli transcribe` 与 `transcriber-cli parity`；对拍集全量通过。
+✅ 已提前完成主体（Phase 0 第 7 步）。剩余：真实媒体对拍全量通过、chunk 并行、进度事件改为 `AsyncThrowingStream`。
 
 ### Phase 2：AppKit 应用
 
