@@ -14,6 +14,7 @@ let package = Package(
         .library(name: "SubtitlePostProcessing", targets: ["SubtitlePostProcessing"]),
         .library(name: "TranscriptionPipeline", targets: ["TranscriptionPipeline"]),
         .library(name: "WhisperCpp", targets: ["WhisperCpp"]),
+        .library(name: "WhisperDecoding", targets: ["WhisperDecoding"]),
         .executable(name: "transcriber-cli", targets: ["transcriber-cli"]),
     ],
     dependencies: [
@@ -40,6 +41,10 @@ let package = Package(
         ),
         .target(
             name: "TranscriptionPipeline",
+            dependencies: ["TranscriberCore"]
+        ),
+        .target(
+            name: "WhisperDecoding",
             dependencies: ["TranscriberCore"]
         ),
         .target(
@@ -92,6 +97,11 @@ let package = Package(
         .testTarget(
             name: "WhisperCppTests",
             dependencies: ["WhisperCpp"]
+        ),
+        .testTarget(
+            name: "WhisperDecodingTests",
+            dependencies: ["WhisperDecoding"],
+            resources: [.copy("Fixtures")]
         ),
         // whisper.cpp built by `make whisper-xcframework` (see the root Makefile).
         .binaryTarget(name: "whisper", path: "Vendor/whisper.xcframework"),

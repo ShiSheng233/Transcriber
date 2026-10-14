@@ -214,6 +214,12 @@ $(MODELS_DIR)/whisper/$(1).bin: $(GGML_CONVERTER)
 	$(MAKE) $(MEL_FILTERS) $(DOWNLOADS_DIR)/$(1)/config.json $(DOWNLOADS_DIR)/$(1)/vocab.json $(DOWNLOADS_DIR)/$(1)/model.safetensors
 	uv run --script $(GGML_CONVERTER) $(DOWNLOADS_DIR)/$(1) $(MEL_FILTERS) $$@
 
+# The Swift decoder reads token ids and text from the model's own tokenizer.json.
+$(MODELS_DIR)/whisper/$(1).tokenizer.json:
+	$(MAKE) $(DOWNLOADS_DIR)/$(1)/tokenizer.json
+	mkdir -p $$(@D)
+	cp $(DOWNLOADS_DIR)/$(1)/tokenizer.json $$@
+
 $(MODELS_DIR)/whisper/$(1)-q8_0.bin: $(MODELS_DIR)/whisper/$(1).bin $(WHISPER_QUANTIZE)
 	$(WHISPER_QUANTIZE) $$< $$@ q8_0
 endef
@@ -221,7 +227,7 @@ endef
 $(eval $(call whisper_model,chickenrice-v0.2,chickenrice0721/whisper-large-v2-translate-zh-v0.2-st,cc6f01704d188c6ed2d1ab84b83734f964c9a45a,0abdde18518f3902913e4e2124145fb7d4635ebba88fd5c035b71819ec328ad0))
 $(eval $(call whisper_model,whisper-ja-1.5b,efwkjn/whisper-ja-1.5B,72c13fb7b6cc2a831780cdd79cd1a829e77bab02,0bf92cf794ebb2cef2699c24dc71184be6a1ac133cc3c64f228ea08173d0155f))
 
-WHISPER_MODEL_FILES := $(foreach model,$(WHISPER_MODELS),$(MODELS_DIR)/whisper/$(model).bin)
+WHISPER_MODEL_FILES := $(foreach model,$(WHISPER_MODELS),$(MODELS_DIR)/whisper/$(model).bin $(MODELS_DIR)/whisper/$(model).tokenizer.json)
 
 whisper-models: $(WHISPER_MODEL_FILES)
 	cd $(MODELS_DIR)/whisper && shasum -a 256 $(notdir $(WHISPER_MODEL_FILES)) > SHA256SUMS
@@ -239,7 +245,7 @@ MLX_EXAMPLES_COMMIT := 796f5b53cab69a3d48a44233ce21aae889e94a08
 # weights.safetensors while convert.py at this commit writes model.safetensors.
 MLX_WHISPER_PACKAGE := mlx-whisper @ git+https://github.com/ml-explore/mlx-examples@$(MLX_EXAMPLES_COMMIT)\#subdirectory=whisper
 MLX_CONVERTER       := $(DOWNLOADS_DIR)/mlx-examples-$(MLX_EXAMPLES_COMMIT)/convert.py
-MLX_MODEL_FILES     := $(foreach model,$(WHISPER_MODELS),$(MODELS_DIR)/mlx/$(model)/model.safetensors)
+MLX_MODEL_FILES     := $(foreach model,$(WHISPER_MODELS),$(MODELS_DIR)/mlx/$(model)/model.safetensors $(MODELS_DIR)/mlx/$(model)/tokenizer.json)
 
 $(MLX_CONVERTER):
 	mkdir -p $(@D)
@@ -250,6 +256,10 @@ $(MODELS_DIR)/mlx/$(1)/model.safetensors:
 	$(MAKE) $(MLX_CONVERTER) $(DOWNLOADS_DIR)/$(1)/config.json $(DOWNLOADS_DIR)/$(1)/model.safetensors
 	uv run --no-project --python 3.12 --with "$(MLX_WHISPER_PACKAGE)" \
 		python $(MLX_CONVERTER) --torch-name-or-path $(DOWNLOADS_DIR)/$(1) --mlx-path $$(@D) --dtype float16
+
+$(MODELS_DIR)/mlx/$(1)/tokenizer.json: $(MODELS_DIR)/whisper/$(1).tokenizer.json
+	mkdir -p $$(@D)
+	cp $$< $$@
 endef
 
 $(foreach model,$(WHISPER_MODELS),$(eval $(call mlx_model,$(model))))
@@ -309,6 +319,11 @@ parity-fixtures: | $(CHICKENRICE_SOURCE) $(VAD_ONNX)
 	uv run --script Tools/parity/make_subtitle_fixture.py $(CHICKENRICE_PACKAGE)/infer.py \
 		$(TEST_FIXTURES)/SubtitleExportTests/Fixtures
 	uv run --script Tools/parity/make_decode_fixture.py $(TEST_FIXTURES)/MediaDecodingTests/Fixtures
+	$(MAKE) $(foreach model,$(WHISPER_MODELS),$(MODELS_DIR)/whisper/$(model).tokenizer.json)
+	cp $(MODELS_DIR)/whisper/chickenrice-v0.2.tokenizer.json $(MODELS_DIR)/whisper/whisper-ja-1.5b.tokenizer.json \
+		$(TEST_FIXTURES)/WhisperDecodingTests/Fixtures/
+	uv run --script Tools/parity/make_tokenizer_fixture.py $(TEST_FIXTURES)/WhisperDecodingTests/Fixtures/tokenizer-cases.json \
+		$(foreach model,$(WHISPER_MODELS),$(model)=$(MODELS_DIR)/whisper/$(model).tokenizer.json)
 
 # Baseline A: the original pipeline ---------------------------------------------
 #
