@@ -11,10 +11,12 @@ struct SubtitleEditingTests {
     @Test mutating func insertsAfterAndBefore() {
         let after = SubtitleEditing.insert(after: 1, in: lines)
         #expect(after.lines.count == 4 && after.selection == [2])
-        #expect(after.lines[2] == line(2, 4, ""))
-        let before = SubtitleEditing.insert(before: 0, in: lines)
-        #expect(before.lines[0] == line(0, 0, ""))  // cannot start before zero
-        #expect(SubtitleEditing.insert(after: 0, in: []).lines == [line(0, 2, "")])
+        #expect(after.lines[2] == line(2, 5, ""))  // 3 s, up to the next line's start
+        #expect(SubtitleEditing.insert(after: 0, in: lines).lines[1] == line(1, 4, ""))  // no gap to fill: full length
+        let before = SubtitleEditing.insert(before: 2, in: lines)
+        #expect(before.lines[2] == line(2, 5, ""))  // from the previous end
+        #expect(SubtitleEditing.insert(before: 0, in: lines).lines[0] == line(0, 0, ""))  // never before zero
+        #expect(SubtitleEditing.insert(after: 0, in: []).lines == [line(0, 3, "")])
     }
 
     @Test mutating func duplicatesAndDeletes() {
@@ -53,6 +55,15 @@ struct SubtitleEditingTests {
     @Test mutating func setsTimesWithoutCrossing() {
         let result = SubtitleEditing.setTimes(0, start: AudioTime(seconds: 3), in: lines)
         #expect(result.lines[0] == line(3, 3, "a"))
-        #expect(SubtitleEditing.charactersPerSecond(line(0, 2, "四个字儿 ab")) == 3)
+        #expect(SubtitleEditing.charactersPerSecond(line(0, 2, "四个字儿，ab！")) == 3)  // no spaces or punctuation
+        #expect(SubtitleEditing.charactersPerSecond(line(0, 0.1, "abc")) == nil)
+    }
+
+    @Test mutating func makesTimesContinuousAndFindsOverlaps() {
+        #expect(SubtitleEditing.makeContinuous([2], changing: .start, in: lines).lines[2] == line(2, 6, "c"))
+        #expect(SubtitleEditing.makeContinuous([1], changing: .end, in: lines).lines[1] == line(1, 5, "b"))
+        let overlapping = [line(0, 2, "a"), line(1, 3, "b"), line(3, 4, "c")]
+        #expect(SubtitleEditing.overlapping(1, in: overlapping) == [0])
+        #expect(SubtitleEditing.longestLineLength("ab\nabcd") == 4)
     }
 }

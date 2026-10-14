@@ -11,6 +11,8 @@ final class MainWindowController: NSWindowController {
 
     private let queueViewModel: JobQueueViewModel
     private let detailViewModel = JobDetailViewModel()
+    private let detailViewController: JobDetailViewController
+    private lazy var findReplaceSheet = FindReplaceSheet(editor: detailViewModel.editor)
     private let openSettings: () -> Void
     private var binder: ObservationBinder?
     private lazy var modelPopUp: NSPopUpButton = {
@@ -29,6 +31,10 @@ final class MainWindowController: NSWindowController {
     ) {
         self.queueViewModel = queueViewModel
         self.openSettings = openSettings
+        detailViewController = JobDetailViewController(viewModel: detailViewModel)
+        detailViewModel.onEdit = { [queueViewModel] jobID, lines in
+            queueViewModel.updateSubtitles(of: jobID, to: lines)
+        }
 
         let splitViewController = NSSplitViewController()
         let sidebar = NSSplitViewItem(sidebarWithViewController: JobQueueViewController(
@@ -37,7 +43,7 @@ final class MainWindowController: NSWindowController {
         sidebar.minimumThickness = 260
         sidebar.canCollapse = false
         splitViewController.addSplitViewItem(sidebar)
-        splitViewController.addSplitViewItem(NSSplitViewItem(viewController: JobDetailViewController(viewModel: detailViewModel)))
+        splitViewController.addSplitViewItem(NSSplitViewItem(viewController: detailViewController))
 
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: Self.initialContentSize),
@@ -66,6 +72,7 @@ final class MainWindowController: NSWindowController {
         detailViewModel.show(queueViewModel.selectedJob)
         window?.title = queueViewModel.windowTitle
         window?.subtitle = queueViewModel.windowSubtitle
+        window?.isDocumentEdited = !queueViewModel.unsavedJobIDs.isEmpty
         _ = detailViewModel.showsPlayer  // re-validate the Player item when it changes
         window?.toolbar?.validateVisibleItems()
         renderModelMenu()
@@ -190,9 +197,148 @@ final class MainWindowController: NSWindowController {
     }
 }
 
+extension MainWindowController: SubtitleEditorCommands {
+    private var editor: SubtitleEditorViewModel {
+        detailViewModel.editor
+    }
+
+    /// Commands read the lines: keep what is being typed first.
+    private func editing(_ change: (SubtitleEditorViewModel) -> Void) {
+        detailViewController.editorView.commitPendingText()
+        change(editor)
+    }
+
+    @objc func insertLineBefore(_ sender: Any?) {
+        editing { $0.insertBefore() }
+        detailViewController.editorView.focusText()
+    }
+
+    @objc func insertLineAfter(_ sender: Any?) {
+        editing { $0.insertAfter() }
+        detailViewController.editorView.focusText()
+    }
+
+    @objc func duplicateLines(_ sender: Any?) {
+        editing { $0.duplicate() }
+    }
+
+    @objc func deleteLines(_ sender: Any?) {
+        editing { $0.delete() }
+    }
+
+    @objc func joinLines(_ sender: Any?) {
+        editing { $0.merge() }
+    }
+
+    @objc func splitLine(_ sender: Any?) {
+        let offset = detailViewController.editorView.textCursorOffset
+        editing { $0.split(atCharacter: offset) }
+    }
+
+    @objc func makeStartsContinuous(_ sender: Any?) {
+        editing { $0.makeContinuous(changing: .start) }
+    }
+
+    @objc func makeEndsContinuous(_ sender: Any?) {
+        editing { $0.makeContinuous(changing: .end) }
+    }
+
+    @objc func shiftToPlayback(_ sender: Any?) {
+        editing { $0.shiftToPlayback() }
+    }
+
+    @objc func jumpToLineStart(_ sender: Any?) {
+        detailViewController.jumpToActiveLine(end: false)
+    }
+
+    @objc func jumpToLineEnd(_ sender: Any?) {
+        detailViewController.jumpToActiveLine(end: true)
+    }
+
+    @objc func showFindReplace(_ sender: Any?) {
+        guard let window, window.attachedSheet == nil else { return }
+        findReplaceSheet.begin(on: window)
+    }
+
+    @objc func findNextSubtitle(_ sender: Any?) {
+        if findReplaceSheet.query.isEmpty {
+            showFindReplace(sender)
+        } else if !editor.findNext(findReplaceSheet.query, options: findReplaceSheet.options) {
+            NSSound.beep()
+        }
+    }
+
+    @objc func setStartToPlayback(_ sender: Any?) {
+        editing { $0.setStartToPlayback() }
+    }
+
+    @objc func setEndToPlayback(_ sender: Any?) {
+        editing { $0.setEndToPlayback() }
+    }
+
+    @objc func playLine(_ sender: Any?) {
+        detailViewController.playActiveLine()
+    }
+
+    /// Asks for an offset; applies it to the selected lines, or all of them.
+    @objc func shiftTimes(_ sender: Any?) {
+        guard let window, window.attachedSheet == nil else { return }
+        detailViewController.editorView.commitPendingText()
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Shift Times")
+        let target = editor.selection.isEmpty
+            ? String(localized: "all lines")
+            : String(localized: "the \(editor.selection.count) selected lines")
+        alert.informativeText = String(localized: "Seconds to move \(target) by; negative moves them earlier.")
+        let field = NSTextField(string: "0.0")
+        field.frame = NSRect(x: 0, y: 0, width: 120, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: String(localized: "Shift"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        alert.window.initialFirstResponder = field
+        alert.beginSheetModal(for: window) { [weak self] response in
+            let text = field.stringValue.replacingOccurrences(of: ",", with: ".")
+            guard response == .alertFirstButtonReturn, let seconds = Double(text) else { return }
+            self?.editor.shift(byMilliseconds: Int((seconds * 1_000).rounded()))
+        }
+    }
+
+    @objc func saveSubtitles(_ sender: Any?) {
+        detailViewController.editorView.commitPendingText()
+        guard let jobID = detailViewModel.shownJobID else { return }
+        Task {
+            do {
+                try await queueViewModel.saveSubtitles(of: jobID)
+            } catch {
+                if let window {
+                    NSAlert(error: error).beginSheetModal(for: window) { _ in }
+                }
+            }
+        }
+    }
+}
+
 extension MainWindowController: NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
+        case #selector(insertLineBefore(_:)), #selector(insertLineAfter(_:)):
+            return editor.isEditable
+        case #selector(duplicateLines(_:)), #selector(deleteLines(_:)), #selector(splitLine(_:)),
+             #selector(setStartToPlayback(_:)), #selector(setEndToPlayback(_:)), #selector(shiftToPlayback(_:)),
+             #selector(makeStartsContinuous(_:)), #selector(makeEndsContinuous(_:)):
+            return editor.canEditSelection
+        case #selector(jumpToLineStart(_:)), #selector(jumpToLineEnd(_:)):
+            return editor.activeLine != nil && detailViewModel.showsPlayerArea
+        case #selector(showFindReplace(_:)), #selector(findNextSubtitle(_:)):
+            return !editor.lines.isEmpty
+        case #selector(joinLines(_:)):
+            return editor.canMerge
+        case #selector(shiftTimes(_:)):
+            return editor.isEditable && !editor.lines.isEmpty
+        case #selector(playLine(_:)):
+            return editor.activeLine != nil && detailViewModel.showsPlayerArea
+        case #selector(saveSubtitles(_:)):
+            return detailViewModel.shownJobID.map(queueViewModel.unsavedJobIDs.contains) ?? false
         case #selector(togglePlayer(_:)):
             menuItem.title = detailViewModel.showsPlayer ? String(localized: "Hide Player") : String(localized: "Show Player")
             return true

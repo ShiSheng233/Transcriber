@@ -29,13 +29,22 @@ enum DebugSnapshotRenderer {
     static func transcribe(_ media: URL, with queueViewModel: JobQueueViewModel, main: MainWindowController, to directory: URL) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         main.window?.appearance = NSAppearance(named: .aqua)
-        queueViewModel.addFiles([media])
+        // A copy in an empty folder: no subtitles beside it to ask about, and
+        // the subtitle files the run writes stay out of the media folder.
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("TranscriberSnapshot-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let copy = folder.appendingPathComponent(media.lastPathComponent)
+        try? FileManager.default.copyItem(at: media, to: copy)
+        queueViewModel.addFiles([copy])
         let deadline = Date().addingTimeInterval(300)
         while queueViewModel.jobs.isEmpty, Date() < deadline {
+            if queueViewModel.pendingSubtitleChoice != nil {
+                queueViewModel.resolveSubtitleChoice(.transcribe)  // never wait for a person
+            }
             RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         }
         queueViewModel.select(jobID: queueViewModel.jobs.first?.id)
-        queueViewModel.startQueue()
+        queueViewModel.startQueue(usesLanguageModel: false)
         var renderedRunning = false
         while queueViewModel.jobs.contains(where: { !$0.status.isFinished }), Date() < deadline {
             RunLoop.main.run(until: Date().addingTimeInterval(0.05))

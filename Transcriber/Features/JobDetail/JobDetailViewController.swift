@@ -1,14 +1,17 @@
 import AVKit
+import TranscriberCore
 import AppKit
 
-/// Player above, subtitle lines below. Clicking a line seeks to it; playback
-/// highlights the current line.
+/// Player above, the subtitle editor below. Selecting a line seeks to it;
+/// the line under the playhead is marked in the grid and shown over the video.
 final class JobDetailViewController: NSViewController {
     private let viewModel: JobDetailViewModel
     private let playerView = AVPlayerView()
     private let subtitleOverlay = SubtitleOverlayView()
     private let player = AVPlayer()
-    private let tableView = NSTableView()
+    let editorView: SubtitleEditorView
+    /// Pauses at the end of the line being played by Play Line.
+    private var lineEndObserver: Any?
     private let placeholderLabel = NSTextField(labelWithString: "")
     private let emptyState = EmptyStateView(
         symbolName: "captions.bubble",
@@ -19,7 +22,6 @@ final class JobDetailViewController: NSViewController {
     private var binder: ObservationBinder?
     private var timeObserver: Any?
     private var displayedPlayerURL: URL?
-    private var displayedLines: [JobDetailViewModel.Line] = []
     /// Video needs room for the picture; audio only the control bar.
     private static let audioPlayerHeight: CGFloat = 64
     private lazy var playerMinimumHeight = playerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 160)
@@ -29,7 +31,11 @@ final class JobDetailViewController: NSViewController {
 
     init(viewModel: JobDetailViewModel) {
         self.viewModel = viewModel
+        editorView = SubtitleEditorView(viewModel: viewModel.editor)
         super.init(nibName: nil, bundle: nil)
+        editorView.onUserSelectedLine = { [weak self] index in
+            self?.seekToLine(index)
+        }
     }
 
     @available(*, unavailable)
@@ -49,29 +55,6 @@ final class JobDetailViewController: NSViewController {
             overlay.addSubview(subtitleOverlay)
         }
 
-        let timeColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("Time"))
-        timeColumn.title = String(localized: "Time")
-        timeColumn.width = 150
-        timeColumn.resizingMask = []
-        let textColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("Text"))
-        textColumn.title = String(localized: "Subtitle")
-        textColumn.resizingMask = .autoresizingMask
-        tableView.addTableColumn(timeColumn)
-        tableView.addTableColumn(textColumn)
-        tableView.usesAutomaticRowHeights = true
-        tableView.style = .fullWidth
-        tableView.intercellSpacing = NSSize(width: 12, height: 6)
-        tableView.dataSource = self
-        tableView.delegate = self
-        tableView.target = self
-        tableView.action = #selector(lineClicked(_:))
-
-        let scrollView = NSScrollView()
-        scrollView.documentView = tableView
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
-        scrollView.scrollerStyle = .overlay
-
         placeholderLabel.textColor = .secondaryLabelColor
         placeholderLabel.alignment = .center
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -80,7 +63,7 @@ final class JobDetailViewController: NSViewController {
         splitView.isVertical = false
         splitView.dividerStyle = .thin
         splitView.addArrangedSubview(playerView)
-        splitView.addArrangedSubview(scrollView)
+        splitView.addArrangedSubview(editorView)
         splitView.setHoldingPriority(.defaultLow - 1, forSubviewAt: 0)
         splitView.translatesAutoresizingMaskIntoConstraints = false
         emptyState.translatesAutoresizingMaskIntoConstraints = false
@@ -100,10 +83,10 @@ final class JobDetailViewController: NSViewController {
             emptyState.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             emptyState.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             playerMinimumHeight,
-            scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 160),
-            placeholderLabel.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
-            placeholderLabel.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor, constant: 14),
-            placeholderLabel.widthAnchor.constraint(lessThanOrEqualTo: scrollView.widthAnchor, constant: -40),
+            editorView.heightAnchor.constraint(greaterThanOrEqualToConstant: 240),
+            placeholderLabel.centerXAnchor.constraint(equalTo: editorView.centerXAnchor),
+            placeholderLabel.centerYAnchor.constraint(equalTo: editorView.centerYAnchor, constant: -40),
+            placeholderLabel.widthAnchor.constraint(lessThanOrEqualTo: editorView.widthAnchor, constant: -40),
             container.widthAnchor.constraint(greaterThanOrEqualToConstant: 420),
         ])
         view = container
@@ -164,34 +147,48 @@ final class JobDetailViewController: NSViewController {
             needsPlayerResize = true
             view.needsLayout = true
         }
-        if viewModel.lines != displayedLines {
-            displayedLines = viewModel.lines
-            tableView.reloadData()
-        }
         emptyState.isHidden = viewModel.hasSelection
         splitView.isHidden = !viewModel.hasSelection
         placeholderLabel.stringValue = viewModel.subtitlesPlaceholder ?? ""
         placeholderLabel.isHidden = !viewModel.hasSelection || viewModel.subtitlesPlaceholder == nil
-        highlight(viewModel.currentLineIndex)
         subtitleOverlay.text = viewModel.isAudioOnly ? nil : viewModel.currentSubtitle
     }
 
-    private func highlight(_ index: Int?) {
-        guard let index else {
-            return
+    // MARK: Playback commands
+
+    func seekToLine(_ index: Int) {
+        guard viewModel.editor.lines.indices.contains(index) else { return }
+        seek(to: viewModel.editor.lines[index].start.seconds)
+    }
+
+    /// Plays the active line from its start and pauses at its end.
+    func playActiveLine() {
+        guard let line = viewModel.editor.activeLine, player.currentItem != nil else { return }
+        if let lineEndObserver {
+            player.removeTimeObserver(lineEndObserver)
         }
-        if tableView.selectedRow != index {
-            tableView.selectRowIndexes([index], byExtendingSelection: false)
-            tableView.scrollRowToVisible(index)
+        let end = CMTime(seconds: line.end.seconds, preferredTimescale: 1_000)
+        lineEndObserver = player.addBoundaryTimeObserver(forTimes: [NSValue(time: end)], queue: .main) { [weak self] in
+            MainActor.assumeIsolated {
+                self?.player.pause()
+            }
+        }
+        player.seek(to: CMTime(seconds: line.start.seconds, preferredTimescale: 1_000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.player.play()
+            }
         }
     }
 
-    @objc private func lineClicked(_ sender: Any?) {
-        let index = tableView.clickedRow
-        guard displayedLines.indices.contains(index) else {
-            return
-        }
-        player.seek(to: CMTime(seconds: displayedLines[index].startSeconds, preferredTimescale: 1_000), toleranceBefore: .zero, toleranceAfter: .zero)
+    func jumpToActiveLine(end: Bool) {
+        guard let line = viewModel.editor.activeLine else { return }
+        player.pause()
+        seek(to: (end ? line.end : line.start).seconds)
+    }
+
+    private func seek(to seconds: Double) {
+        player.seek(to: CMTime(seconds: seconds, preferredTimescale: 1_000), toleranceBefore: .zero, toleranceAfter: .zero)
+        viewModel.playbackTimeChanged(to: seconds)
     }
 }
 
@@ -200,24 +197,5 @@ extension JobDetailViewController: NSSplitViewDelegate {
     /// by the split view (which would hide it behind our back).
     func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool {
         false
-    }
-}
-
-extension JobDetailViewController: NSTableViewDataSource, NSTableViewDelegate {
-    func numberOfRows(in tableView: NSTableView) -> Int {
-        displayedLines.count
-    }
-
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let line = displayedLines[row]
-        let isTimeColumn = tableColumn?.identifier.rawValue == "Time"
-        let label = NSTextField(wrappingLabelWithString: isTimeColumn ? line.timeText : line.text)
-        if isTimeColumn {
-            label.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-            label.textColor = .secondaryLabelColor
-            label.maximumNumberOfLines = 1
-        }
-        label.isSelectable = false
-        return label
     }
 }

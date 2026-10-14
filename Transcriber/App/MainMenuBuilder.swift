@@ -7,6 +7,7 @@ enum MainMenuBuilder {
         mainMenu.addItem(submenuItem(makeApplicationMenu()))
         mainMenu.addItem(submenuItem(makeFileMenu()))
         mainMenu.addItem(submenuItem(makeEditMenu()))
+        mainMenu.addItem(submenuItem(SubtitleEditorMenu.makeMainMenu()))
         mainMenu.addItem(submenuItem(makeViewMenu()))
         mainMenu.addItem(submenuItem(makeWindowMenu()))
         return mainMenu

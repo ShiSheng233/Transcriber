@@ -2,36 +2,35 @@ import Foundation
 import Observation
 import TranscriberCore
 
-/// The selected job's media and subtitles, and which line is playing.
+/// The selected job: its media for the player, and its subtitles in the
+/// editor (editable once the job is done).
 @Observable
 final class JobDetailViewModel {
-    struct Line: Equatable {
-        let timeText: String
-        let text: String
-        let startSeconds: Double
-        let endSeconds: Double
-    }
-
     private static let showsPlayerKey = "ShowsPlayer"
+    private static let audioExtensions: Set<String> = ["mp3", "wav", "flac", "m4a", "aac", "ogg", "opus", "wma"]
     private let userDefaults: UserDefaults
 
+    let editor = SubtitleEditorViewModel()
     private(set) var mediaURL: URL?
-    /// Off: only the subtitle list; the media is not loaded at all.
+    /// Off: only the subtitles; the media is not loaded at all.
     private(set) var showsPlayer: Bool
-    private(set) var lines: [Line] = []
-    private(set) var currentLineIndex: Int?
-    /// Shown above the subtitle list while it is empty.
+    private(set) var hasSelection = false
+    /// Shown over the grid while it is empty.
     private(set) var subtitlesPlaceholder: String?
+    private(set) var shownJobID: UUID?
+
+    /// Edits to the shown job, for the queue to keep.
+    @ObservationIgnored var onEdit: (UUID, [TimedText]) -> Void = { _, _ in }
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
         showsPlayer = userDefaults.object(forKey: Self.showsPlayerKey) == nil || userDefaults.bool(forKey: Self.showsPlayerKey)
+        editor.onChange = { [weak self] lines in
+            if let self, let jobID = shownJobID {
+                onEdit(jobID, lines)
+            }
+        }
     }
-
-    private(set) var hasSelection = false
-    private var shownJobID: UUID?
-
-    private static let audioExtensions: Set<String> = ["mp3", "wav", "flac", "m4a", "aac", "ogg", "opus", "wma"]
 
     /// Audio files get only the playback controls, no picture area.
     var isAudioOnly: Bool {
@@ -48,68 +47,44 @@ final class JobDetailViewModel {
         showsPlayer ? mediaURL : nil
     }
 
+    /// The line being spoken, shown over the video.
+    var currentSubtitle: String? {
+        editor.playingIndex.flatMap { editor.lines.indices.contains($0) ? editor.lines[$0].text : nil }
+    }
+
     func togglePlayer() {
         showsPlayer.toggle()
         userDefaults.set(showsPlayer, forKey: Self.showsPlayerKey)
     }
 
-    /// Shows `job`, or nothing. Keeps the media when only its status changed.
+    /// Shows `job`, or nothing. A finished job with written files can be edited.
     func show(_ job: Job?) {
         hasSelection = job != nil
         guard let job else {
             shownJobID = nil
             mediaURL = nil
-            lines = []
-            currentLineIndex = nil
+            editor.load([], isEditable: false)
             subtitlesPlaceholder = nil
             return
         }
+        let isEditable = job.status == .completed && !job.outputURLs.isEmpty
         if shownJobID != job.id {
             shownJobID = job.id
             mediaURL = job.mediaURL
-            currentLineIndex = nil
+            editor.load(job.segments, isEditable: isEditable)
+        } else {
+            editor.follow(job.segments, isEditable: isEditable)
         }
-        let newLines = job.segments.map(Self.line(for:))
-        if newLines != lines {
-            lines = newLines
-        }
+        let isEmpty = editor.lines.isEmpty
         subtitlesPlaceholder = switch job.status {
-        case .completed: lines.isEmpty ? String(localized: "No speech was found in this file.") : nil
-        case .failed, .cancelled: String(localized: "No subtitles.")
-        default: lines.isEmpty ? String(localized: "Subtitles appear here as they are made.") : nil
+        case .completed: isEmpty ? String(localized: "No speech was found in this file.") : nil
+        case .failed, .cancelled: isEmpty ? String(localized: "No subtitles.") : nil
+        default: isEmpty ? String(localized: "Subtitles appear here as they are made.") : nil
         }
     }
 
-    /// The line being spoken, shown over the video.
-    var currentSubtitle: String? {
-        currentLineIndex.flatMap { lines.indices.contains($0) ? lines[$0].text : nil }
-    }
-
-    /// Highlights the line being spoken at `seconds`.
     func playbackTimeChanged(to seconds: Double) {
-        let index = lines.firstIndex { seconds >= $0.startSeconds && seconds < $0.endSeconds }
-        if index != currentLineIndex {
-            currentLineIndex = index
-        }
-    }
-
-    private static func line(for segment: TimedText) -> Line {
-        Line(
-            timeText: "\(clock(segment.start)) – \(clock(segment.end))",
-            text: segment.text,
-            startSeconds: segment.start.seconds,
-            endSeconds: segment.end.seconds
-        )
-    }
-
-    private static func clock(_ time: AudioTime) -> String {
-        let total = time.milliseconds
-        let hours = total / 3_600_000
-        let minutes = total % 3_600_000 / 60_000
-        let seconds = total % 60_000 / 1_000
-        let tenths = total % 1_000 / 100
-        return hours > 0
-            ? String(format: "%d:%02d:%02d.%d", hours, minutes, seconds, tenths)
-            : String(format: "%d:%02d.%d", minutes, seconds, tenths)
+        guard seconds.isFinite else { return }
+        editor.playbackTimeChanged(to: AudioTime(seconds: max(seconds, 0)))
     }
 }

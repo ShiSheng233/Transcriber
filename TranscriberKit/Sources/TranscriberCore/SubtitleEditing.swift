@@ -6,8 +6,8 @@
 /// only where an operation moves times (`shift`, `setStart`); insertions go
 /// where the user asked, as in Aegisub.
 public enum SubtitleEditing {
-    /// A new line's length when nothing bounds it (Aegisub's default).
-    public static let newLineDuration = AudioTime(milliseconds: 2_000)
+    /// A new line's length when nothing bounds it (Aegisub `Timing/Default Duration`).
+    public static let newLineDuration = AudioTime(milliseconds: 3_000)
 
     public struct Outcome: Equatable, Sendable {
         public let lines: [TimedText]
@@ -15,28 +15,61 @@ public enum SubtitleEditing {
         public let selection: [Int]
     }
 
-    /// An empty line right after `index`, starting where it ends.
+    /// An empty line right after `index`, starting where it ends and cut
+    /// short at the next line's start (Aegisub's insert after).
     public static func insert(after index: Int, in lines: [TimedText]) -> Outcome {
         guard lines.indices.contains(index) else {
             let start = lines.last?.end ?? .zero
             return Outcome(lines: lines + [TimedText(start: start, end: start + newLineDuration, text: "")], selection: [lines.count])
         }
         let start = lines[index].end
+        var end = start + newLineDuration
+        if index + 1 < lines.count, lines[index + 1].start > start {
+            end = min(end, lines[index + 1].start)
+        }
         var result = lines
-        result.insert(TimedText(start: start, end: start + newLineDuration, text: ""), at: index + 1)
+        result.insert(TimedText(start: start, end: end, text: ""), at: index + 1)
         return Outcome(lines: result, selection: [index + 1])
     }
 
-    /// An empty line right before `index`, ending where it starts.
+    /// An empty line right before `index`, ending where it starts and cut
+    /// short at the previous line's end.
     public static func insert(before index: Int, in lines: [TimedText]) -> Outcome {
         guard lines.indices.contains(index) else {
             return insert(after: lines.count - 1, in: lines)
         }
         let end = lines[index].start
-        let start = end > newLineDuration ? end - newLineDuration : .zero
+        var start = end > newLineDuration ? end - newLineDuration : .zero
+        if index > 0, lines[index - 1].end < end {
+            start = max(start, lines[index - 1].end)
+        }
         var result = lines
-        result.insert(TimedText(start: start, end: max(end, start), text: ""), at: index)
+        result.insert(TimedText(start: start, end: end, text: ""), at: index)
         return Outcome(lines: result, selection: [index])
+    }
+
+    /// Aegisub "Make times continuous": each selected line starts where the
+    /// previous line ends (`.start`), or ends where the next one starts
+    /// (`.end`). A single line uses its neighbour.
+    public enum ContinuousEdge: Sendable {
+        case start
+        case end
+    }
+
+    public static func makeContinuous(_ indices: [Int], changing edge: ContinuousEdge, in lines: [TimedText]) -> Outcome {
+        let chosen = indices.filter(lines.indices.contains).sorted()
+        var result = lines
+        for index in chosen {
+            switch edge {
+            case .start where index > 0:
+                result[index].start = min(result[index - 1].end, result[index].end)
+            case .end where index + 1 < lines.count:
+                result[index].end = max(result[index + 1].start, result[index].start)
+            default:
+                break
+            }
+        }
+        return Outcome(lines: result, selection: chosen)
     }
 
     /// Copies of the lines, each right after its original.
@@ -156,13 +189,34 @@ public enum SubtitleEditing {
         return Outcome(lines: result, selection: [index])
     }
 
-    /// Characters per second, the reading-speed figure Aegisub shows;
-    /// whitespace and line breaks are not counted.
-    public static func charactersPerSecond(_ line: TimedText) -> Double {
-        let seconds = (line.end - line.start).seconds
-        let count = line.text.filter { !$0.isWhitespace }.count
-        return seconds > 0 ? Double(count) / seconds : 0
+    /// Characters per second as Aegisub counts them (whitespace and
+    /// punctuation ignored); `nil` where Aegisub leaves the cell blank: lines
+    /// of 100 ms or less, or above 100 CPS.
+    public static func charactersPerSecond(_ line: TimedText) -> Double? {
+        let milliseconds = line.end.milliseconds - line.start.milliseconds
+        guard milliseconds > 100 else {
+            return nil
+        }
+        let count = line.text.filter { !$0.isWhitespace && !$0.isPunctuation && !$0.isSymbol }.count
+        let speed = Double(count) * 1_000 / Double(milliseconds)
+        return speed > 100 ? nil : speed
     }
+
+    /// Lines whose time overlaps `index`'s (Aegisub shows them in red).
+    public static func overlapping(_ index: Int, in lines: [TimedText]) -> Set<Int> {
+        guard lines.indices.contains(index) else {
+            return []
+        }
+        let line = lines[index]
+        return Set(lines.indices.filter { $0 != index && lines[$0].start < line.end && line.start < lines[$0].end })
+    }
+
+    /// The longest line of the text, for Aegisub's 40-character limit.
+    public static func longestLineLength(_ text: String) -> Int {
+        text.split(separator: "\n", omittingEmptySubsequences: false).map(\.count).max() ?? 0
+    }
+
+    public static let characterLimit = 40
 
     /// A space between Latin words, nothing between CJK text.
     private static func joined(_ first: String, _ second: String) -> String {

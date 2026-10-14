@@ -63,13 +63,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Stops work and frees the model first: ggml aborts at exit if Metal
     /// buffers are still allocated.
+    /// Asks about unsaved subtitle edits, then stops work and frees the
+    /// model: ggml aborts at exit if Metal buffers are still allocated.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        var savesFirst = false
+        if let queueViewModel, !queueViewModel.unsavedJobIDs.isEmpty {
+            switch askToSaveBeforeQuitting(count: queueViewModel.unsavedJobIDs.count) {
+            case .alertFirstButtonReturn: savesFirst = true
+            case .alertSecondButtonReturn: break
+            default: return .terminateCancel
+            }
+        }
         let queue = environment.jobQueue
+        let queueViewModel = queueViewModel
         Task {
+            if savesFirst, let queueViewModel {
+                do {
+                    try await queueViewModel.saveAllSubtitles()
+                } catch {
+                    NSAlert(error: error).runModal()
+                    NSApp.reply(toApplicationShouldTerminate: false)
+                    return
+                }
+            }
             await queue.shutDown()
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
+    }
+
+    private func askToSaveBeforeQuitting(count: Int) -> NSApplication.ModalResponse {
+        let alert = NSAlert()
+        alert.messageText = count == 1
+            ? String(localized: "Save the edited subtitles before quitting?")
+            : String(localized: "Save edited subtitles of \(count) files before quitting?")
+        alert.informativeText = String(localized: "Your edits are lost if you don't save them.")
+        alert.addButton(withTitle: String(localized: "Save All"))
+        alert.addButton(withTitle: String(localized: "Don't Save"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        return alert.runModal()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

@@ -36,6 +36,8 @@ final class JobQueueViewModel {
     /// Media files with subtitles next to them, waiting for the user to
     /// choose between translating those subtitles and transcribing again.
     private(set) var pendingSubtitleChoice: FileIntake?
+    /// Jobs whose subtitles were edited since they were last written.
+    private(set) var unsavedJobIDs: Set<UUID> = []
 
     private let queue: JobQueue
     private let settingsStore: SettingsStore
@@ -158,12 +160,39 @@ final class JobQueueViewModel {
         Task { await queue.add(media, model: model) }
     }
 
+    /// The editor changed a job's subtitles; they are written on Save.
+    func updateSubtitles(of jobID: UUID, to lines: [TimedText]) {
+        unsavedJobIDs.insert(jobID)
+        Task { await queue.replaceSegments(of: jobID, with: lines) }
+    }
+
+    /// Writes the job's subtitle files again.
+    func saveSubtitles(of jobID: UUID) async throws {
+        _ = try await queue.saveSubtitles(of: jobID)
+        unsavedJobIDs.remove(jobID)
+    }
+
+    func saveAllSubtitles() async throws {
+        for jobID in unsavedJobIDs {
+            try await saveSubtitles(of: jobID)
+        }
+    }
+
     func dismissMissingModels() {
         isMissingModels = false
     }
 
     func startQueue() {
-        let configuration = settingsStore.settings.queueConfiguration(apiKeys: apiKeyStore)
+        startQueue(usesLanguageModel: true)
+    }
+
+    /// `usesLanguageModel` false: the debug snapshot run, which must not
+    /// send the user's lines to their LLM service.
+    func startQueue(usesLanguageModel: Bool) {
+        var configuration = settingsStore.settings.queueConfiguration(apiKeys: apiKeyStore)
+        if !usesLanguageModel {
+            configuration.llm = nil
+        }
         Task { await queue.start(configuration: configuration) }
     }
 
@@ -177,11 +206,18 @@ final class JobQueueViewModel {
     }
 
     func remove(jobID: UUID) {
+        unsavedJobIDs.remove(jobID)
         Task { await queue.remove(jobID) }
     }
 
+    /// Finished files leave the list, except those with unsaved edits.
     func clearFinished() {
-        Task { await queue.removeFinished() }
+        let removable = jobs.filter { $0.status.isFinished && !unsavedJobIDs.contains($0.id) }.map(\.id)
+        Task {
+            for jobID in removable {
+                await queue.remove(jobID)
+            }
+        }
     }
 
     func select(jobID: UUID?) {
