@@ -1,0 +1,21 @@
+# Converted models (not distributed publicly yet)
+/Models/
+
+# Xcode
+xcuserdata/
+DerivedData/
+.build/
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# Python tooling
+__pycache__/
+.venv/
+
+# Tool downloads and intermediates (make clean-tools)
+/.build-tools/
+
+# Built by `make whisper-xcframework`
+/TranscriberKit/Vendor/
