@@ -8,6 +8,7 @@ let package = Package(
     products: [
         .library(name: "TranscriberCore", targets: ["TranscriberCore"]),
         .library(name: "AudioFeatures", targets: ["AudioFeatures"]),
+        .library(name: "MediaDecoding", targets: ["MediaDecoding"]),
         .library(name: "SpeechDetection", targets: ["SpeechDetection"]),
         .library(name: "SubtitleExport", targets: ["SubtitleExport"]),
         .library(name: "SubtitlePostProcessing", targets: ["SubtitlePostProcessing"]),
@@ -21,6 +22,10 @@ let package = Package(
     targets: [
         .target(name: "TranscriberCore"),
         .target(name: "AudioFeatures"),
+        .target(
+            name: "MediaDecoding",
+            dependencies: ["libavcodec", "libavformat", "libavutil", "libswresample"]
+        ),
         .target(
             name: "SpeechDetection",
             dependencies: ["TranscriberCore", "AudioFeatures"]
@@ -59,6 +64,11 @@ let package = Package(
             resources: [.copy("Fixtures")]
         ),
         .testTarget(
+            name: "MediaDecodingTests",
+            dependencies: ["MediaDecoding"],
+            resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
             name: "SpeechDetectionTests",
             dependencies: ["SpeechDetection"],
             resources: [.copy("Fixtures")]
@@ -84,5 +94,10 @@ let package = Package(
         ),
         // whisper.cpp built by `make whisper-xcframework` (see the root Makefile).
         .binaryTarget(name: "whisper", path: "Vendor/whisper.xcframework"),
+        // FFmpeg built by `make ffmpeg-xcframeworks` (LGPL, dynamic).
+        .binaryTarget(name: "libavcodec", path: "Vendor/libavcodec.xcframework"),
+        .binaryTarget(name: "libavformat", path: "Vendor/libavformat.xcframework"),
+        .binaryTarget(name: "libavutil", path: "Vendor/libavutil.xcframework"),
+        .binaryTarget(name: "libswresample", path: "Vendor/libswresample.xcframework"),
     ]
 )
