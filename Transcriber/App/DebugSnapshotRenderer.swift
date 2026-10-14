@@ -1,6 +1,5 @@
 #if DEBUG
 import AppKit
-import LLMTranslation
 import TranscriberCore
 
 /// Development aid: `-RenderSnapshots <directory>` renders every settings tab
@@ -53,72 +52,6 @@ enum DebugSnapshotRenderer {
             main.togglePlayer(nil)
             RunLoop.main.run(until: Date().addingTimeInterval(0.5))
         }
-    }
-
-    /// -KeyEntryCheck: types a test Base URL and key into the LLM pane the way
-    /// a user does (focus moves field to field) and prints what the Keychain
-    /// holds for the test host afterwards. Restores the previous Base URL.
-    static func checkKeyEntry(settings: SettingsWindowController, keys: APIKeyStore, store: SettingsStore) {
-        guard ProcessInfo.processInfo.arguments.contains("-KeyEntryCheck"),
-              let window = settings.window, let tabs = window.contentViewController as? NSTabViewController,
-              let llmIndex = tabs.tabViewItems.firstIndex(where: { $0.label == "LLM" }) else {
-            return
-        }
-        let previousURL = store.settings.llm.baseURL
-        tabs.selectedTabViewItemIndex = llmIndex
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-        let fields = allSubviews(of: window.contentView).compactMap { $0 as? NSTextField }
-        guard let urlField = fields.first(where: { $0.placeholderString == "https://example.com/v1" }),
-              let keyField = fields.first(where: { $0 is NSSecureTextField }) else {
-            print("KEYCHECK fields not found")
-            return
-        }
-        // Choosing "Custom" should put the cursor in the Base URL field.
-        if let providerPopUp = allSubviews(of: window.contentView).compactMap({ $0 as? NSPopUpButton }).first(where: { $0.itemTitles.contains("Custom") }) {
-            providerPopUp.selectItem(withTitle: "Custom")
-            _ = providerPopUp.target?.perform(providerPopUp.action, with: providerPopUp)
-            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-            let editor = window.firstResponder
-            print("KEYCHECK after Custom: editing URL field = \(editor === urlField.currentEditor()), editing key field = \(editor === keyField.currentEditor()), popup shows \(providerPopUp.titleOfSelectedItem ?? "")")
-        }
-        let testURL = "https://keycheck.example/v1"
-        type(testURL, into: urlField, window: window)
-        window.selectNextKeyView(nil)  // Tab, as a user would
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-        print("KEYCHECK after Tab: first responder is key field = \(window.firstResponder === keyField.currentEditor())")
-        type("sk-test-123", into: keyField, window: window)
-        window.makeFirstResponder(nil)  // end editing
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-        let testBaseURL = URL(string: testURL)!
-        print("KEYCHECK stored for test host: \(keys.read(for: testBaseURL))")
-        // Paste a new key, then switch tabs and close the window without Return.
-        type("sk-changed-456", into: keyField, window: window)
-        tabs.selectedTabViewItemIndex = 0
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-        print("KEYCHECK after switching tabs: \(keys.read(for: testBaseURL))")
-        tabs.selectedTabViewItemIndex = llmIndex
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-        type("sk-closed-789", into: keyField, window: window)
-        window.performClose(nil)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-        print("KEYCHECK after closing the window: \(keys.read(for: testBaseURL))")
-        window.makeKeyAndOrderFront(nil)
-        print("KEYCHECK base URL setting: \(store.settings.llm.baseURL.absoluteString)")
-        keys.save("", for: testBaseURL)
-        store.update { $0.llm.baseURL = previousURL }
-    }
-
-    private static func type(_ text: String, into field: NSTextField, window: NSWindow) {
-        window.makeFirstResponder(field)
-        (field.currentEditor() as? NSTextView)?.selectAll(nil)
-        (field.currentEditor() as? NSTextView)?.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
-    }
-
-    private static func allSubviews(of view: NSView?) -> [NSView] {
-        guard let view else {
-            return []
-        }
-        return [view] + view.subviews.flatMap { allSubviews(of: $0) }
     }
 
     static func renderActivity(_ activity: ActivityWindowController, to directory: URL) {
