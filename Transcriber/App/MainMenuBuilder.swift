@@ -5,6 +5,7 @@ enum MainMenuBuilder {
     static func makeMainMenu() -> NSMenu {
         let mainMenu = NSMenu()
         mainMenu.addItem(submenuItem(makeApplicationMenu()))
+        mainMenu.addItem(submenuItem(makeFileMenu()))
         mainMenu.addItem(submenuItem(makeEditMenu()))
         mainMenu.addItem(submenuItem(makeWindowMenu()))
         return mainMenu
@@ -17,6 +18,12 @@ enum MainMenuBuilder {
             withTitle: "About \(appName)",
             action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
             keyEquivalent: ""
+        )
+        menu.addItem(.separator())
+        menu.addItem(
+            withTitle: String(localized: "Settings…"),
+            action: #selector(AppDelegate.showSettings(_:)),
+            keyEquivalent: ","
         )
         menu.addItem(.separator())
         menu.addItem(
@@ -41,6 +48,15 @@ enum MainMenuBuilder {
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
+        return menu
+    }
+
+    private static func makeFileMenu() -> NSMenu {
+        let menu = NSMenu(title: String(localized: "File"))
+        menu.addItem(withTitle: String(localized: "Add Files…"), action: #selector(MainWindowController.addFiles(_:)), keyEquivalent: "o")
+        menu.addItem(withTitle: String(localized: "Start"), action: #selector(MainWindowController.startQueue(_:)), keyEquivalent: "r")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: String(localized: "Close Window"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         return menu
     }
 

@@ -1,9 +1,28 @@
 import AppKit
+import UniformTypeIdentifiers
 
+/// The queue on the left, the selected file's preview on the right, and a
+/// toolbar. It forwards toolbar actions to the queue view model and passes the
+/// selected job to the detail view model.
 final class MainWindowController: NSWindowController {
-    private static let initialContentSize = NSSize(width: 960, height: 600)
+    private static let initialContentSize = NSSize(width: 1100, height: 700)
 
-    init() {
+    private let queueViewModel: JobQueueViewModel
+    private let detailViewModel = JobDetailViewModel()
+    private let openSettings: () -> Void
+    private var binder: ObservationBinder?
+
+    init(queueViewModel: JobQueueViewModel, openSettings: @escaping () -> Void) {
+        self.queueViewModel = queueViewModel
+        self.openSettings = openSettings
+
+        let splitViewController = NSSplitViewController()
+        let sidebar = NSSplitViewItem(sidebarWithViewController: JobQueueViewController(viewModel: queueViewModel))
+        sidebar.minimumThickness = 260
+        sidebar.canCollapse = false
+        splitViewController.addSplitViewItem(sidebar)
+        splitViewController.addSplitViewItem(NSSplitViewItem(viewController: JobDetailViewController(viewModel: detailViewModel)))
+
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: Self.initialContentSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -11,14 +30,111 @@ final class MainWindowController: NSWindowController {
             defer: false
         )
         window.title = "Transcriber"
+        window.contentViewController = splitViewController
+        window.setContentSize(Self.initialContentSize)
         window.setFrameAutosaveName("MainWindow")
-        window.contentViewController = JobQueueViewController()
         window.center()
         super.init(window: window)
+
+        window.toolbar = makeToolbar()
+        window.toolbarStyle = .unified
+        binder = ObservationBinder { [weak self] in self?.render() }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("MainWindowController is created in code")
+    }
+
+    private func render() {
+        detailViewModel.show(queueViewModel.selectedJob)
+        window?.toolbar?.validateVisibleItems()
+    }
+
+    // MARK: Actions (toolbar and menu)
+
+    @objc func addFiles(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = true
+        panel.allowedContentTypes = [.audiovisualContent, .folder]
+        panel.message = String(localized: "Choose audio or video files, or folders that contain them.")
+        guard let window else {
+            return
+        }
+        panel.beginSheetModal(for: window) { [queueViewModel] response in
+            if response == .OK {
+                queueViewModel.addFiles(panel.urls)
+            }
+        }
+    }
+
+    @objc func startQueue(_ sender: Any?) {
+        queueViewModel.startQueue()
+    }
+
+    @objc func clearFinished(_ sender: Any?) {
+        queueViewModel.clearFinished()
+    }
+
+    @objc func showSettingsFromToolbar(_ sender: Any?) {
+        openSettings()
+    }
+}
+
+extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
+    private enum ItemID {
+        static let add = NSToolbarItem.Identifier("add")
+        static let start = NSToolbarItem.Identifier("start")
+        static let clear = NSToolbarItem.Identifier("clear")
+        static let settings = NSToolbarItem.Identifier("settings")
+    }
+
+    private func makeToolbar() -> NSToolbar {
+        let toolbar = NSToolbar(identifier: "MainToolbar")
+        toolbar.delegate = self
+        toolbar.displayMode = .iconOnly
+        return toolbar
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [ItemID.add, ItemID.start, ItemID.clear, .flexibleSpace, ItemID.settings]
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarDefaultItemIdentifiers(toolbar)
+    }
+
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        item.target = self
+        switch itemIdentifier {
+        case ItemID.add:
+            configure(item, label: String(localized: "Add Files"), symbol: "plus", action: #selector(addFiles(_:)))
+        case ItemID.start:
+            configure(item, label: String(localized: "Start"), symbol: "play.fill", action: #selector(startQueue(_:)))
+        case ItemID.clear:
+            configure(item, label: String(localized: "Clear Finished"), symbol: "checklist.checked", action: #selector(clearFinished(_:)))
+        case ItemID.settings:
+            configure(item, label: String(localized: "Settings"), symbol: "gearshape", action: #selector(showSettingsFromToolbar(_:)))
+        default:
+            return nil
+        }
+        return item
+    }
+
+    func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
+        switch item.itemIdentifier {
+        case ItemID.start: queueViewModel.canStart
+        case ItemID.clear: queueViewModel.hasFinishedJobs
+        default: true
+        }
+    }
+
+    private func configure(_ item: NSToolbarItem, label: String, symbol: String, action: Selector) {
+        item.label = label
+        item.toolTip = label
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        item.action = action
     }
 }
