@@ -1,17 +1,22 @@
-import Foundation
+import Accelerate
 
+/// Vectorized log-softmax; each decoding step runs it over the whole vocabulary.
 enum LogSoftmax {
     static func apply(_ logits: [Float]) -> [Float] {
         let normalizer = logSumExp(logits[...])
-        return logits.map { $0 - normalizer }
+        return vDSP.add(-normalizer, logits)
     }
 
     /// Stable log(sum(exp(x))); -infinity when every value is -infinity.
     static func logSumExp(_ values: ArraySlice<Float>) -> Float {
-        guard let maximum = values.max(), maximum > -.infinity else {
+        guard !values.isEmpty else {
             return -.infinity
         }
-        let sum = values.reduce(Float(0)) { $0 + exp($1 - maximum) }
-        return maximum + log(sum)
+        let maximum = vDSP.maximum(values)
+        guard maximum > -.infinity else {
+            return -.infinity
+        }
+        let exponentials = vForce.exp(vDSP.add(-maximum, values))
+        return maximum + log(vDSP.sum(exponentials))
     }
 }

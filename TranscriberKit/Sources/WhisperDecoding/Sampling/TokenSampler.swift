@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 
 /// Picks the next token from a step's log probabilities.
@@ -10,11 +11,8 @@ public struct GreedySampler: TokenSampler {
     public init() {}
 
     public func sample(from logProbabilities: [Float], using generator: inout some RandomNumberGenerator) -> Int {
-        var bestToken = 0
-        for token in logProbabilities.indices where logProbabilities[token] > logProbabilities[bestToken] {
-            bestToken = token
-        }
-        return bestToken
+        // vDSP reports the first index of the maximum.
+        Int(vDSP.indexOfMaximum(logProbabilities).0)
     }
 }
 
@@ -30,7 +28,7 @@ public struct TemperatureSampler: TokenSampler {
     }
 
     public func sample(from logProbabilities: [Float], using generator: inout some RandomNumberGenerator) -> Int {
-        let probabilities = LogSoftmax.apply(logProbabilities.map { $0 / temperature }).map { exp($0) }
+        let probabilities = vForce.exp(LogSoftmax.apply(vDSP.divide(logProbabilities, temperature)))
         var remaining = Float.random(in: 0..<1, using: &generator)
         for (token, probability) in probabilities.enumerated() where probability > 0 {
             remaining -= probability

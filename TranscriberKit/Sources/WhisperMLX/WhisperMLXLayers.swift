@@ -1,5 +1,6 @@
 import Foundation
 import MLX
+import MLXFast
 import MLXNN
 
 /// Swift port of mlx-whisper's `whisper.py` (Apple, MIT). Property keys match
@@ -21,18 +22,34 @@ final class MultiHeadAttention: Module {
     }
 
     /// Attention of `queries` over `keys`/`values` (already projected).
-    func attend(_ queries: MLXArray, keys: MLXArray, values: MLXArray, mask: MLXArray?) -> MLXArray {
+    ///
+    /// `fused` uses MLX's scaled-dot-product-attention kernel; otherwise it is
+    /// whisper.py's `qkv_attention` with a precise softmax. Measured against
+    /// the original: the encoder may use the fused kernel (it avoids building
+    /// 1500x1500 score matrices and made translation ~30% faster with no change
+    /// in output), but in the decoder it changed ChickenRice's results (CER
+    /// 9.6% -> 15.4%), so the decoder keeps the precise softmax.
+    func attend(_ queries: MLXArray, keys: MLXArray, values: MLXArray, mask: MLXArray?, fused: Bool) -> MLXArray {
         let (batchSize, queryLength, stateSize) = (queries.dim(0), queries.dim(1), queries.dim(2))
-        let scale = pow(Float(stateSize / headCount), -0.25)
-        let q = queries.reshaped(batchSize, queryLength, headCount, -1).transposed(0, 2, 1, 3) * scale
-        let k = keys.reshaped(batchSize, keys.dim(1), headCount, -1).transposed(0, 2, 3, 1) * scale
-        let v = values.reshaped(batchSize, values.dim(1), headCount, -1).transposed(0, 2, 1, 3)
-        var scores = matmul(q, k)
-        if let mask {
-            scores = scores + mask
+        let headSize = stateSize / headCount
+        let attended: MLXArray
+        if fused {
+            let q = queries.reshaped(batchSize, queryLength, headCount, headSize).transposed(0, 2, 1, 3)
+            let k = keys.reshaped(batchSize, keys.dim(1), headCount, headSize).transposed(0, 2, 1, 3)
+            let v = values.reshaped(batchSize, values.dim(1), headCount, headSize).transposed(0, 2, 1, 3)
+            attended = MLXFast.scaledDotProductAttention(queries: q, keys: k, values: v, scale: 1 / sqrt(Float(headSize)), mask: mask)
+        } else {
+            let scale = pow(Float(headSize), -0.25)
+            let q = queries.reshaped(batchSize, queryLength, headCount, headSize).transposed(0, 2, 1, 3) * scale
+            let k = keys.reshaped(batchSize, keys.dim(1), headCount, headSize).transposed(0, 2, 3, 1) * scale
+            let v = values.reshaped(batchSize, values.dim(1), headCount, headSize).transposed(0, 2, 1, 3)
+            var scores = matmul(q, k)
+            if let mask {
+                scores = scores + mask
+            }
+            attended = matmul(softmax(scores, axis: -1, precise: true), v)
         }
-        let weights = softmax(scores, axis: -1, precise: true)
-        return out(matmul(weights, v).transposed(0, 2, 1, 3).reshaped(batchSize, queryLength, stateSize))
+        return out(attended.transposed(0, 2, 1, 3).reshaped(batchSize, queryLength, stateSize))
     }
 }
 
@@ -88,7 +105,7 @@ final class AudioEncoder: Module {
         for block in blocks {
             let normalized = block.attentionNorm(x)
             let attention = block.attention
-            x = x + attention.attend(attention.query(normalized), keys: attention.key(normalized), values: attention.value(normalized), mask: nil)
+            x = x + attention.attend(attention.query(normalized), keys: attention.key(normalized), values: attention.value(normalized), mask: nil, fused: true)
             x = block.feedForward(x)
         }
         return finalNorm(x)
@@ -129,3 +146,4 @@ final class WhisperNetwork: Module {
         _decoder.wrappedValue = TextDecoder(configuration: configuration)
     }
 }
+
