@@ -7,6 +7,7 @@ import TranscriberCore
 import TranscriptionPipeline
 import WhisperCpp
 import WhisperDecoding
+import WhisperMLX
 
 struct TranscribeCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -25,6 +26,9 @@ struct TranscribeCommand: AsyncParsableCommand {
 
     @Option(help: "Write subtitles here instead of next to each input.")
     var outputDirectory: String?
+
+    @Option(help: "whispercpp or mlx.")
+    var backend: String = "whispercpp"
 
     @Flag(help: "Enable whisper.cpp flash attention (faster, less faithful timestamps).")
     var flashAttention = false
@@ -55,14 +59,22 @@ struct TranscribeCommand: AsyncParsableCommand {
         let models = URL(fileURLWithPath: modelsDirectory)
         let modelName = task == .translate ? "chickenrice-v0.2" : "whisper-ja-1.5b"
         let tokenizer = try WhisperTokenizer(contentsOf: models.appendingPathComponent("whisper/\(modelName).tokenizer.json"))
-        let backend = WhisperCppBackend(model: try WhisperModel(
-            contentsOf: models.appendingPathComponent("whisper/\(modelName)\(modelSuffix).bin"),
-            usesGPU: !cpu,
-            usesFlashAttention: flashAttention
-        ))
+        let whisperBackend: any WhisperBackend
+        switch backend {
+        case "whispercpp":
+            whisperBackend = WhisperCppBackend(model: try WhisperModel(
+                contentsOf: models.appendingPathComponent("whisper/\(modelName)\(modelSuffix).bin"),
+                usesGPU: !cpu,
+                usesFlashAttention: flashAttention
+            ))
+        case "mlx":
+            whisperBackend = try WhisperMLXBackend(modelDirectory: models.appendingPathComponent("mlx/\(modelName)"))
+        default:
+            throw ValidationError("backend must be whispercpp or mlx")
+        }
         let vadModel = try WhisperVADModel(compiledModelAt: models.appendingPathComponent("vad/whisper-vad-asmr.mlmodelc"))
         let segmentGenerator = SegmentGenerator(
-            backend: backend,
+            backend: whisperBackend,
             decoder: FallbackDecoder(windowDecoder: WindowDecoder(tokenizer: tokenizer, settings: ChickenRiceDefaults.decoding(task: task)))
         )
         var settings = TranscriptionPipeline.Settings.chickenRice

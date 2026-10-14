@@ -15,10 +15,12 @@ let package = Package(
         .library(name: "TranscriptionPipeline", targets: ["TranscriptionPipeline"]),
         .library(name: "WhisperCpp", targets: ["WhisperCpp"]),
         .library(name: "WhisperDecoding", targets: ["WhisperDecoding"]),
+        .library(name: "WhisperMLX", targets: ["WhisperMLX"]),
         .executable(name: "transcriber-cli", targets: ["transcriber-cli"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
+        .package(url: "https://github.com/ml-explore/mlx-swift", exact: "0.32.3"),
     ],
     targets: [
         .target(name: "TranscriberCore"),
@@ -51,6 +53,14 @@ let package = Package(
             dependencies: ["TranscriberCore", "AudioFeatures"]
         ),
         .target(
+            name: "WhisperMLX",
+            dependencies: [
+                "AudioFeatures", "WhisperDecoding",
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+            ]
+        ),
+        .target(
             name: "WhisperCpp",
             dependencies: ["TranscriberCore", "AudioFeatures", "WhisperDecoding", "whisper"]
         ),
@@ -65,6 +75,7 @@ let package = Package(
                 "TranscriptionPipeline",
                 "WhisperCpp",
                 "WhisperDecoding",
+                "WhisperMLX",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ]
         ),
