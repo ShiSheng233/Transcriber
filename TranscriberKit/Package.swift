@@ -50,6 +50,7 @@ let package = Package(
             name: "transcriber-cli",
             dependencies: [
                 "TranscriberCore",
+                "MediaDecoding",
                 "WhisperCpp",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ]
