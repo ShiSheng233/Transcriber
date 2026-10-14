@@ -86,7 +86,9 @@ final class DecoderSlotBatch {
         }
     }
 
-    /// One decoding step for every slot as a pure function:
+    /// One decoding step for every slot. MLXArray is a reference type, so the
+    /// cache arrays are updated in place by the subscript assignments.
+    /// Inputs and outputs:
     /// `[tokens, positions, selfKeys..., selfValues..., crossKeys..., crossValues...]`
     /// -> `[logits, selfKeys..., selfValues...]`.
     private static func makeStep(decoder: TextDecoder, slotCount: Int, contextLength: Int) -> ([MLXArray]) -> [MLXArray] {
@@ -94,8 +96,8 @@ final class DecoderSlotBatch {
         return { inputs in
             let tokens = inputs[0]
             let positions = inputs[1]
-            var selfKeys = Array(inputs[2..<(2 + layerCount)])
-            var selfValues = Array(inputs[(2 + layerCount)..<(2 + 2 * layerCount)])
+            let selfKeys = Array(inputs[2..<(2 + layerCount)])
+            let selfValues = Array(inputs[(2 + layerCount)..<(2 + 2 * layerCount)])
             let crossKeys = Array(inputs[(2 + 2 * layerCount)..<(2 + 3 * layerCount)])
             let crossValues = Array(inputs[(2 + 3 * layerCount)..<(2 + 4 * layerCount)])
             let slots = MLXArray(0..<Int32(slotCount))

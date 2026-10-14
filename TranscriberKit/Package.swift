@@ -8,6 +8,7 @@ let package = Package(
     products: [
         .library(name: "TranscriberCore", targets: ["TranscriberCore"]),
         .library(name: "AudioFeatures", targets: ["AudioFeatures"]),
+        .library(name: "JobQueue", targets: ["JobQueue"]),
         .library(name: "MediaDecoding", targets: ["MediaDecoding"]),
         .library(name: "SpeechDetection", targets: ["SpeechDetection"]),
         .library(name: "SubtitleExport", targets: ["SubtitleExport"]),
@@ -25,6 +26,13 @@ let package = Package(
     targets: [
         .target(name: "TranscriberCore"),
         .target(name: "AudioFeatures"),
+        .target(
+            name: "JobQueue",
+            dependencies: [
+                "TranscriberCore", "SpeechDetection", "SubtitleExport", "TranscriptionPipeline",
+                "WhisperCpp", "WhisperDecoding", "WhisperMLX",
+            ]
+        ),
         .target(
             name: "MediaDecoding",
             dependencies: ["libavcodec", "libavformat", "libavutil", "libswresample"]
@@ -88,6 +96,10 @@ let package = Package(
             name: "AudioFeaturesTests",
             dependencies: ["AudioFeatures"],
             resources: [.copy("Fixtures")]
+        ),
+        .testTarget(
+            name: "JobQueueTests",
+            dependencies: ["JobQueue", "SubtitleExport", "TranscriberCore"]
         ),
         .testTarget(
             name: "MediaDecodingTests",
