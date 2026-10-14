@@ -16,7 +16,7 @@ final class ModelsSettingsViewController: SettingsPaneViewController {
         return SettingsForm.page([
             SettingsForm.section(String(localized: "Models Folder"), rows: [
                 SettingsForm.row(control: folderControls),
-            ], footer: String(localized: "The folder holds whisper/, mlx/ and vad/, as made by make whisper-models mlx-models vad-model.")),
+            ], footer: String(localized: "Contains whisper/, mlx/ and vad/.")),
             SettingsForm.section(String(localized: "Required Files"), rows: [statusStack]),
         ])
     }

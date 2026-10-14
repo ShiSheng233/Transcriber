@@ -7,8 +7,8 @@ import AppKit
 enum SettingsForm {
     static let pageWidth: CGFloat = 540
     private static let pageInset: CGFloat = 20
-    private static let rowInsets = NSEdgeInsets(top: 9, left: 12, bottom: 9, right: 12)
-    private static let minimumRowHeight: CGFloat = 40
+    private static let rowInsets = NSEdgeInsets(top: 11, left: 14, bottom: 11, right: 14)
+    private static let minimumRowHeight: CGFloat = 44
 
     static func page(_ sections: [NSView]) -> NSView {
         let stack = verticalStack(sections, spacing: 22)
@@ -33,6 +33,7 @@ enum SettingsForm {
             let label = NSTextField(wrappingLabelWithString: footer)
             label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
             label.textColor = .secondaryLabelColor
+            label.preferredMaxLayoutWidth = pageWidth - 2 * pageInset
             views.append(label)
         }
         let stack = verticalStack(views, spacing: 8)
@@ -43,15 +44,17 @@ enum SettingsForm {
     }
 
     static func row(_ title: String, description: String? = nil, control: NSView) -> NSView {
+        row(title, descriptionLabel: description.map(descriptionLabel(_:)), control: control)
+    }
+
+    /// A row whose description the caller updates later (e.g. a status).
+    static func row(_ title: String, descriptionLabel: NSTextField?, control: NSView) -> NSView {
         let titleLabel = NSTextField(labelWithString: title)
         var labels: [NSView] = [titleLabel]
-        if let description {
-            let descriptionLabel = NSTextField(wrappingLabelWithString: description)
-            descriptionLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-            descriptionLabel.textColor = .secondaryLabelColor
+        if let descriptionLabel {
             labels.append(descriptionLabel)
         }
-        let labelStack = verticalStack(labels, spacing: 2)
+        let labelStack = verticalStack(labels, spacing: 3)
         labelStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         labelStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
         control.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -65,6 +68,17 @@ enum SettingsForm {
         row.edgeInsets = rowInsets
         row.heightAnchor.constraint(greaterThanOrEqualToConstant: minimumRowHeight).isActive = true
         return row
+    }
+
+    /// One short line under a row's title. Longer explanations belong in the
+    /// section footer, so a description never wraps or stretches its row.
+    static func descriptionLabel(_ text: String = "") -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        label.textColor = .secondaryLabelColor
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
     }
 
     /// A row holding a single control across the full width (e.g. a path).
@@ -139,9 +153,8 @@ private final class GroupBox: NSView {
     }
 
     override func updateLayer() {
+        // Fill only, no outline, like System Settings' grouped rows.
         layer?.backgroundColor = NSColor.quaternarySystemFill.cgColor
-        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.35).cgColor
-        layer?.borderWidth = 0.5
     }
 }
 
@@ -155,7 +168,7 @@ extension SettingsForm {
         row.addSubview(line)
         NSLayoutConstraint.activate([
             line.topAnchor.constraint(equalTo: row.topAnchor),
-            line.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
+            line.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 14),
             line.trailingAnchor.constraint(equalTo: row.trailingAnchor),
         ])
     }

@@ -26,7 +26,8 @@ enum DebugSnapshotRenderer {
                 tabs.selectedTabViewItemIndex = index
                 RunLoop.main.run(until: Date().addingTimeInterval(0.2))
                 let name = tabs.tabViewItems[index].label
-                snapshot(tabs.tabViewItems[index].viewController?.view, to: directory.appendingPathComponent("settings-\(name).png"))
+                // The whole window content, as the user sees it in its tab.
+                snapshot(settings.window?.contentView, to: directory.appendingPathComponent("settings-\(name).png"))
             }
         }
         snapshot(main.window?.contentView, to: directory.appendingPathComponent("main.png"))

@@ -17,8 +17,20 @@ class SettingsPaneViewController: NSViewController {
         fatalError("Settings panes are created in code")
     }
 
+    /// The form uses Auto Layout inside; pin it to a plain container so the
+    /// tab view controller can size and place it.
     override func loadView() {
-        view = makeForm()
+        let form = makeForm()
+        form.translatesAutoresizingMaskIntoConstraints = false
+        let container = NSView()
+        container.addSubview(form)
+        NSLayoutConstraint.activate([
+            form.topAnchor.constraint(equalTo: container.topAnchor),
+            form.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            form.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            form.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+        ])
+        view = container
     }
 
     override func viewDidLoad() {

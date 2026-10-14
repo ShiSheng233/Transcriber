@@ -21,24 +21,12 @@ final class GeneralSettingsViewController: SettingsPaneViewController {
     override func makeForm() -> NSView {
         SettingsForm.page([
             SettingsForm.section(String(localized: "Transcription"), rows: [
-                SettingsForm.row(
-                    String(localized: "Task"),
-                    description: String(localized: "Applies to files you add from now on."),
-                    control: taskPopUp
-                ),
-            ], footer: String(localized: "Translate uses ChickenRice v0.2 (Japanese speech → Chinese subtitles). Transcribe uses whisper-ja-1.5B (Japanese subtitles).")),
+                SettingsForm.row(String(localized: "Task"), description: String(localized: "For newly added files"), control: taskPopUp),
+            ], footer: String(localized: "Translate uses ChickenRice v0.2 · Transcribe uses whisper-ja-1.5B")),
             SettingsForm.section(String(localized: "Performance"), rows: [
-                SettingsForm.row(
-                    String(localized: "Engine"),
-                    description: String(localized: "whisper.cpp is faster for translation; MLX uses less memory and is faster for transcription."),
-                    control: backendPopUp
-                ),
-                SettingsForm.row(
-                    String(localized: "Chunks at once"),
-                    description: String(localized: "30-second chunks decoded in parallel on the GPU. 4 is fastest on most Macs."),
-                    control: concurrencyPopUp
-                ),
-            ]),
+                SettingsForm.row(String(localized: "Engine"), control: backendPopUp),
+                SettingsForm.row(String(localized: "Chunks at once"), description: String(localized: "4 is fastest on most Macs"), control: concurrencyPopUp),
+            ], footer: String(localized: "whisper.cpp translates faster; MLX transcribes faster and uses less memory.")),
         ])
     }
 

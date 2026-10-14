@@ -8,7 +8,7 @@ final class LLMSettingsViewController: SettingsPaneViewController {
     private let enabledSwitch = NSSwitch()
     private let apiKeyField = NSSecureTextField()
     private lazy var modelPopUp = SettingsForm.popUp([], target: self, action: #selector(modelChanged(_:)))
-    private let modelStatusLabel = NSTextField(labelWithString: "")
+    private let modelStatusLabel = SettingsForm.descriptionLabel()
     private let languageBox = NSComboBox()
     private let keepsOriginalSwitch = NSSwitch()
     private let glossaryView = NSTextView()
@@ -33,8 +33,6 @@ final class LLMSettingsViewController: SettingsPaneViewController {
         )
         refreshButton.bezelStyle = .accessoryBarAction
         let modelControls = NSStackView(views: [modelPopUp, refreshButton])
-        modelStatusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        modelStatusLabel.textColor = .secondaryLabelColor
 
         languageBox.addItems(withObjectValues: Self.suggestedLanguages)
         languageBox.completes = true
@@ -60,24 +58,19 @@ final class LLMSettingsViewController: SettingsPaneViewController {
 
         return SettingsForm.page([
             SettingsForm.section(String(localized: "Language Model"), rows: [
-                SettingsForm.row(
-                    String(localized: "Improve subtitles"),
-                    description: String(localized: "After transcription, a model on OpenRouter polishes ChickenRice's Chinese, or translates whisper-ja's Japanese. Timing is not changed."),
-                    control: enabledSwitch
-                ),
-            ]),
+                SettingsForm.row(String(localized: "Improve subtitles"), description: String(localized: "Polish Chinese or translate Japanese"), control: enabledSwitch),
+            ], footer: String(localized: "Runs on OpenRouter after transcription. Timing never changes.")),
             SettingsForm.section(String(localized: "OpenRouter"), rows: [
-                SettingsForm.row(String(localized: "API key"), description: String(localized: "Stored in your Keychain."), control: apiKeyControls),
-                SettingsForm.row(String(localized: "Model"), control: modelControls),
-                SettingsForm.row(control: modelStatusLabel),
-            ], footer: String(localized: "Only models that support structured output are listed, so every line comes back matched to its time.")),
+                SettingsForm.row(String(localized: "API key"), description: String(localized: "Stored in Keychain"), control: apiKeyControls),
+                SettingsForm.row(String(localized: "Model"), descriptionLabel: modelStatusLabel, control: modelControls),
+            ], footer: String(localized: "Only models with structured output are listed.")),
             SettingsForm.section(String(localized: "Translation"), rows: [
-                SettingsForm.row(String(localized: "Translate into"), description: String(localized: "For the Transcribe task."), control: languageBox),
-                SettingsForm.row(String(localized: "Keep the Japanese line"), description: String(localized: "Bilingual subtitles: translation above, original below."), control: keepsOriginalSwitch),
+                SettingsForm.row(String(localized: "Translate into"), description: String(localized: "Transcribe task only"), control: languageBox),
+                SettingsForm.row(String(localized: "Keep the Japanese line"), description: String(localized: "Bilingual subtitles"), control: keepsOriginalSwitch),
             ]),
             SettingsForm.section(String(localized: "Glossary"), rows: [
                 SettingsForm.row(control: glossaryScroll),
-            ], footer: String(localized: "One entry per line, written as source = translation, e.g. お兄ちゃん = 哥哥. The model always uses these.")),
+            ], footer: String(localized: "One per line: source = translation, e.g. お兄ちゃん = 哥哥")),
         ])
     }
 
@@ -120,9 +113,14 @@ final class LLMSettingsViewController: SettingsPaneViewController {
         }
 
         modelStatusLabel.stringValue = switch viewModel.modelListState {
-        case .notLoaded, .loading: String(localized: "Loading models from OpenRouter…")
-        case .loaded: selectedID.isEmpty ? String(localized: "\(viewModel.availableModels.count) models available.") : selectedID
-        case .failed(let message): String(localized: "Could not load models: \(message)")
+        case .notLoaded, .loading: String(localized: "Loading…")
+        case .loaded: selectedID.isEmpty ? String(localized: "\(viewModel.availableModels.count) models") : selectedID
+        case .failed: String(localized: "Couldn't load models")
+        }
+        if case .failed(let message) = viewModel.modelListState {
+            modelStatusLabel.toolTip = message
+        } else {
+            modelStatusLabel.toolTip = selectedID.isEmpty ? nil : selectedID
         }
         modelStatusLabel.textColor = if case .failed = viewModel.modelListState { .systemRed } else { .secondaryLabelColor }
     }

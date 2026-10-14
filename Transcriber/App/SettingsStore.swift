@@ -11,8 +11,6 @@ final class SettingsStore {
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
-        if let data = userDefaults.data(forKey: Self.defaultsKey) {
-        }
         if let data = userDefaults.data(forKey: Self.defaultsKey),
            let saved = try? JSONDecoder().decode(AppSettings.self, from: data) {
             settings = saved

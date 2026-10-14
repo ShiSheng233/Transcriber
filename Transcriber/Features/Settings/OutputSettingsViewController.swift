@@ -30,13 +30,9 @@ final class OutputSettingsViewController: SettingsPaneViewController {
                 SettingsForm.row(control: formatsStack),
             ], footer: String(localized: "SRT, VTT and LRC match the original tool's files; ASS adds a default style.")),
             SettingsForm.section(String(localized: "Location"), rows: [
-                SettingsForm.row(
-                    String(localized: "Save subtitles"),
-                    description: String(localized: "Files are named after the source and replace older ones."),
-                    control: locationPopUp
-                ),
+                SettingsForm.row(String(localized: "Save subtitles"), control: locationPopUp),
                 folderRow,
-            ]),
+            ], footer: String(localized: "Files with the same name are replaced.")),
         ])
     }
 
