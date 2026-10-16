@@ -20,9 +20,12 @@ public struct LLMReplyCache: Sendable {
         Self.deleteReplies(in: directory, olderThan: Date.now.addingTimeInterval(-Double(lifetime.components.seconds)))
     }
 
-    /// The folder the app uses, under the user's Caches.
+    /// The folder the app uses: its own folder in the user's Caches, which
+    /// the Homebrew cask's zap removes.
     public static var standardDirectory: URL {
-        URL.cachesDirectory.appendingPathComponent("Transcriber/LLMReplies", isDirectory: true)
+        URL.cachesDirectory
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Transcriber", isDirectory: true)
+            .appendingPathComponent("LLMReplies", isDirectory: true)
     }
 
     struct Key: Encodable {

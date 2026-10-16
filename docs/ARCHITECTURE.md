@@ -371,7 +371,7 @@ JobQueue、JobDetail 预览、Settings（含后端选择、Core ML 编码器开�
 - CLI：`transcriber-cli llm-models`、`transcribe --llm-model <id>`（key 读 `OPENROUTER_API_KEY`）。
 
 - **场景与滚动摘要**（参照 WhisperJAV / PySubtrans）：相邻两行间隔 > 120 s 切成新场景；场景内的批次依次发送，每批要求模型额外返回 `batch_summary` 与 `scene_summary`，后续批次带上 `scene_so_far` 和最近 5 条批次摘要，名字、关系、语气更一致。场景之间并行（4 个）；超过 5 批的场景再切开，保证没有长停顿的片子也能并行。
-- **续跑**：完整回复按“模型 + 指令 + 本批行与上下文”（不含摘要）的 SHA-256 存进 `~/Library/Caches/Transcriber/LLMReplies`，保留 14 天；任务停止、部分失败或重跑时已完成的批次直接复用，活动日志会写复用了几批。
+- **续跑**：完整回复按“模型 + 指令 + 本批行与上下文”（不含摘要）的 SHA-256 存进 `~/Library/Caches/dev.shisheng.Transcriber/LLMReplies`，保留 14 天；任务停止、部分失败或重跑时已完成的批次直接复用，活动日志会写复用了几批。
 - **单句重翻**：字幕编辑器选中若干行 › Retranslate Selected Lines（⇧⌘R）。每行按时间找回 LLM 之前的原文（新加或改过时间的行用当前文本），前后行作为上下文，不复用缓存；结果作为一个可撤销步骤写回，没回答的行保持不变并提示。
 
 待做：用真实 API key 做端到端试跑与提示词调优；按 token 用量估算费用。
