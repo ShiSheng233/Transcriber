@@ -312,8 +312,89 @@ public actor JobQueue {
         return Retranslation(lines: updated, unansweredCount: unanswered)
     }
 
+    public struct Proofreading: Sendable {
+        /// The lines given, with the chosen ones corrected when they are the
+        /// transcript itself; unchanged when their originals were corrected.
+        public let lines: [TimedText]
+        /// Whether the corrections went to the job's originals (a
+        /// translated job) rather than to `lines`.
+        public let correctedOriginals: Bool
+        /// Lines the model changed.
+        public let correctedCount: Int
+        /// Chosen lines the model did not answer; they keep their text.
+        public let unansweredCount: Int
+        /// Chosen lines with no original to correct (added or retimed).
+        public let skippedCount: Int
+    }
+
+    /// Whether `proofread` can act on the job: its speech model writes
+    /// Japanese that the language model step translates. Chinese output
+    /// is polished as a whole instead.
+    public static func canProofread(_ job: Job) -> Bool {
+        job.model?.llmMode == .translate && job.status.isFinished
+    }
+
+    /// Sends chosen lines to the language model only to fix what the speech
+    /// model misheard, without translating (see `ProofreadingPlan` for which
+    /// text that is). Corrected originals replace the job's at once and are
+    /// not an editor undo step; corrected lines come back in the result.
+    /// Cached replies are not reused.
+    /// - Parameter lines: the job's lines as the editor has them.
+    public func proofread(_ lineIndices: [Int], of lines: [TimedText], in jobID: UUID, with llm: LLMConfiguration) async throws -> Proofreading {
+        guard let job = jobs.first(where: { $0.id == jobID }), llm.isUsable else {
+            throw JobQueueError.languageModelRequired
+        }
+        guard Self.canProofread(job) else {
+            throw JobQueueError.nothingToProofread
+        }
+        let plan = ProofreadingPlan(chosen: lineIndices, of: lines, originals: job.linesBeforeLanguageModel)
+        guard !plan.lineIndices.isEmpty else {
+            throw plan.skippedCount > 0 ? JobQueueError.noOriginalsToProofread : JobQueueError.nothingToProofread
+        }
+        log(.info, jobID, "Proofreading \(plan.lineIndices.count) line(s) with \(llm.settings.model)…")
+        let result = try await makeRefiner(for: llm).refine(
+            plan.segments, job: .proofreadJapanese, glossary: llm.settings.glossaryEntries, lineIndices: plan.lineIndices, reusesCachedReplies: false
+        )
+        let corrections = plan.corrections(from: result.answeredLines)
+        var updated = lines
+        switch plan.target {
+        case .lines:
+            for (index, text) in corrections {
+                updated[index].text = text
+            }
+        case .originals:
+            var correctedByTimes: [TimeRange: String] = [:]
+            for (index, text) in corrections {
+                correctedByTimes[TimeRange(plan.segments[index])] = text
+            }
+            if !correctedByTimes.isEmpty {
+                update(jobID) { job in
+                    for index in job.linesBeforeLanguageModel.indices {
+                        if let corrected = correctedByTimes[TimeRange(job.linesBeforeLanguageModel[index])] {
+                            job.linesBeforeLanguageModel[index].text = corrected
+                        }
+                    }
+                }
+            }
+        }
+        let unanswered = plan.lineIndices.count - result.answeredLines.count
+        if plan.skippedCount > 0 {
+            log(.warning, jobID, "\(plan.skippedCount) line(s) have no recognized original (added or retimed) and were skipped")
+        }
+        log(unanswered > 0 ? .warning : .info, jobID, unanswered > 0
+            ? "\(unanswered) of \(plan.lineIndices.count) line(s) got no answer and kept their text (\(result.firstFailure ?? "incomplete reply"))"
+            : "\(corrections.count) of \(plan.lineIndices.count) line(s) corrected")
+        return Proofreading(
+            lines: updated,
+            correctedOriginals: plan.target == .originals,
+            correctedCount: corrections.count,
+            unansweredCount: unanswered,
+            skippedCount: plan.skippedCount
+        )
+    }
+
     /// A line's times, to find it again after editing.
-    private struct TimeRange: Hashable {
+    struct TimeRange: Hashable {
         let start: AudioTime
         let end: AudioTime
 
@@ -741,7 +822,7 @@ public actor JobQueue {
         let refiner = makeRefiner(for: llm, marksHallucinations: removesHallucinations)
         let writesOriginalLines = switch refinerJob {
         case .translate, .translateSubtitles: llm.settings.keepsOriginalLine
-        case .polishChinese: false  // the original is a rougher Chinese line
+        case .polishChinese, .proofreadJapanese: false  // the original is a rougher version of the same line
         }
         update(jobID) {
             $0.status = .refining(completedBatches: 0, totalBatches: 1)
@@ -751,6 +832,7 @@ public actor JobQueue {
         }
         let action = switch refinerJob {
         case .polishChinese: "Polishing"
+        case .proofreadJapanese: "Proofreading"
         case .translate, .translateSubtitles: "Translating"
         }
         log(.info, jobID, "\(action) \(segments.count) subtitles with \(llm.settings.model)…")
@@ -891,6 +973,8 @@ public enum JobQueueError: LocalizedError, Equatable {
     case nothingToRetranscribe
     case noMediaToTranscribe
     case noSpeechModel
+    case nothingToProofread
+    case noOriginalsToProofread
 
     public var errorDescription: String? {
         switch self {
@@ -899,6 +983,8 @@ public enum JobQueueError: LocalizedError, Equatable {
         case .nothingToRetranscribe: "Select the lines to transcribe again."
         case .noMediaToTranscribe: "There is no media file to transcribe for these subtitles."
         case .noSpeechModel: "Choose a speech model in the toolbar first."
+        case .nothingToProofread: "Only Japanese transcripts can be proofread: select lines of a file whose speech model writes Japanese."
+        case .noOriginalsToProofread: "The selected lines have no recognized original to correct: they were added or retimed after the language model ran."
         }
     }
 }

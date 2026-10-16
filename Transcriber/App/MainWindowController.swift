@@ -430,6 +430,37 @@ extension MainWindowController: SubtitleEditorCommands {
         }
     }
 
+    /// Sends the selected lines to the language model only to fix what the
+    /// speech model misheard: a translated file's originals are corrected
+    /// (shown with Show Original Text), an untranslated transcript's lines
+    /// change as one undo step.
+    @objc func proofreadLines(_ sender: Any?) {
+        detailViewController.editorView.commitPendingText()
+        guard let jobID = detailViewModel.shownJobID, !editor.selection.isEmpty, queueViewModel.canProofread(jobID: jobID) else { return }
+        let sentLines = editor.lines
+        let lineIndices = editor.selection
+        Task {
+            do {
+                let result = try await queueViewModel.proofread(lineIndices, of: sentLines, in: jobID)
+                if detailViewModel.shownJobID == jobID, !result.correctedOriginals {
+                    editor.applyProofreading(result.lines, sentLines: sentLines)
+                }
+                if result.unansweredCount > 0 || result.skippedCount > 0, let window {
+                    let alert = NSAlert()
+                    alert.messageText = String(localized: "Some lines were not proofread")
+                    alert.informativeText = result.skippedCount > 0
+                        ? String(localized: "\(result.skippedCount) of \(lineIndices.count) lines have no recognized original because they were added or retimed. The Activity window has the details.")
+                        : String(localized: "\(result.unansweredCount) of \(lineIndices.count) lines got no answer and kept their text. The Activity window has the details.")
+                    alert.beginSheetModal(for: window) { _ in }
+                }
+            } catch {
+                if let window {
+                    NSAlert(error: error).beginSheetModal(for: window) { _ in }
+                }
+            }
+        }
+    }
+
     /// Transcribes the time the selected lines cover again (and translates
     /// the new lines when the file was translated); one undo step.
     @objc func retranscribeLines(_ sender: Any?) {
@@ -545,6 +576,8 @@ extension MainWindowController: NSMenuItemValidation {
         case #selector(retranslateLines(_:)):
             return editor.canEditSelection && queueViewModel.canUseLanguageModel
                 && !(detailViewModel.shownJobID.map { queueViewModel.retranslatingJobIDs.contains($0) || queueViewModel.retranscribingJobIDs.contains($0) } ?? false)
+        case #selector(proofreadLines(_:)):
+            return editor.canEditSelection && (detailViewModel.shownJobID.map(queueViewModel.canProofread(jobID:)) ?? false)
         case #selector(translateSubtitles(_:)):
             return detailViewModel.subtitleMode == .edit
         case #selector(saveSubtitles(_:)):

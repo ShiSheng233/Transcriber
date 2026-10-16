@@ -4,6 +4,8 @@ import TranscriberCore
 /// The instructions and JSON payload for one batch of subtitle lines.
 enum SubtitlePrompt {
     enum Job {
+        /// Fix what the speech model misheard in Japanese lines, without translating.
+        case proofreadJapanese
         case polishChinese
         case translate(targetLanguage: String)
         case translateSubtitles(targetLanguage: String)
@@ -55,6 +57,14 @@ enum SubtitlePrompt {
     ) -> String {
         var instructions: String
         switch job {
+        case .proofreadJapanese:
+            instructions = """
+                You proofread Japanese subtitles that a speech model transcribed from audio (anime, drama, \
+                ASMR and similar). Fix only the words the model misheard: wrong kanji for a homophone, \
+                broken or garbled words, names and terms written inconsistently, using the surrounding \
+                lines as context. Keep the speaker's own wording, tone, fillers and sounds; do not rewrite \
+                for style, do not polish and do not translate. Leave a line that is already right unchanged.
+                """
         case .polishChinese:
             instructions = """
                 You edit Chinese subtitles that a speech model translated directly from Japanese audio \
@@ -117,8 +127,14 @@ enum SubtitlePrompt {
                 """
         }
         if !glossary.isEmpty {
-            instructions += "\nAlways use these renderings:\n"
-            instructions += glossary.map { "- \($0.source) → \($0.target)" }.joined(separator: "\n")
+            if case .proofreadJapanese = job {
+                // Only the Japanese side matters: it is how these names are spelled.
+                instructions += "\nThese names and terms are spelled this way:\n"
+                instructions += glossary.map { "- \($0.source)" }.joined(separator: "\n")
+            } else {
+                instructions += "\nAlways use these renderings:\n"
+                instructions += glossary.map { "- \($0.source) → \($0.target)" }.joined(separator: "\n")
+            }
         }
         return instructions
     }

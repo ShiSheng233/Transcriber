@@ -207,6 +207,32 @@ final class JobQueueViewModel {
         return try await queue.retranslate(lineIndices, of: lines, in: jobID, with: llm)
     }
 
+    /// Whether the job's Japanese transcript can be proofread now: the
+    /// language model is usable, the job is done, and no other request for
+    /// it is running. Not for files whose speech model writes Chinese.
+    func canProofread(jobID: UUID) -> Bool {
+        guard canUseLanguageModel, let job = jobs.first(where: { $0.id == jobID }) else {
+            return false
+        }
+        return JobQueue.canProofread(job) && !retranslatingJobIDs.contains(jobID) && !retranscribingJobIDs.contains(jobID)
+    }
+
+    /// Sends the chosen lines to the language model only to fix what the
+    /// speech model misheard; see `JobQueue.proofread`. Corrected originals
+    /// that go into bilingual files make the job unsaved.
+    func proofread(_ lineIndices: [Int], of lines: [TimedText], in jobID: UUID) async throws -> JobQueue.Proofreading {
+        guard let llm = settingsStore.settings.queueConfiguration(apiKeys: apiKeyStore).llm else {
+            throw JobQueueError.languageModelRequired
+        }
+        retranslatingJobIDs.insert(jobID)
+        defer { retranslatingJobIDs.remove(jobID) }
+        let result = try await queue.proofread(lineIndices, of: lines, in: jobID, with: llm)
+        if result.correctedOriginals, result.correctedCount > 0, jobs.first(where: { $0.id == jobID })?.writesOriginalLines == true {
+            unsavedJobIDs.insert(jobID)
+        }
+        return result
+    }
+
     /// Whether the job has media to transcribe part of again.
     func canRetranscribe(jobID: UUID) -> Bool {
         guard let job = jobs.first(where: { $0.id == jobID }) else {

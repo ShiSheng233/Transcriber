@@ -30,6 +30,10 @@ public struct SubtitleRefiner: Sendable {
         case translate(targetLanguage: String)
         /// Existing subtitles in any language, e.g. imported from a file.
         case translateSubtitles(targetLanguage: String)
+        /// Japanese transcripts with what the speech model misheard fixed,
+        /// nothing else; for chosen lines (a full run proofreads within the
+        /// translation, see `correctsSources`).
+        case proofreadJapanese
     }
 
     public struct Configuration: Sendable {
@@ -127,6 +131,7 @@ public struct SubtitleRefiner: Sendable {
         case .polishChinese: .polishChinese
         case .translate(let language): .translate(targetLanguage: language)
         case .translateSubtitles(let language): .translateSubtitles(targetLanguage: language)
+        case .proofreadJapanese: .proofreadJapanese
         }
         let system = ChatMessage(role: .system, content: SubtitlePrompt.systemMessage(
             for: promptJob, glossary: glossary, correctsSources: correctsSources(for: job), marksHallucinations: configuration.marksHallucinations

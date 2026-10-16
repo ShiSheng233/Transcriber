@@ -279,7 +279,7 @@ queued → loadingModel → decodingAudio → detectingSpeech → transcribing(p
 
 **两条线**：识别一次只跑一个文件（已经占满 GPU）；识别完、需要 LLM 的文件交给另一条线，LLM 步骤按顺序一次一个，与下一个文件的识别同时进行。还有文件等着识别时模型保持加载，没有了才卸载（下一个文件约 0.5 s 重新加载）。编辑器里的“重新转写”与队列的识别共用同一把锁，不会同时抢 GPU。停止会把两条线上的任务都放回队列（LLM 已完成的批次在缓存里，重跑不再花钱）；取消只作用于那一个文件，无论它在哪条线上。
 
-**编辑器命令**：Retranscribe Selected Lines（⌥⌘R）重新识别选中行覆盖的时间段（前后各多解码 1 s 作上下文，保留中点落在该段内的新字幕并裁到段内），替换这些行；这个文件走过 LLM 且 LLM 开着时，新行再送去翻译。Retranslate Selected Lines（⇧⌘R）见 §10 Phase 3。队列里右键 › Recognition Model 给等待中的文件换模型；已结束的文件变为 Transcribe Again With，换模型重新识别（有未保存的编辑时不可用）。
+**编辑器命令**：Retranscribe Selected Lines（⌥⌘R）重新识别选中行覆盖的时间段（前后各多解码 1 s 作上下文，保留中点落在该段内的新字幕并裁到段内），替换这些行；这个文件走过 LLM 且 LLM 开着时，新行再送去翻译。Retranslate Selected Lines（⇧⌘R）与 Proofread Selected Lines（⇧⌘P）见 §10 Phase 3。队列里右键 › Recognition Model 给等待中的文件换模型；已结束的文件变为 Transcribe Again With，换模型重新识别（有未保存的编辑时不可用）。
 
 **编辑器（参照 Aegisub）**：编辑面板自上而下是操作栏、编辑框、网格；调时间模式下波形取代视频画面显示在上半区（播放器继续放声音，可以只看波形调时间）。操作栏默认收起，从窗口工具栏右上角的 Editing Tools 按钮（View › Show Editing Tools ⌥⌘E）打开，和播放器开关一样全局记住。操作栏的按钮与菜单项发同一个 action，由 `MainWindowController.isCommandEnabled` 统一判断可用；分组：行（插入、删除、拆分▾、合并▾、交换）、时间（设起点/终点到播放头、平移到播放头、连续▾、Shift Times…、Adjust Timing…）、播放（Play Line、播放▾）、选择（Select Lines…、查找替换），右侧两个开关：调时间模式、原文列。
 - **识别置信度**：没通过 Whisper 自身检查的行在网格里行号标橙，悬停显示 avg log prob、no speech、压缩比；Select Lines 可按它筛选，再批量重新识别或重翻。
@@ -407,6 +407,7 @@ JobQueue、JobDetail 预览、Settings（含后端选择、Core ML 编码器开�
   - Remove invented lines：LLM（翻译或润色）的回复里每行多一个 `drop`，标为 true 的行（视频结尾、频道推广、字幕署名、循环、与上下文无关的文本）从结果里删掉，活动日志逐条列出；拿不准时保留。不另花一遍。
   - 识别时没通过 Whisper 自身检查的行在请求里带 `"doubtful": true`，提示模型重点检查。只在为 true 时发送，其他请求与缓存键不变。
 - **单句重翻**：字幕编辑器选中若干行 › Retranslate Selected Lines（⇧⌘R）。每行按时间找回 LLM 之前的原文（新加或改过时间的行用当前文本），前后行作为上下文，不复用缓存；结果作为一个可撤销步骤写回，没回答的行保持不变并提示。
+- **单句校对**：字幕编辑器选中若干行 › Proofread Selected Lines（⇧⌘P），只改识别听错的词（同音错字、破碎的词、前后不一致的名字），不翻译、不润色，保留措辞、语气和语气词；术语表只给日文一侧，作为这些名字的正确写法。用 `SubtitleRefiner.Job.proofreadJapanese`（只服务这条命令；整份翻译仍在翻译请求里顺带校对），不复用缓存。`ProofreadingPlan` 决定改哪里：翻译过的文件把整份 `linesBeforeLanguageModel` 发去（上下文也是日文），按时间找到选中行的原文并改正，译文不动（要跟着改就再 Retranslate）；原文改动直接写进任务，不进编辑器撤销栈，写双语字幕时任务变为未保存；新加或改过时间的行没有原文，跳过并提示。没走过 LLM 的 translate 模式文件（行本身就是日文）直接改这些行，作为一个可撤销步骤。只对 translate 模式的转写任务开放，polish 模式（中文输出）和字幕文件不可用。
 
 待做：用真实 API key 做端到端试跑与提示词调优；按 token 用量估算费用。
 

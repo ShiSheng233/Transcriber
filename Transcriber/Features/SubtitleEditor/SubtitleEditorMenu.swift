@@ -22,6 +22,7 @@ import AppKit
     func findNextSubtitle(_ sender: Any?)
     func translateSubtitles(_ sender: Any?)
     func retranslateLines(_ sender: Any?)
+    func proofreadLines(_ sender: Any?)
     func retranscribeLines(_ sender: Any?)
     func saveSubtitles(_ sender: Any?)
     func playSelection(_ sender: Any?)
@@ -117,6 +118,7 @@ enum SubtitleEditorMenu {
     static let modelItems: Group = [
         Item(title: String(localized: "Retranscribe Selected Lines"), action: #selector(Commands.retranscribeLines(_:)), key: "r", modifiers: [.command, .option]),
         Item(title: String(localized: "Retranslate Selected Lines"), action: #selector(Commands.retranslateLines(_:)), key: "r", modifiers: [.command, .shift]),
+        Item(title: String(localized: "Proofread Selected Lines"), action: #selector(Commands.proofreadLines(_:)), key: "p", modifiers: [.command, .shift]),
     ]
 
     static let viewItems: Group = [

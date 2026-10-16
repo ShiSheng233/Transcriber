@@ -367,6 +367,16 @@ final class SubtitleEditorViewModel {
     ///   - sentLines: the lines as they were when the request was made.
     ///   - newLines: the same lines with the answered ones replaced.
     func applyRetranslation(_ newLines: [TimedText], sentLines: [TimedText]) {
+        applyAnswers(newLines, sentLines: sentLines, actionName: String(localized: "Retranslate"))
+    }
+
+    /// Corrected text for proofread lines, as one undo step; the same rules
+    /// as `applyRetranslation`.
+    func applyProofreading(_ newLines: [TimedText], sentLines: [TimedText]) {
+        applyAnswers(newLines, sentLines: sentLines, actionName: String(localized: "Proofread"))
+    }
+
+    private func applyAnswers(_ newLines: [TimedText], sentLines: [TimedText], actionName: String) {
         guard isEditable, newLines.count == sentLines.count else { return }
         var updated = lines
         for index in newLines.indices where newLines[index] != sentLines[index] && updated.indices.contains(index) {
@@ -376,7 +386,7 @@ final class SubtitleEditorViewModel {
             }
         }
         guard updated != lines else { return }
-        replace(lines: updated, selection: selection, actionName: String(localized: "Retranslate"))
+        replace(lines: updated, selection: selection, actionName: actionName)
     }
 
     /// The lines with a stretch transcribed again, as one undo step; the
