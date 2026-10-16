@@ -3,6 +3,9 @@ import TranscriberCore
 
 /// Aegisub's time notation, "0:01:02.50" (hours, minutes, seconds, centiseconds).
 enum SubtitleTimeFormat {
+    /// Longer than any media file; anything past it is a typo.
+    private static let longestSeconds = 1_000.0 * 3_600
+
     static func string(_ time: AudioTime) -> String {
         let centiseconds = (time.milliseconds + 5) / 10
         return String(
@@ -18,11 +21,15 @@ enum SubtitleTimeFormat {
         guard (1...3).contains(fields.count) else {
             return nil
         }
-        let numbers = fields.map { Double($0) }
-        guard numbers.allSatisfy({ $0 != nil && $0! >= 0 }) else {
+        let numbers = fields.compactMap { Double($0) }
+        guard numbers.count == fields.count, numbers.allSatisfy({ $0 >= 0 }) else {
             return nil
         }
-        let seconds = numbers.compactMap { $0 }.reduce(0) { $0 * 60 + $1 }
+        let seconds = numbers.reduce(0) { $0 * 60 + $1 }
+        // "inf" and "1e30" parse as numbers, but converting them to samples would trap.
+        guard seconds <= longestSeconds else {
+            return nil
+        }
         return AudioTime(milliseconds: Int((seconds * 1_000).rounded()))
     }
 }

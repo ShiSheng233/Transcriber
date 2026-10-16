@@ -151,4 +151,13 @@ struct SubtitleEditorViewModelTests {
         #expect(editor.lines[1].start == AudioTime(milliseconds: 1_000))
         #expect(editor.lines[1].end == AudioTime(milliseconds: 1_000))
     }
+
+    @Test func numbersNoMediaIsThatLongAreNotTimes() {
+        let editor = TestLines.editor()
+        editor.select([0])
+        for text in ["inf", "1e30", "nan", "-1"] {
+            #expect(!editor.setEnd(text), "\(text)")
+        }
+        #expect(editor.lines == TestLines.three)
+    }
 }
