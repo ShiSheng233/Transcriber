@@ -1,13 +1,17 @@
 import AppKit
 import TranscriberCore
 
-/// Window > Activity: the full log, newest at the bottom.
+/// Window > Activity: the full log, newest at the bottom. It follows new
+/// entries while scrolled to the end; scrolling up to read stops that until
+/// the end is reached again.
 final class ActivityWindowController: NSWindowController {
     private let viewModel: ActivityViewModel
     private let textView = NSTextView()
     private let detailsCheckbox = NSButton(checkboxWithTitle: String(localized: "Show Details"), target: nil, action: nil)
     private var binder: ObservationBinder?
     private var displayedEntryIDs: [UUID] = []
+    /// How close to the end still counts as at the end, in points.
+    private static let endTolerance: CGFloat = 24
 
     init(viewModel: ActivityViewModel) {
         self.viewModel = viewModel
@@ -75,7 +79,7 @@ final class ActivityWindowController: NSWindowController {
         }
         let storage = textView.textStorage
         let isAppend = ids.count > displayedEntryIDs.count && Array(ids.prefix(displayedEntryIDs.count)) == displayedEntryIDs
-        let isAtBottom = (textView.enclosingScrollView?.verticalScroller?.floatValue ?? 1) > 0.98
+        let followsEnd = isScrolledToEnd
         let newEntries = isAppend ? Array(entries.dropFirst(displayedEntryIDs.count)) : entries
         // One entry per line: a line break before every entry but the first in the view.
         let startsEmpty = !isAppend || displayedEntryIDs.isEmpty
@@ -90,9 +94,29 @@ final class ActivityWindowController: NSWindowController {
             storage?.setAttributedString(text)
         }
         displayedEntryIDs = ids
-        if isAtBottom {
-            textView.scrollToEndOfDocument(nil)
+        if followsEnd {
+            scrollToEnd()
         }
+    }
+
+    /// Measured from what is visible, before new text is added; a closed
+    /// window or a log that fits counts as at the end.
+    private var isScrolledToEnd: Bool {
+        guard let window, window.isVisible else { return true }
+        return textView.visibleRect.maxY >= textView.bounds.maxY - Self.endTolerance
+    }
+
+    private func scrollToEnd() {
+        if let container = textView.textContainer {
+            textView.layoutManager?.ensureLayout(for: container)
+        }
+        textView.scrollToEndOfDocument(nil)
+    }
+
+    /// Opens at the newest entries.
+    override func showWindow(_ sender: Any?) {
+        super.showWindow(sender)
+        scrollToEnd()
     }
 
     private func attributes(for level: LogEntry.Level) -> [NSAttributedString.Key: Any] {
