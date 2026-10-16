@@ -4,19 +4,22 @@ import AppKit
 /// for the editor's dialogs (Shift Times, Adjust Timing, Select Lines).
 /// Subclasses fill `form`, refresh `summaryLabel` and act in `confirm()`.
 class EditorSheet: NSWindowController {
-    private static let width: CGFloat = 400
-    private static let inset: CGFloat = 16
+    private static let minimumWidth: CGFloat = 400
+    private static let inset: CGFloat = 20
 
     let form = NSStackView()
     let summaryLabel = NSTextField(labelWithString: "")
     let confirmButton: NSButton
     /// Remembers the fields between uses (a per-person convenience).
     let userDefaults: UserDefaults
+    private let content = NSStackView()
+    /// Every row's label, kept equally wide so the controls line up.
+    private var rowLabels: [NSTextField] = []
 
     init(title: String, confirmTitle: String, userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
         confirmButton = NSButton(title: confirmTitle, target: nil, action: nil)
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 200), styleMask: [.titled], backing: .buffered, defer: true)
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: Self.minimumWidth, height: 200), styleMask: [.titled], backing: .buffered, defer: true)
         panel.title = title
         super.init(window: panel)
 
@@ -39,14 +42,16 @@ class EditorSheet: NSWindowController {
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let buttons = NSStackView(views: [summaryLabel, spacer, cancel, confirmButton])
 
-        let stack = NSStackView(views: [titleLabel, form, buttons])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 14
-        stack.edgeInsets = NSEdgeInsets(top: Self.inset, left: Self.inset, bottom: Self.inset, right: Self.inset)
-        stack.widthAnchor.constraint(equalToConstant: Self.width).isActive = true
-        buttons.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -2 * Self.inset).isActive = true
-        panel.contentView = stack
+        [titleLabel, form, buttons].forEach(content.addArrangedSubview)
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 14
+        content.edgeInsets = NSEdgeInsets(top: Self.inset, left: Self.inset, bottom: Self.inset, right: Self.inset)
+        // At least this wide, wider when a row needs it, never clipping a row.
+        content.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.minimumWidth).isActive = true
+        content.setHuggingPriority(.defaultHigh, for: .horizontal)
+        buttons.widthAnchor.constraint(equalTo: content.widthAnchor, constant: -2 * Self.inset).isActive = true
+        panel.contentView = content
     }
 
     @available(*, unavailable)
@@ -57,6 +62,9 @@ class EditorSheet: NSWindowController {
     func begin(on window: NSWindow) {
         guard let sheet = self.window, window.attachedSheet == nil else { return }
         update()
+        alignRowLabels()
+        content.layoutSubtreeIfNeeded()
+        sheet.setContentSize(content.fittingSize)
         window.beginSheet(sheet)
     }
 
@@ -90,14 +98,23 @@ class EditorSheet: NSWindowController {
 
     // MARK: Building blocks
 
-    /// A row: a label in a fixed column, then controls.
+    /// A row: a label in a column as wide as the widest label, then controls.
     func row(_ title: String, _ controls: [NSView]) -> NSStackView {
         let label = NSTextField(labelWithString: title)
         label.alignment = .right
-        label.widthAnchor.constraint(equalToConstant: 96).isActive = true
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
+        rowLabels.append(label)
         let row = NSStackView(views: [label] + controls)
         row.spacing = 8
         return row
+    }
+
+    /// Labels in different rows can only be tied together once the rows are
+    /// in the sheet, so this runs when it opens.
+    private func alignRowLabels() {
+        guard let first = rowLabels.first else { return }
+        NSLayoutConstraint.activate(rowLabels.dropFirst().map { $0.widthAnchor.constraint(equalTo: first.widthAnchor) })
+        rowLabels = []
     }
 
     func radioButtons(_ titles: [String]) -> [NSButton] {
