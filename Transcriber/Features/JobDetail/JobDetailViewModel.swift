@@ -9,6 +9,7 @@ import TranscriberCore
 final class JobDetailViewModel {
     private static let showsPlayerKey = "ShowsPlayer"
     private static let timingModeKey = "ShowsTimingMode"
+    private static let editingToolsKey = "ShowsEditingTools"
     private static let sourceColumnKey = "ShowsSourceColumn"
     private static let audioExtensions: Set<String> = ["mp3", "wav", "flac", "m4a", "aac", "ogg", "opus", "wma"]
     private let userDefaults: UserDefaults
@@ -20,6 +21,8 @@ final class JobDetailViewModel {
     private(set) var showsPlayer: Bool
     /// The waveform and its timing tools; off: nothing is decoded for it.
     private(set) var isTimingModeOn: Bool
+    /// The editor's action bar; off by default, opened from the window toolbar.
+    private(set) var showsEditingTools: Bool
     private(set) var hasSelection = false
     /// Shown over the grid while it is empty.
     private(set) var subtitlesPlaceholder: String?
@@ -37,6 +40,7 @@ final class JobDetailViewModel {
         waveform = WaveformViewModel(loader: waveformLoader)
         showsPlayer = userDefaults.object(forKey: Self.showsPlayerKey) == nil || userDefaults.bool(forKey: Self.showsPlayerKey)
         isTimingModeOn = userDefaults.bool(forKey: Self.timingModeKey)
+        showsEditingTools = userDefaults.bool(forKey: Self.editingToolsKey)
         editor.setPrefersSourceColumn(userDefaults.object(forKey: Self.sourceColumnKey) == nil || userDefaults.bool(forKey: Self.sourceColumnKey))
         editor.onChange = { [weak self] lines in
             if let self, let jobID = shownJobID {
@@ -79,6 +83,11 @@ final class JobDetailViewModel {
         showsPlayer.toggle()
         userDefaults.set(showsPlayer, forKey: Self.showsPlayerKey)
         updateWaveform()
+    }
+
+    func toggleEditingTools() {
+        showsEditingTools.toggle()
+        userDefaults.set(showsEditingTools, forKey: Self.editingToolsKey)
     }
 
     func toggleTimingMode() {

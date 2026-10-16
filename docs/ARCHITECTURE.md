@@ -274,7 +274,7 @@ queued → loadingModel → decodingAudio → detectingSpeech → transcribing(p
 
 **编辑器命令**：Retranscribe Selected Lines（⌥⌘R）重新识别选中行覆盖的时间段（前后各多解码 1 s 作上下文，保留中点落在该段内的新字幕并裁到段内），替换这些行；这个文件走过 LLM 且 LLM 开着时，新行再送去翻译。Retranslate Selected Lines（⇧⌘R）见 §10 Phase 3。队列里右键 › Recognition Model 给等待中的文件换模型；已结束的文件变为 Transcribe Again With，换模型重新识别（有未保存的编辑时不可用）。
 
-**编辑器（参照 Aegisub）**：编辑面板自上而下是操作栏、波形（仅调时间模式）、编辑框、网格。操作栏的按钮与菜单项发同一个 action，由 `MainWindowController.isCommandEnabled` 统一判断可用；分组：行（插入、删除、拆分▾、合并▾、交换）、时间（设起点/终点到播放头、平移到播放头、连续▾、Shift Times…、Adjust Timing…）、播放（Play Line、播放▾）、选择（Select Lines…、查找替换），右侧两个开关：调时间模式、原文列。
+**编辑器（参照 Aegisub）**：编辑面板自上而下是操作栏、波形（仅调时间模式）、编辑框、网格。操作栏默认收起，从窗口工具栏右上角的 Editing Tools 按钮（View › Show Editing Tools ⌥⌘E）打开，和播放器开关一样全局记住。操作栏的按钮与菜单项发同一个 action，由 `MainWindowController.isCommandEnabled` 统一判断可用；分组：行（插入、删除、拆分▾、合并▾、交换）、时间（设起点/终点到播放头、平移到播放头、连续▾、Shift Times…、Adjust Timing…）、播放（Play Line、播放▾）、选择（Select Lines…、查找替换），右侧两个开关：调时间模式、原文列。
 - **调时间模式**（View › Timing Mode ⌥⌘A，默认关，全局记住）：关着时不显示波形也不解码。开着时在编辑框上方显示波形：拖活动行两端调时间（⇧ 带动相接的邻行，⌥ 关吸附；吸附到 6 pt 内的邻行边、播放头、声音边界），拖行中间平移所选行，松手才写入、一步撤销；拖动时网格与时间字段实时跟随。单击定位，点行号条选行；⌥/⌘ 滚动或捏合缩放（10–2000 pt/s），播放时整页翻。焦点在波形上时 Space 播放/暂停，Q/E/D/W 播放起点前/后、终点前/后 500 ms，S 播放选区，↑↓ 换行，←→ 移播放头 0.1 s（⇧ 1 s）。播放头用 display link 每帧刷新。
 - **Adjust Timing**（⇧⌘I，`TimingPostProcessing`）：lead-in 200 / lead-out 300 ms（只延伸到邻行，不制造重叠）→ 吸附到声音边界（起点 100、终点 150 ms 内，需波形已载入）→ 间隔 < 300 ms 的相邻行延长前一行接上。
 - **Shift Times**（⌘I）：按时间或帧（fps 可选），提前/推后，选中行 / 全部 / 活动行之后，两端 / 只起点 / 只终点。

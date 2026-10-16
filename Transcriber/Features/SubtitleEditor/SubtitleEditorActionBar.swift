@@ -121,8 +121,9 @@ final class SubtitleEditorActionBar: NSView {
         popUp.bezelStyle = .accessoryBarAction
         popUp.controlSize = .small
         popUp.toolTip = title
-        // A pull-down shows its first item as the button's face.
-        let face = NSMenuItem()
+        popUp.imagePosition = .imageOnly
+        // A pull-down shows its first item as the button's face: the symbol, no title.
+        let face = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         face.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
         popUp.menu?.addItem(face)
         SubtitleEditorMenu.add(items, to: popUp.menu ?? NSMenu())

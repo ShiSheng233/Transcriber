@@ -202,6 +202,7 @@ final class JobDetailViewController: NSViewController {
         placeholderLabel.stringValue = viewModel.subtitlesPlaceholder ?? ""
         placeholderLabel.isHidden = !viewModel.hasSelection || viewModel.subtitlesPlaceholder == nil
         subtitleOverlay.text = viewModel.isAudioOnly ? nil : viewModel.currentSubtitle
+        editorView.setActionBarVisible(viewModel.showsEditingTools)
         renderWaveform()
     }
 

@@ -24,6 +24,7 @@ final class SubtitleEditorView: NSView {
 
     let actionBar = SubtitleEditorActionBar()
     private let waveformSlot = NSStackView()
+    private var actionBarSeparator = NSBox()
     private let tableView = NSTableView()
     private let sourceLabel = NSTextField(wrappingLabelWithString: "")
     private let startField = NSTextField()
@@ -48,7 +49,8 @@ final class SubtitleEditorView: NSView {
         waveformSlot.orientation = .vertical
         waveformSlot.spacing = 0
 
-        let column = NSStackView(views: [actionBar, Self.separator(), waveformSlot, editBox, gridScroll])
+        actionBarSeparator = Self.separator()
+        let column = NSStackView(views: [actionBar, actionBarSeparator, waveformSlot, editBox, gridScroll])
         column.orientation = .vertical
         column.spacing = 0
         column.distribution = .fill
@@ -79,6 +81,12 @@ final class SubtitleEditorView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         viewModel.undoManager = window?.undoManager
+    }
+
+    /// The action bar is shown from the window toolbar, like the player.
+    func setActionBarVisible(_ isVisible: Bool) {
+        actionBar.isHidden = !isVisible
+        actionBarSeparator.isHidden = !isVisible
     }
 
     /// Shows the waveform between the action bar and the edit box, or

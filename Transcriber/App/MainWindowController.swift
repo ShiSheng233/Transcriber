@@ -84,7 +84,7 @@ final class MainWindowController: NSWindowController {
         window?.title = queueViewModel.windowTitle
         window?.subtitle = queueViewModel.windowSubtitle
         window?.isDocumentEdited = !queueViewModel.unsavedJobIDs.isEmpty
-        _ = detailViewModel.showsPlayer  // re-validate the Player item when it changes
+        _ = (detailViewModel.showsPlayer, detailViewModel.showsEditingTools)  // re-validate the toggles when they change
         window?.toolbar?.validateVisibleItems()
         renderModelMenu()
         if queueViewModel.isMissingModels {
@@ -207,6 +207,10 @@ final class MainWindowController: NSWindowController {
 
     @objc func togglePlayer(_ sender: Any?) {
         detailViewModel.togglePlayer()
+    }
+
+    @objc func toggleEditingTools(_ sender: Any?) {
+        detailViewModel.toggleEditingTools()
     }
 }
 
@@ -474,6 +478,8 @@ extension MainWindowController: NSMenuItemValidation {
         switch action {
         case #selector(togglePlayer(_:)):
             menuItem.title = detailViewModel.showsPlayer ? String(localized: "Hide Player") : String(localized: "Show Player")
+        case #selector(toggleEditingTools(_:)):
+            menuItem.title = detailViewModel.showsEditingTools ? String(localized: "Hide Editing Tools") : String(localized: "Show Editing Tools")
         case #selector(toggleWaveform(_:)), #selector(toggleSourceColumn(_:)):
             menuItem.state = isCommandOn(action) ? .on : .off
         default:
@@ -556,6 +562,7 @@ extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
         static let start = NSToolbarItem.Identifier("start")
         static let clear = NSToolbarItem.Identifier("clear")
         static let player = NSToolbarItem.Identifier("player")
+        static let editingTools = NSToolbarItem.Identifier("editingTools")
         static let model = NSToolbarItem.Identifier("model")
     }
 
@@ -567,7 +574,7 @@ extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.flexibleSpace, ItemID.model, .space, ItemID.add, ItemID.start, ItemID.clear, .space, ItemID.player]
+        [.flexibleSpace, ItemID.model, .space, ItemID.add, ItemID.start, ItemID.clear, .space, ItemID.editingTools, ItemID.player]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -586,6 +593,8 @@ extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
             configure(item, label: String(localized: "Clear Finished"), symbol: "checklist.checked", action: #selector(clearFinished(_:)))
         case ItemID.player:
             configure(item, label: String(localized: "Player"), symbol: "video", action: #selector(togglePlayer(_:)))
+        case ItemID.editingTools:
+            configure(item, label: String(localized: "Editing Tools"), symbol: "wrench.and.screwdriver", action: #selector(toggleEditingTools(_:)))
         case ItemID.model:
             // Task-specific, so it lives here rather than in Settings (HIG).
             item.label = String(localized: "Model")
@@ -606,6 +615,13 @@ extension MainWindowController: NSToolbarDelegate, NSToolbarItemValidation {
                 systemSymbolName: detailViewModel.showsPlayer ? "video" : "video.slash",
                 accessibilityDescription: label
             )
+        }
+        if item.itemIdentifier == ItemID.editingTools {
+            let shows = detailViewModel.showsEditingTools
+            let label = shows ? String(localized: "Hide Editing Tools") : String(localized: "Show Editing Tools")
+            item.toolTip = label
+            // Filled while the bar is open, like a pressed toggle.
+            item.image = NSImage(systemSymbolName: shows ? "wrench.and.screwdriver.fill" : "wrench.and.screwdriver", accessibilityDescription: label)
         }
         if item.itemIdentifier == ItemID.start {
             let isRunning = queueViewModel.isRunning

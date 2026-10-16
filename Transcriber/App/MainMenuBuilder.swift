@@ -82,6 +82,11 @@ enum MainMenuBuilder {
             withTitle: String(localized: "Hide Player"), action: #selector(MainWindowController.togglePlayer(_:)), keyEquivalent: "p"
         )
         player.keyEquivalentModifierMask = [.command, .option]
+        let tools = menu.addItem(
+            withTitle: String(localized: "Show Editing Tools"), action: #selector(MainWindowController.toggleEditingTools(_:)), keyEquivalent: "e"
+        )
+        tools.keyEquivalentModifierMask = [.command, .option]
+        menu.addItem(.separator())
         SubtitleEditorMenu.add(SubtitleEditorMenu.viewItems, to: menu)
         return menu
     }
