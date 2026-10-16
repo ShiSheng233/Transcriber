@@ -38,6 +38,7 @@
 				"Features/JobQueue/JobQueueViewModel.swift",
 				"Features/Settings/SettingsViewModel.swift",
 				"Features/Settings/ShortcutsViewModel.swift",
+				"Features/SubtitleEditor/SubtitleEditorViewModel+Consistency.swift",
 				"Features/SubtitleEditor/SubtitleEditorViewModel+Lines.swift",
 				"Features/SubtitleEditor/SubtitleEditorViewModel+Timing.swift",
 				"Features/SubtitleEditor/SubtitleEditorViewModel.swift",

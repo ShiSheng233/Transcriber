@@ -41,4 +41,36 @@ struct SubtitleEditorViewModelTests {
         undoManager.undo()
         #expect(editor.lines[0].text == "ゆいちゃん")
     }
+
+    @Test func unifiesTheChosenSpellingsAsOneUndoStep() throws {
+        let editor = SubtitleEditorViewModel()
+        let undoManager = UndoManager()
+        undoManager.groupsByEvent = false
+        editor.undoManager = undoManager
+        let original = [Self.line(0, "ナナミ、来て"), Self.line(2, "ななみ、待って"), Self.line(4, "ﾅﾅﾐちゃん"), Self.line(6, "おはよう")]
+        editor.load(original, isEditable: true)
+        var reported: [TimedText] = []
+        editor.onChange = { reported = $0 }
+
+        let group = try #require(editor.termVariantGroups(glossaryTerms: []).first)
+        #expect(group.suggestedSpelling == "ナナミ")
+        undoManager.beginUndoGrouping()
+        let changed = editor.unifySpellings([group.key: group.suggestedSpelling])
+        undoManager.endUndoGrouping()
+
+        #expect(changed == 2)
+        #expect(editor.lines.map(\.text) == ["ナナミ、来て", "ナナミ、待って", "ナナミちゃん", "おはよう"])
+        #expect(reported == editor.lines)
+        #expect(editor.termVariantGroups(glossaryTerms: []).isEmpty)
+        #expect(undoManager.undoActionName == "Unify Spellings")
+        undoManager.undo()
+        #expect(editor.lines == original)
+    }
+
+    @Test func aGlossaryTermKeepsTheGlossarySpelling() {
+        let editor = SubtitleEditorViewModel()
+        editor.load([Self.line(0, "ｱﾘｽだよ")], isEditable: true)
+        let groups = editor.termVariantGroups(glossaryTerms: ["アリス", "爱丽丝"])
+        #expect(groups.map(\.suggestedSpelling) == ["アリス"])
+    }
 }

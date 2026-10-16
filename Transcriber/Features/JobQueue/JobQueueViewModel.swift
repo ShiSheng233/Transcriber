@@ -196,6 +196,12 @@ final class JobQueueViewModel {
         return llm.isEnabled && !llm.model.isEmpty
     }
 
+    /// Both sides of the glossary's entries: names and terms with a known
+    /// spelling, for Check Consistency.
+    var glossaryTerms: [String] {
+        settingsStore.settings.llm.glossaryEntries.flatMap { [$0.source, $0.target] }
+    }
+
     /// Sends the chosen lines through the language model again; see
     /// `JobQueue.retranslate`.
     func retranslate(_ lineIndices: [Int], of lines: [TimedText], in jobID: UUID) async throws -> JobQueue.Retranslation {

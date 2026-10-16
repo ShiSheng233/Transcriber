@@ -68,6 +68,7 @@ final class SubtitleEditorActionBar: NSView {
         let select: [NSView] = [
             button(Command(title: String(localized: "Select Lines…"), symbol: "line.3.horizontal.decrease.circle", action: #selector(Commands.showSelectLines(_:)))),
             button(Command(title: String(localized: "Find and Replace…"), symbol: "magnifyingglass", action: #selector(Commands.showFindReplace(_:)))),
+            button(Command(title: String(localized: "Check Consistency…"), symbol: "textformat.abc", action: #selector(Commands.showConsistencyCheck(_:)))),
         ]
         let modes: [NSView] = [
             button(Command(title: String(localized: "Timing Mode"), symbol: "waveform", action: #selector(Commands.toggleWaveform(_:))), isToggle: true),

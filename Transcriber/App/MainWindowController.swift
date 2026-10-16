@@ -19,6 +19,9 @@ final class MainWindowController: NSWindowController {
         detailViewModel.waveform.snapSpans
     }
     private lazy var selectLinesSheet = SelectLinesSheet(editor: detailViewModel.editor)
+    private lazy var consistencySheet = ConsistencySheet(editor: detailViewModel.editor) { [queueViewModel] in
+        queueViewModel.glossaryTerms
+    }
     private let openSettings: () -> Void
     private var binder: ObservationBinder?
     private lazy var modelPopUp: NSPopUpButton = {
@@ -317,6 +320,12 @@ extension MainWindowController: SubtitleEditorCommands {
         selectLinesSheet.begin(on: window)
     }
 
+    @objc func showConsistencyCheck(_ sender: Any?) {
+        guard let window else { return }
+        detailViewController.editorView.commitPendingText()
+        consistencySheet.begin(on: window)
+    }
+
     @objc func playSelection(_ sender: Any?) {
         detailViewController.play(.selection)
     }
@@ -561,7 +570,7 @@ extension MainWindowController: NSMenuItemValidation {
             return editor.canSwap
         case #selector(sortLinesByStart(_:)):
             return editor.canSort
-        case #selector(shiftTimes(_:)), #selector(showTimingPostProcessor(_:)):
+        case #selector(shiftTimes(_:)), #selector(showTimingPostProcessor(_:)), #selector(showConsistencyCheck(_:)):
             return editor.isEditable && !editor.lines.isEmpty
         case #selector(toggleWaveform(_:)):
             return detailViewModel.canUseTimingMode

@@ -40,6 +40,7 @@ import AppKit
     func sortLinesByStart(_ sender: Any?)
     func showTimingPostProcessor(_ sender: Any?)
     func showSelectLines(_ sender: Any?)
+    func showConsistencyCheck(_ sender: Any?)
     func toggleWaveform(_ sender: Any?)
     func toggleSourceColumn(_ sender: Any?)
     func zoomInWaveform(_ sender: Any?)
@@ -176,6 +177,7 @@ enum SubtitleEditorMenu {
             Item(title: String(localized: "Find and Replace…"), action: #selector(Commands.showFindReplace(_:)), key: "f"),
             Item(title: String(localized: "Find Next"), action: #selector(Commands.findNextSubtitle(_:)), key: "g"),
             Item(title: String(localized: "Select Lines…"), action: #selector(Commands.showSelectLines(_:)), key: "l"),
+            Item(title: String(localized: "Check Consistency…"), action: #selector(Commands.showConsistencyCheck(_:)), key: "c", modifiers: [.command, .shift]),
             nil,
         ]
         add(top + lineItems + [nil], to: menu)
