@@ -17,6 +17,8 @@ final class LLMSettingsViewController: SettingsPaneViewController {
     private let modelStatusLabel = SettingsForm.descriptionLabel()
     private let languageBox = NSComboBox()
     private let keepsOriginalSwitch = NSSwitch()
+    private let proofreadSwitch = NSSwitch()
+    private let removesHallucinationsSwitch = NSSwitch()
     private let glossaryView = NSTextView()
 
     override func makeForm() -> NSView {
@@ -24,6 +26,10 @@ final class LLMSettingsViewController: SettingsPaneViewController {
         enabledSwitch.action = #selector(enabledChanged(_:))
         keepsOriginalSwitch.target = self
         keepsOriginalSwitch.action = #selector(keepsOriginalChanged(_:))
+        proofreadSwitch.target = self
+        proofreadSwitch.action = #selector(proofreadChanged(_:))
+        removesHallucinationsSwitch.target = self
+        removesHallucinationsSwitch.action = #selector(removesHallucinationsChanged(_:))
 
         baseURLField.placeholderString = "https://example.com/v1"
         baseURLField.target = self
@@ -77,6 +83,10 @@ final class LLMSettingsViewController: SettingsPaneViewController {
             SettingsForm.section(String(localized: "Language Model"), rows: [
                 SettingsForm.row(String(localized: "Improve subtitles"), description: String(localized: "Polish Chinese or translate Japanese"), control: enabledSwitch),
             ], footer: String(localized: "Runs after transcription. Timing never changes.")),
+            SettingsForm.section(String(localized: "Correction"), rows: [
+                SettingsForm.row(String(localized: "Fix recognition mistakes first"), description: String(localized: "Proofread Japanese before translating"), control: proofreadSwitch),
+                SettingsForm.row(String(localized: "Remove invented lines"), description: String(localized: "Outros, credits and loops that were never said"), control: removesHallucinationsSwitch),
+            ], footer: String(localized: "Proofreading is one more pass over the file. Lines the speech model was unsure of are checked with extra care; removed lines are listed in the Activity window.")),
             SettingsForm.section(String(localized: "Service"), rows: [
                 SettingsForm.row(String(localized: "Provider"), control: providerPopUp),
                 SettingsForm.row(String(localized: "Base URL"), control: SettingsForm.field(baseURLField)),
@@ -104,6 +114,8 @@ final class LLMSettingsViewController: SettingsPaneViewController {
         let llm = viewModel.settings.llm
         enabledSwitch.state = llm.isEnabled ? .on : .off
         keepsOriginalSwitch.state = llm.keepsOriginalLine ? .on : .off
+        proofreadSwitch.state = llm.proofreadsTranscript ? .on : .off
+        removesHallucinationsSwitch.state = llm.removesHallucinations ? .on : .off
         let provider = viewModel.llmProvider
         providerPopUp.selectItem(at: LLMProvider.allCases.firstIndex(of: provider) ?? 0)
         if baseURLField.currentEditor() == nil {
@@ -157,6 +169,14 @@ final class LLMSettingsViewController: SettingsPaneViewController {
 
     @objc private func keepsOriginalChanged(_ sender: NSSwitch) {
         viewModel.setKeepsOriginalLine(sender.state == .on)
+    }
+
+    @objc private func proofreadChanged(_ sender: NSSwitch) {
+        viewModel.setProofreadsTranscript(sender.state == .on)
+    }
+
+    @objc private func removesHallucinationsChanged(_ sender: NSSwitch) {
+        viewModel.setRemovesHallucinations(sender.state == .on)
     }
 
     @objc private func apiKeyChanged(_ sender: NSSecureTextField) {

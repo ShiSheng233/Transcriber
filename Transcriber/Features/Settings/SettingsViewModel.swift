@@ -214,6 +214,14 @@ final class SettingsViewModel {
         store.update { $0.llm.keepsOriginalLine = keepsOriginalLine }
     }
 
+    func setProofreadsTranscript(_ proofreads: Bool) {
+        store.update { $0.llm.proofreadsTranscript = proofreads }
+    }
+
+    func setRemovesHallucinations(_ removes: Bool) {
+        store.update { $0.llm.removesHallucinations = removes }
+    }
+
     func setGlossary(_ glossary: String) {
         store.update { $0.llm.glossary = glossary }
     }
