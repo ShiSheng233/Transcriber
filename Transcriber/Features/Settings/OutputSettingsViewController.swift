@@ -64,7 +64,24 @@ final class OutputSettingsViewController: SettingsPaneViewController {
                 filterRow(String(localized: "Drop lines with odd timing"),
                           description: String(localized: "Too fast to read, or a word held for seconds"),
                           option: \.dropsImplausibleReadingSpeed),
+                filterRow(String(localized: "Drop filler-only lines"),
+                          description: String(localized: "Lines that are only “えーと”, “あの” and the like"),
+                          option: \.dropsFillerLines),
             ], footer: String(localized: "All off gives the original tool's subtitles; short replies like “うん” can also be removed.")),
+            SettingsForm.section(String(localized: "Text and Timing"), rows: [
+                filterRow(String(localized: "Normalize text"),
+                          description: String(localized: "Half-width kana, “・・・” → “…”, “!?” → “！？”"),
+                          option: \.normalizesText),
+                filterRow(String(localized: "Shorten stretched sounds"),
+                          description: String(localized: "“ああああ” → “ああ”, “ダメダメダメダメ” → “ダメダメ”"),
+                          option: \.shortensStretchedSounds),
+                filterRow(String(localized: "Repair looping lines"),
+                          description: String(localized: "Cut a line that repeats itself, keep the rest"),
+                          option: \.repairsLoopingLines),
+                filterRow(String(localized: "Fix timing"),
+                          description: String(localized: "5/6–7 s on screen, small gaps closed"),
+                          option: \.fixesTiming),
+            ], footer: String(localized: "Off by default, so the subtitles match the original tool.")),
         ])
     }
 
