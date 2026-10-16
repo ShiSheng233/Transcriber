@@ -338,7 +338,11 @@ extension SubtitleEditorView: NSTableViewDataSource, NSTableViewDelegate {
         let overlapping = rowData.overlapsActiveLine
         switch identifier {
         case Column.number:
-            cell.configure(text: rowData.isPlaying ? "▶ \(rowData.number)" : "\(rowData.number)", role: .number, alignment: .right, isPlaying: rowData.isPlaying)
+            cell.configure(
+                text: rowData.isPlaying ? "▶ \(rowData.number)" : "\(rowData.number)", role: .number, alignment: .right,
+                isPlaying: rowData.isPlaying, isDoubtful: rowData.isDoubtful
+            )
+            cell.toolTip = rowData.confidenceSummary.isEmpty ? nil : rowData.confidenceSummary
         case Column.start:
             cell.configure(text: rowData.start, role: .time, alignment: .right, isOverlapping: overlapping)
         case Column.end:

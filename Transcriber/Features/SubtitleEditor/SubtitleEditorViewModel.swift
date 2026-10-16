@@ -22,6 +22,10 @@ final class SubtitleEditorViewModel {
         /// The line before the language model changed it; empty if unknown.
         let source: String
         let isPlaying: Bool
+        /// The speech model's own checks failed for this line.
+        let isDoubtful: Bool
+        /// The model's numbers, for the row's tooltip; empty without them.
+        let confidenceSummary: String
         /// Overlaps the active line in time (Aegisub shows it in red).
         let overlapsActiveLine: Bool
     }
@@ -107,9 +111,19 @@ final class SubtitleEditorViewModel {
                 text: line.text.replacingOccurrences(of: "\n", with: " ⏎ "),
                 source: sources[index]?.replacingOccurrences(of: "\n", with: " ⏎ ") ?? "",
                 isPlaying: index == playingIndex,
+                isDoubtful: line.confidence?.isDoubtful ?? false,
+                confidenceSummary: line.confidence.map(Self.summary(of:)) ?? "",
                 overlapsActiveLine: overlaps.contains(index)
             )
         }
+    }
+
+    private static func summary(of confidence: RecognitionConfidence) -> String {
+        let numbers = String(
+            format: "avg log prob %.2f · no speech %.2f · compression %.2f",
+            confidence.averageLogProbability, confidence.noSpeechProbability, confidence.compressionRatio
+        )
+        return confidence.isDoubtful ? String(localized: "Doubtful: the model's checks failed (\(numbers))") : numbers
     }
 
     /// "12/40": the active line's longest line against Aegisub's limit.

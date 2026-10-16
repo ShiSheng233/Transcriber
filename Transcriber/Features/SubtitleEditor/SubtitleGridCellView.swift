@@ -17,6 +17,7 @@ final class SubtitleGridCellView: NSTableCellView {
     private var role = Role.text
     private var isPlaying = false
     private var isOverlapping = false
+    private var isDoubtful = false
 
     init(identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
@@ -53,9 +54,11 @@ final class SubtitleGridCellView: NSTableCellView {
         alignment: NSTextAlignment,
         isPlaying: Bool = false,
         isOverlapping: Bool = false,
+        isDoubtful: Bool = false,
         readingSpeedWarning: Double = 0
     ) {
         self.role = role
+        self.isDoubtful = isDoubtful
         self.isPlaying = isPlaying
         self.isOverlapping = isOverlapping
         label.stringValue = text
@@ -82,6 +85,7 @@ final class SubtitleGridCellView: NSTableCellView {
         label.textColor = switch role {
         case _ where isOverlapping: .systemRed
         case .number where isPlaying: .controlAccentColor
+        case .number where isDoubtful: .systemOrange
         case .text: .labelColor
         case .number, .time, .source: .secondaryLabelColor
         }

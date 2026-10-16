@@ -24,6 +24,7 @@ final class SelectLinesSheet: EditorSheet {
     private lazy var regexBox = checkbox(String(localized: "Regular expression"))
     private lazy var matchCaseBox = checkbox(String(localized: "Match case"))
     private lazy var emptyBox = checkbox(String(localized: "Empty text"))
+    private lazy var doubtfulBox = checkbox(String(localized: "Doubtful recognition (marked orange)"))
     private lazy var combineButtons = radioButtons([String(localized: "All criteria"), String(localized: "Any criterion")])
     private lazy var modeButtons = radioButtons([
         String(localized: "Replace"), String(localized: "Add"), String(localized: "Intersect"), String(localized: "Subtract"),
@@ -41,6 +42,7 @@ final class SelectLinesSheet: EditorSheet {
             row("", [textBox, textField]),
             row("", [regexBox, matchCaseBox]),
             row("", [emptyBox]),
+            row("", [doubtfulBox]),
             row(String(localized: "Match:"), combineButtons),
             row(String(localized: "Selection:"), modeButtons),
         ] {
@@ -51,7 +53,7 @@ final class SelectLinesSheet: EditorSheet {
 
     private var boxes: [(NSButton, String)] {
         [(speedBox, "Speed"), (shortBox, "Short"), (longBox, "Long"), (overlapBox, "Overlap"), (textBox, "Text"),
-         (regexBox, "Regex"), (matchCaseBox, "MatchCase"), (emptyBox, "Empty")]
+         (regexBox, "Regex"), (matchCaseBox, "MatchCase"), (emptyBox, "Empty"), (doubtfulBox, "Doubtful")]
     }
 
     private var fields: [(NSTextField, String, String)] {
@@ -89,6 +91,9 @@ final class SelectLinesSheet: EditorSheet {
         }
         if emptyBox.state == .on {
             criteria.append(.emptyText)
+        }
+        if doubtfulBox.state == .on {
+            criteria.append(.doubtful)
         }
         return criteria
     }

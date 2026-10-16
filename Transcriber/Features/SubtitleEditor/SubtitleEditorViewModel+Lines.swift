@@ -34,6 +34,8 @@ extension SubtitleEditorViewModel {
         case durationAbove(AudioTime)
         case overlapping
         case emptyText
+        /// The speech model's own checks failed.
+        case doubtful
     }
 
     /// The lines meeting every criterion (`requiresAll`) or any of them.
@@ -68,6 +70,8 @@ extension SubtitleEditorViewModel {
             coreCriterion = .overlapping
         case .emptyText:
             coreCriterion = .textMatching { $0.allSatisfy(\.isWhitespace) }
+        case .doubtful:
+            return lines.indices.filter { lines[$0].confidence?.isDoubtful == true }
         }
         return SubtitleSelection.matching(coreCriterion, in: lines)
     }
