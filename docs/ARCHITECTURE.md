@@ -102,7 +102,8 @@ final class JobQueueViewController: NSViewController {
 | `TranscriptionTask` | `.translateToChinese`（海南鸡）或 `.transcribeJapanese` |
 | `VADSettings`、`ChunkingSettings`、`DecodingSettings`、`MergeSettings` | 对应 `generation_config.json5` 的结构化配置 |
 | `ChickenRiceDefaults` | 上述 Settings 的原项目默认值，逐项注明出处 |
-| `Job` / `JobStatus` | 队列任务与状态机（见 §7） |
+| `Job` / `JobStatus` | 队列任务与状态机（见 §7）；`speechSpans` 存外层 VAD 的语音段（去掉 200 ms 留白），编辑器调时间吸附用 |
+| `RecognitionConfidence` | 每行字幕的 avg_logprob、no_speech_prob、压缩比，以及 `isDoubtful`：最后一个温度仍没通过模型自己的回退检查（压缩比 > 阈值或 avg_logprob < 阈值），faster-whisper 照样保留了最好的那次。合并行取最不可信的值；手动改过文字的行清空。只用于标记和筛选，不改变流水线输出 |
 
 ## 5. Service 模块（TranscriberKit 内的 target）
 
@@ -246,17 +247,23 @@ whisper.cpp 以 `WHISPER_COREML=ON` + `WHISPER_COREML_ALLOW_FALLBACK=ON` 自行�
 
 ### 6.5 可选的字幕过滤（参照 WhisperJAV 的 sanitizer）
 
-设置 › Output › Cleanup 五个开关，默认全关（= 原版输出），CLI 对应 `--drop-loops` `--drop-nonverbal` `--drop-hallucinations` `--merge-repeats` `--drop-implausible-speed`。顺序与 WhisperJAV 一致，幻觉短语插在声音行之后：
+设置 › Output › Cleanup 与 Text and Timing 共十个开关，默认全关（= 原版输出），CLI 对应 `--drop-loops` `--drop-nonverbal` `--drop-hallucinations` `--drop-fillers` `--merge-repeats` `--drop-implausible-speed` `--normalize-text` `--shorten-stretched` `--repair-loops` `--fix-timing`。顺序：声音行 → 文本规范化、拉长音缩短、循环行修复 → 只有填充词的行 → 幻觉短语 → 合并重复行 → 时长异常行 → 时间修正：
 
 | 开关 | 规则 | 出处 |
 | --- | --- | --- |
 | 丢弃重复循环 | 窗口结果在所有温度下压缩比仍超阈值时丢弃。faster-whisper 在全部失败时仍保留最好的那次（`below_cr_threshold_results or all_results`），重复循环就是这样进字幕的。WhisperJAV 另按 avg_logprob < −1 删行，未采用：在对拍样本上它删掉了海南鸡一句原版也输出的正确台词（翻译模型的 log 概率天然偏低） | CHANGELOG v1.9.2 |
 | 丢弃声音行 | 只有 ♪、省略号、≤6 字的喘息类假名（あんっはふ…）或括号描述（[喘ぎ声]）的行。与原版不同：关键词只在括号描述或整行时生效（否则会删掉含“喘”的中文句子），另把 ♡♥ 当标点、加入常见中文语气词 | `segment_filters.py` |
-| 丢弃幻觉短语 | Whisper 从训练数据里的视频结尾和字幕署名学来、在静音处编出的行。比较前做 NFKC、小写，去掉空格与标点。署名类（ご視聴ありがとうございました、チャンネル登録…、字幕制作…、字幕由…提供、请不吝点赞订阅…、明镜与点点栏目、Amara.org）整行由这些短语组成就删；客套类（ありがとうございました、お疲れ様でした、谢谢观看）常是真台词，只在前后各空 ≥ 2 s 且位于音频首尾 60 s 内时删。avg_logprob 不作证据（原因同上） | `HallucinationPhraseFilter` |
+| 丢弃幻觉短语 | Whisper 从训练数据里的视频结尾和字幕署名学来、在静音处编出的行。比较前做 NFKC、小写，去掉空格与标点。署名类（ご視聴ありがとうございました、チャンネル登録…、字幕制作…、字幕由…提供、请不吝点赞订阅…、明镜与点点栏目、Amara.org）整行由这些短语组成就删；客套类（ありがとうございました、お疲れ様でした、谢谢观看）常是真台词，只在有额外证据时删：前后各空 ≥ 2 s 且位于音频首尾 60 s 内，或者模型自己判断这个窗口 no_speech_prob > 0.5。avg_logprob 不作证据（原因同上） | `HallucinationPhraseFilter` |
+| 文本规范化 | 半角片假名转全角、全角英数转半角、「・・・」「...」「。。。」→「…」、日中文旁的 `!?~` → `！？〜`、两个日中文字符之间的空格删掉。不做整体 NFKC（会把 ～ 变成 ~、… 变成 ...） | `JapaneseTextNormalizer` |
+| 缩短拉长音 | 同一字符 ≥ 4 次留 2 次；ー、っ、〜 连续留 1 个；！？… ≥ 3 次留 2 次；2–6 字的片段 ≥ 3 次留 2 次（与 anime-whisper 配置里压成 1 次的旧规则不同，保留语气） | `StretchedSoundShortener` |
+| 修复循环行 | 按行判断：≥ 12 字的行里，某个 1–10 字的单元连续重复覆盖一半以上，截到两份再接「…」；不同字符少于长度的 30% 时截到前 10 字。只改这一行，不再连整个窗口一起删 | `LineLoopRepair` |
+| 删除只有填充词的行 | 整行都由 えーと、あの、うーん、まあ… 组成才删；「うん」「はい」不算 | `FillerLineFilter` |
 | 合并重复行 | 连续 ≥3 条文本相同、间隔 < 600 ms 的合成一条 | `subtitle_sanitizer.py` |
 | 丢弃时长异常行 | 先删没有任何字母数字的行，再删 > 30 字/秒、或 ≤4 字且 < 1 字/秒的行 | `subtitle_sanitizer.py` |
 
-注意：最后一项会删掉拉得很长的短回应（如 2.5 s 的「うん」）。
+| 时间修正 | 不足 5/6 s 的行往后面的空隙里延长（不越过下一行开头）、超过 7 s 截到 7 s、与下一行间隔 < 300 ms 时收成两帧（83 ms），避免闪烁（Netflix 日文字幕规范） | `SubtitleTimingFixer` |
+
+注意：“丢弃时长异常行”会删掉拉得很长的短回应（如 2.5 s 的「うん」）。
 
 ## 7. Job 状态机
 
@@ -275,8 +282,9 @@ queued → loadingModel → decodingAudio → detectingSpeech → transcribing(p
 **编辑器命令**：Retranscribe Selected Lines（⌥⌘R）重新识别选中行覆盖的时间段（前后各多解码 1 s 作上下文，保留中点落在该段内的新字幕并裁到段内），替换这些行；这个文件走过 LLM 且 LLM 开着时，新行再送去翻译。Retranslate Selected Lines（⇧⌘R）见 §10 Phase 3。队列里右键 › Recognition Model 给等待中的文件换模型；已结束的文件变为 Transcribe Again With，换模型重新识别（有未保存的编辑时不可用）。
 
 **编辑器（参照 Aegisub）**：编辑面板自上而下是操作栏、波形（仅调时间模式）、编辑框、网格。操作栏默认收起，从窗口工具栏右上角的 Editing Tools 按钮（View › Show Editing Tools ⌥⌘E）打开，和播放器开关一样全局记住。操作栏的按钮与菜单项发同一个 action，由 `MainWindowController.isCommandEnabled` 统一判断可用；分组：行（插入、删除、拆分▾、合并▾、交换）、时间（设起点/终点到播放头、平移到播放头、连续▾、Shift Times…、Adjust Timing…）、播放（Play Line、播放▾）、选择（Select Lines…、查找替换），右侧两个开关：调时间模式、原文列。
-- **调时间模式**（View › Timing Mode ⌥⌘A，默认关，全局记住）：关着时不显示波形也不解码。开着时在编辑框上方显示波形：拖活动行两端调时间（⇧ 带动相接的邻行，⌥ 关吸附；吸附到 6 pt 内的邻行边、播放头、声音边界），拖行中间平移所选行，松手才写入、一步撤销；拖动时网格与时间字段实时跟随。单击定位，点行号条选行；⌥/⌘ 滚动或捏合缩放（10–2000 pt/s），播放时整页翻。焦点在波形上时 Space 播放/暂停，Q/E/D/W 播放起点前/后、终点前/后 500 ms，S 播放选区，↑↓ 换行，←→ 移播放头 0.1 s（⇧ 1 s）。播放头用 display link 每帧刷新。
-- **Adjust Timing**（⇧⌘I，`TimingPostProcessing`）：lead-in 200 / lead-out 300 ms（只延伸到邻行，不制造重叠）→ 吸附到声音边界（起点 100、终点 150 ms 内，需波形已载入）→ 间隔 < 300 ms 的相邻行延长前一行接上。
+- **识别置信度**：没通过 Whisper 自身检查的行在网格里行号标橙，悬停显示 avg log prob、no speech、压缩比；Select Lines 可按它筛选，再批量重新识别或重翻。
+- **调时间模式**（View › Timing Mode ⌥⌘A，默认关，全局记住）：关着时不显示波形也不解码。开着时在编辑框上方显示波形：拖活动行两端调时间（⇧ 带动相接的邻行，⌥ 关吸附；吸附到 6 pt 内的邻行边、播放头、语音边界：转写过的文件用识别时存下的 VAD 语音段，字幕文件用波形响度），拖行中间平移所选行，松手才写入、一步撤销；拖动时网格与时间字段实时跟随。单击定位，点行号条选行；⌥/⌘ 滚动或捏合缩放（10–2000 pt/s），播放时整页翻。焦点在波形上时 Space 播放/暂停，Q/E/D/W 播放起点前/后、终点前/后 500 ms，S 播放选区，↑↓ 换行，←→ 移播放头 0.1 s（⇧ 1 s）。播放头用 display link 每帧刷新。
+- **Adjust Timing**（⇧⌘I，`TimingPostProcessing`）：lead-in 200 / lead-out 300 ms（只延伸到邻行，不制造重叠）→ 吸附到语音边界（起点 100、终点 150 ms 内；转写过的文件直接可用，字幕文件需先开调时间模式分析响度）→ 间隔 < 300 ms 的相邻行延长前一行接上。
 - **Shift Times**（⌘I）：按时间或帧（fps 可选），提前/推后，选中行 / 全部 / 活动行之后，两端 / 只起点 / 只终点。
 - **Select Lines**（⌘L）：CPS 超限、过短、过长、重叠、文本匹配（可正则）、空文本，可要求全部或任一条件，结果替换 / 加入 / 交集 / 减去当前选择；不进撤销栈。
 - **原文列**（⌥⌘O）：文件走过 LLM 时，按时间找回 LLM 之前的原文（时间相同的行，否则中点落在行内的原文行），网格多一列 Source，编辑框多一行只读原文。
@@ -388,6 +396,10 @@ JobQueue、JobDetail 预览、Settings（含后端选择、Core ML 编码器开�
 
 - **场景与滚动摘要**（参照 WhisperJAV / PySubtrans）：相邻两行间隔 > 120 s 切成新场景；场景内的批次依次发送，每批要求模型额外返回 `batch_summary` 与 `scene_summary`，后续批次带上 `scene_so_far` 和最近 5 条批次摘要，名字、关系、语气更一致。场景之间并行（4 个）；超过 5 批的场景再切开，保证没有长停顿的片子也能并行。
 - **续跑**：完整回复按“模型 + 指令 + 本批行与上下文”（不含摘要）的 SHA-256 存进 `~/Library/Caches/dev.shisheng.Transcriber/LLMReplies`，保留 14 天；任务停止、部分失败或重跑时已完成的批次直接复用，活动日志会写复用了几批。
+- **校对与去幻觉**（设置 › LLM › Correction，默认关，CLI `--llm-proofread` `--llm-remove-hallucinations`）：
+  - Fix recognition mistakes first：translate 模式的模型（日文输出）在翻译前先用日文校对一遍，只改听错的词（同音错字、破碎的词、前后不一致的名字），保留原话的措辞、语气和语气词；翻译从校对后的文本出发，原文列显示的也是它。polish 模式本来就在修正中文，不另加这一遍。
+  - Remove invented lines：第一遍 LLM（校对，或者直接翻译/润色）的回复里每行多一个 `drop`，标为 true 的行（视频结尾、频道推广、字幕署名、循环、与上下文无关的文本）从结果里删掉，活动日志逐条列出；拿不准时保留。不另花一遍。
+  - 识别时没通过 Whisper 自身检查的行在请求里带 `"doubtful": true`，提示模型重点检查。只在为 true 时发送，其他请求与缓存键不变。
 - **单句重翻**：字幕编辑器选中若干行 › Retranslate Selected Lines（⇧⌘R）。每行按时间找回 LLM 之前的原文（新加或改过时间的行用当前文本），前后行作为上下文，不复用缓存；结果作为一个可撤销步骤写回，没回答的行保持不变并提示。
 
 待做：用真实 API key 做端到端试跑与提示词调优；按 token 用量估算费用。
