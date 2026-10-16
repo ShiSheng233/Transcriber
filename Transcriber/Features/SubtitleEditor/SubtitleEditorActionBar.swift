@@ -71,7 +71,7 @@ final class SubtitleEditorActionBar: NSView {
         ]
         let modes: [NSView] = [
             button(Command(title: String(localized: "Timing Mode"), symbol: "waveform", action: #selector(Commands.toggleWaveform(_:))), isToggle: true),
-            button(Command(title: String(localized: "Show Source Column"), symbol: "rectangle.split.2x1", action: #selector(Commands.toggleSourceColumn(_:))), isToggle: true),
+            button(Command(title: String(localized: "Show Original Text"), symbol: "rectangle.split.2x1", action: #selector(Commands.toggleSourceColumn(_:))), isToggle: true),
         ]
 
         for (index, group) in [lines, timing, playback, select].enumerated() {

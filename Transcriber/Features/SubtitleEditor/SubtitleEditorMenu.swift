@@ -121,7 +121,7 @@ enum SubtitleEditorMenu {
 
     static let viewItems: Group = [
         Item(title: String(localized: "Timing Mode"), action: #selector(Commands.toggleWaveform(_:)), key: "a", modifiers: [.command, .option]),
-        Item(title: String(localized: "Show Source Column"), action: #selector(Commands.toggleSourceColumn(_:)), key: "o", modifiers: [.command, .option]),
+        Item(title: String(localized: "Show Original Text"), action: #selector(Commands.toggleSourceColumn(_:)), key: "o", modifiers: [.command, .option]),
         nil,
         Item(title: String(localized: "Zoom In Waveform"), action: #selector(Commands.zoomInWaveform(_:)), key: "="),
         Item(title: String(localized: "Zoom Out Waveform"), action: #selector(Commands.zoomOutWaveform(_:)), key: "-"),

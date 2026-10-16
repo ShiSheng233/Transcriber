@@ -4,6 +4,8 @@ import AppKit
 
 /// Player above, the subtitle editor below. Selecting a line seeks to it;
 /// the line under the playhead is marked in the grid and shown over the video.
+/// In timing mode the waveform takes the video's place: the player keeps
+/// playing the sound, so lines can be timed by ear and eye without the picture.
 final class JobDetailViewController: NSViewController {
     private let viewModel: JobDetailViewModel
     private let playerView = AVPlayerView()
@@ -32,9 +34,18 @@ final class JobDetailViewController: NSViewController {
     /// Video needs room for the picture; audio only the control bar.
     private static let audioPlayerHeight: CGFloat = 64
     private lazy var playerMinimumHeight = playerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 160)
-    private var displayedAsAudio: Bool?
-    /// Set when the kind of media changed; applied once the split view has a size.
+    /// What the top of the split view shows.
+    private enum TopArea: Equatable {
+        case video
+        case audioControls
+        case waveform
+    }
+
+    private var displayedTopArea: TopArea?
+    /// Set when the top area changed; applied once the split view has a size.
     private var needsPlayerResize = false
+    private static let waveformHeight: CGFloat = 180
+    private static let waveformMinimumHeight: CGFloat = 100
 
     init(viewModel: JobDetailViewModel) {
         self.viewModel = viewModel
@@ -116,6 +127,7 @@ final class JobDetailViewController: NSViewController {
             emptyState.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             emptyState.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             playerMinimumHeight,
+            waveformView.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.waveformMinimumHeight),
             editorView.heightAnchor.constraint(greaterThanOrEqualToConstant: 240),
             placeholderLabel.centerXAnchor.constraint(equalTo: editorView.centerXAnchor),
             placeholderLabel.centerYAnchor.constraint(equalTo: editorView.centerYAnchor, constant: -40),
@@ -133,11 +145,15 @@ final class JobDetailViewController: NSViewController {
     override func viewDidLayout() {
         super.viewDidLayout()
         // A hidden player gets no space; sizing it would leave a blank band.
-        guard needsPlayerResize, viewModel.showsPlayerArea, splitView.bounds.height > 0, let isAudioOnly = displayedAsAudio else {
+        guard needsPlayerResize, splitView.bounds.height > 0, let topArea = displayedTopArea else {
             return
         }
         needsPlayerResize = false
-        let height = isAudioOnly ? Self.audioPlayerHeight : (splitView.bounds.height * 0.55).rounded()
+        let height = switch topArea {
+        case .video: (splitView.bounds.height * 0.55).rounded()
+        case .audioControls: Self.audioPlayerHeight
+        case .waveform: Self.waveformHeight
+        }
         if splitView.arrangedSubviews.count == 2 {
             splitView.setPosition(height, ofDividerAt: 0)
         }
@@ -169,32 +185,7 @@ final class JobDetailViewController: NSViewController {
             displayedPlayerURL = viewModel.playerURL
             player.replaceCurrentItem(with: viewModel.playerURL.map { AVPlayerItem(url: $0) })
         }
-        // Without a player the editor has the split view to itself: a hidden
-        // arranged view would still keep its share of the height.
-        let playerIsArranged = splitView.arrangedSubviews.contains(playerView)
-        if playerIsArranged != viewModel.showsPlayerArea {
-            if viewModel.showsPlayerArea {
-                splitView.insertArrangedSubview(playerView, at: 0)
-                playerView.isHidden = false
-                needsPlayerResize = true  // a newly added player has no height yet
-                view.needsLayout = true
-            } else {
-                splitView.removeArrangedSubview(playerView)
-                playerView.removeFromSuperview()
-            }
-        }
-        if displayedAsAudio != viewModel.isAudioOnly, viewModel.hasSelection {
-            displayedAsAudio = viewModel.isAudioOnly
-            playerMinimumHeight.constant = viewModel.isAudioOnly ? Self.audioPlayerHeight : 160
-            // When the window resizes, the lower holding priority grows: the
-            // picture for video, the subtitle list for audio.
-            if splitView.arrangedSubviews.count == 2 {
-                splitView.setHoldingPriority(viewModel.isAudioOnly ? .defaultHigh : .defaultLow - 1, forSubviewAt: 0)
-                splitView.setHoldingPriority(viewModel.isAudioOnly ? .defaultLow - 1 : .defaultLow, forSubviewAt: 1)
-            }
-            needsPlayerResize = true
-            view.needsLayout = true
-        }
+        renderTopArea()
         emptyState.isHidden = viewModel.hasSelection
         splitView.isHidden = !viewModel.hasSelection
         modeBar.isHidden = !viewModel.hasSelection || viewModel.subtitleMode == nil
@@ -206,9 +197,48 @@ final class JobDetailViewController: NSViewController {
         renderWaveform()
     }
 
+    /// The waveform in timing mode, else the video (or just the playback
+    /// controls for audio), else nothing: without a player the editor has the
+    /// split view to itself (a hidden arranged view would keep its share).
+    private func renderTopArea() {
+        let topArea: TopArea? = if !viewModel.hasSelection || !viewModel.showsPlayerArea {
+            nil
+        } else if viewModel.showsWaveform {
+            .waveform
+        } else {
+            viewModel.isAudioOnly ? .audioControls : .video
+        }
+        guard topArea != displayedTopArea || (topArea != nil) != (splitView.arrangedSubviews.count == 2) else { return }
+        displayedTopArea = topArea
+        let topView: NSView? = switch topArea {
+        case .waveform: waveformView
+        case .video, .audioControls: playerView
+        case nil: nil
+        }
+        let currentTop = splitView.arrangedSubviews.count == 2 ? splitView.arrangedSubviews[0] : nil
+        if currentTop !== topView {
+            if let currentTop {
+                splitView.removeArrangedSubview(currentTop)
+                currentTop.removeFromSuperview()
+            }
+            if let topView {
+                splitView.insertArrangedSubview(topView, at: 0)
+                topView.isHidden = false
+            }
+        }
+        guard let topArea else { return }
+        playerMinimumHeight.constant = topArea == .audioControls ? Self.audioPlayerHeight : 160
+        // When the window resizes, the lower holding priority grows: the
+        // picture for video, the subtitle list for audio and the waveform.
+        let topHolds = topArea != .video
+        splitView.setHoldingPriority(topHolds ? .defaultHigh : .defaultLow - 1, forSubviewAt: 0)
+        splitView.setHoldingPriority(topHolds ? .defaultLow - 1 : .defaultLow, forSubviewAt: 1)
+        needsPlayerResize = true  // a newly shown top area has no height yet
+        view.needsLayout = true
+    }
+
     private func renderWaveform() {
         let shows = viewModel.showsWaveform && viewModel.hasSelection
-        editorView.showWaveform(shows ? waveformView : nil)
         if shows, displayLink == nil, view.window != nil {
             let link = view.displayLink(target: self, selector: #selector(displayLinkFired(_:)))
             link.add(to: .main, forMode: .common)

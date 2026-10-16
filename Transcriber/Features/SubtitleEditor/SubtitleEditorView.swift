@@ -1,9 +1,9 @@
 import AppKit
 import TranscriberCore
 
-/// The editor pane, top to bottom as in Aegisub: the action bar, the
-/// waveform (in timing mode), the edit box for the active line, and the grid
-/// of lines. Text is kept as it is typed; Return moves to the next line (or
+/// The editor pane, top to bottom as in Aegisub: the action bar, the edit
+/// box for the active line, and the grid of lines. When the language model
+/// changed the file, each line's original sits above its text. Text is kept as it is typed; Return moves to the next line (or
 /// makes one after the last), Shift-Return adds a line break.
 final class SubtitleEditorView: NSView {
     private enum Column {
@@ -12,7 +12,6 @@ final class SubtitleEditorView: NSView {
         static let end = NSUserInterfaceItemIdentifier("End")
         static let duration = NSUserInterfaceItemIdentifier("Duration")
         static let speed = NSUserInterfaceItemIdentifier("CPS")
-        static let source = NSUserInterfaceItemIdentifier("Source")
         static let text = NSUserInterfaceItemIdentifier("Text")
     }
 
@@ -20,10 +19,11 @@ final class SubtitleEditorView: NSView {
     /// Called when the user selects a line, to seek the player to it.
     var onUserSelectedLine: (Int) -> Void = { _ in }
 
-    private static let waveformHeight: CGFloat = 96
+    /// One line of text, or the original above it.
+    private static let rowHeight: CGFloat = 24
+    private static let rowHeightWithSource: CGFloat = 40
 
     let actionBar = SubtitleEditorActionBar()
-    private let waveformSlot = NSStackView()
     private var actionBarSeparator = NSBox()
     private let tableView = NSTableView()
     private let sourceLabel = NSTextField(wrappingLabelWithString: "")
@@ -46,11 +46,9 @@ final class SubtitleEditorView: NSView {
         gridScroll.documentView = tableView
         gridScroll.hasVerticalScroller = true
         gridScroll.autohidesScrollers = true
-        waveformSlot.orientation = .vertical
-        waveformSlot.spacing = 0
 
         actionBarSeparator = Self.separator()
-        let column = NSStackView(views: [actionBar, actionBarSeparator, waveformSlot, editBox, gridScroll])
+        let column = NSStackView(views: [actionBar, actionBarSeparator, editBox, gridScroll])
         column.orientation = .vertical
         column.spacing = 0
         column.distribution = .fill
@@ -87,20 +85,6 @@ final class SubtitleEditorView: NSView {
     func setActionBarVisible(_ isVisible: Bool) {
         actionBar.isHidden = !isVisible
         actionBarSeparator.isHidden = !isVisible
-    }
-
-    /// Shows the waveform between the action bar and the edit box, or
-    /// removes it (`nil`).
-    func showWaveform(_ waveform: NSView?) {
-        let current = waveformSlot.arrangedSubviews
-        guard current.first !== waveform else { return }
-        current.forEach { $0.removeFromSuperview() }
-        guard let waveform else { return }
-        if !waveform.constraints.contains(where: { $0.firstAttribute == .height && $0.secondItem == nil }) {
-            waveform.heightAnchor.constraint(equalToConstant: Self.waveformHeight).isActive = true
-        }
-        waveformSlot.addArrangedSubview(waveform)
-        waveformSlot.addArrangedSubview(Self.separator())
     }
 
     private static func separator() -> NSBox {
@@ -142,7 +126,6 @@ final class SubtitleEditorView: NSView {
             (Column.end, String(localized: "End"), 92),
             (Column.duration, String(localized: "Duration"), 80),
             (Column.speed, String(localized: "CPS"), 44),
-            (Column.source, String(localized: "Source"), nil),
             (Column.text, String(localized: "Text"), nil),
         ]
         for (identifier, title, width) in columns {
@@ -161,8 +144,7 @@ final class SubtitleEditorView: NSView {
         tableView.rowHeight = 24
         tableView.usesAlternatingRowBackgroundColors = true
         tableView.allowsMultipleSelection = true
-        tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
-        tableView.tableColumn(withIdentifier: Column.source)?.isHidden = true
+        tableView.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         tableView.dataSource = self
         tableView.delegate = self
         tableView.target = self
@@ -237,10 +219,10 @@ final class SubtitleEditorView: NSView {
     // MARK: Rendering
 
     private func render() {
-        let showsSource = viewModel.showsSourceColumn
-        if let sourceColumn = tableView.tableColumn(withIdentifier: Column.source), sourceColumn.isHidden == showsSource {
-            sourceColumn.isHidden = !showsSource
-            tableView.sizeToFit()
+        let rowHeight = viewModel.showsSourceColumn ? Self.rowHeightWithSource : Self.rowHeight
+        if tableView.rowHeight != rowHeight {
+            tableView.rowHeight = rowHeight
+            displayedRows = []  // reload every row with or without its original
         }
         actionBar.validate()
         let rows = viewModel.rows
@@ -349,12 +331,13 @@ extension SubtitleEditorView: NSTableViewDataSource, NSTableViewDelegate {
             cell.configure(text: rowData.end, role: .time, alignment: .right, isOverlapping: overlapping)
         case Column.duration:
             cell.configure(text: rowData.duration, role: .time, alignment: .right)
-        case Column.source:
-            cell.configure(text: rowData.source.isEmpty ? "—" : rowData.source, role: .source, alignment: .natural)
         case Column.speed:
             cell.configure(text: rowData.charactersPerSecond, role: .time, alignment: .right, readingSpeedWarning: rowData.readingSpeedWarning)
         default:
-            cell.configure(text: rowData.text, role: .text, alignment: .natural, isOverlapping: overlapping)
+            cell.configure(
+                text: rowData.text, role: .text, alignment: .natural, isOverlapping: overlapping,
+                original: viewModel.showsSourceColumn ? (rowData.source.isEmpty ? "—" : rowData.source) : nil
+            )
         }
         return cell
     }

@@ -1,3 +1,4 @@
+import AudioOverview
 import JobQueue
 import LLMTranslation
 
@@ -7,7 +8,13 @@ final class AppEnvironment {
     let apiKeyStore = APIKeyStore()
     /// Finished LLM batches are kept two weeks, so a stopped or failed run
     /// started again does not pay for them twice.
-    let jobQueue = JobQueue(llmReplyCache: LLMReplyCache(directory: LLMReplyCache.standardDirectory))
+    /// Waveforms made while transcribing, so timing mode opens at once.
+    let waveformCache = WaveformCache(directory: WaveformCache.standardDirectory)
+    private(set) lazy var jobQueue = JobQueue(
+        llmReplyCache: LLMReplyCache(directory: LLMReplyCache.standardDirectory),
+        waveformCache: waveformCache
+    )
+    private(set) lazy var waveformLoader = WaveformLoader(diskCache: waveformCache)
     private(set) lazy var modelLibrary = ModelLibrary(settingsStore: settingsStore)
     private(set) lazy var activityViewModel = ActivityViewModel(queue: jobQueue)
 }

@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let windowController = MainWindowController(
             queueViewModel: queueViewModel,
             activityViewModel: environment.activityViewModel,
+            waveformLoader: environment.waveformLoader,
             openSettings: { [weak self] in self?.showSettings(nil) },
             showActivity: { [weak self] in self?.showActivity(nil) }
         )

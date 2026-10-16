@@ -35,7 +35,7 @@ final class JobDetailViewModel {
     /// Switches the shown subtitle file to the other mode, with the editor's lines.
     @ObservationIgnored var onSwitchMode: (UUID, JobQueueViewModel.SubtitleMode, [TimedText]) -> Void = { _, _, _ in }
 
-    init(userDefaults: UserDefaults = .standard, waveformLoader: WaveformLoader = WaveformLoader()) {
+    init(userDefaults: UserDefaults = .standard, waveformLoader: WaveformLoader) {
         self.userDefaults = userDefaults
         waveform = WaveformViewModel(loader: waveformLoader)
         showsPlayer = userDefaults.object(forKey: Self.showsPlayerKey) == nil || userDefaults.bool(forKey: Self.showsPlayerKey)
@@ -54,14 +54,25 @@ final class JobDetailViewModel {
         mediaURL.map { Self.audioExtensions.contains($0.pathExtension.lowercased()) } ?? false
     }
 
-    /// Hidden by the user, or nothing to play (a subtitle file on its own).
-    var showsPlayerArea: Bool {
-        showsPlayer && mediaURL != nil
+    /// The video (or audio controls): shown unless hidden by the user, in
+    /// timing mode, or with nothing to play (a subtitle file on its own).
+    var showsVideo: Bool {
+        showsPlayer && !isTimingModeOn && mediaURL != nil
     }
 
-    /// What the player should load: nothing while it is hidden.
+    /// The waveform takes the video's place in timing mode.
+    var showsWaveform: Bool {
+        isTimingModeOn && mediaURL != nil
+    }
+
+    /// Something to play is loaded: the video or the waveform is shown.
+    var showsPlayerArea: Bool {
+        showsVideo || showsWaveform
+    }
+
+    /// What the player should load: nothing while neither is shown.
     var playerURL: URL? {
-        showsPlayer ? mediaURL : nil
+        showsPlayerArea ? mediaURL : nil
     }
 
     /// The line being spoken, shown over the video.
@@ -72,11 +83,6 @@ final class JobDetailViewModel {
     /// Timing mode needs something to play.
     var canUseTimingMode: Bool {
         mediaURL != nil
-    }
-
-    /// The waveform shows with the player, in timing mode.
-    var showsWaveform: Bool {
-        isTimingModeOn && showsPlayerArea
     }
 
     func togglePlayer() {

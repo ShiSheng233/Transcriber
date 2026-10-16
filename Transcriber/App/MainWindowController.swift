@@ -1,4 +1,5 @@
 import AppKit
+import AudioOverview
 import JobQueue
 import TranscriberCore
 import UniformTypeIdentifiers
@@ -10,7 +11,7 @@ final class MainWindowController: NSWindowController {
     private static let initialContentSize = NSSize(width: 1100, height: 700)
 
     private let queueViewModel: JobQueueViewModel
-    private let detailViewModel = JobDetailViewModel()
+    private let detailViewModel: JobDetailViewModel
     private let detailViewController: JobDetailViewController
     private lazy var findReplaceSheet = FindReplaceSheet(editor: detailViewModel.editor)
     private lazy var shiftTimesSheet = ShiftTimesSheet(editor: detailViewModel.editor)
@@ -31,11 +32,13 @@ final class MainWindowController: NSWindowController {
     init(
         queueViewModel: JobQueueViewModel,
         activityViewModel: ActivityViewModel,
+        waveformLoader: WaveformLoader,
         openSettings: @escaping () -> Void,
         showActivity: @escaping () -> Void
     ) {
         self.queueViewModel = queueViewModel
         self.openSettings = openSettings
+        detailViewModel = JobDetailViewModel(waveformLoader: waveformLoader)
         detailViewController = JobDetailViewController(viewModel: detailViewModel)
         detailViewModel.onEdit = { [queueViewModel] jobID, lines in
             queueViewModel.updateSubtitles(of: jobID, to: lines)

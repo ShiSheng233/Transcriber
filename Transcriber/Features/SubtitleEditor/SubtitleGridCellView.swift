@@ -1,17 +1,27 @@
 import AppKit
 
-/// One grid cell: a single-line label centred vertically. On a selected row
-/// (blue background) its text turns white, whatever role colour it has.
+/// One grid cell: a single-line label centred vertically, or for a text
+/// cell of a translated file, the original in small grey type above the
+/// text. On a selected row (blue background) both turn white.
 final class SubtitleGridCellView: NSTableCellView {
     enum Role {
         case number
         case time
         case text
-        /// The original next to a translation: dimmed, not editable.
-        case source
     }
 
     private let label = NSTextField(labelWithString: "")
+    /// The line before the language model changed it, above the text.
+    private let originalLabel = NSTextField(labelWithString: "")
+    private lazy var textStack: NSStackView = {
+        let stack = NSStackView(views: [originalLabel, label])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 1
+        stack.detachesHiddenViews = true
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }()
     /// The CPS warning: a rounded red badge behind the number.
     private let badge = NSView()
     private var role = Role.text
@@ -26,16 +36,21 @@ final class SubtitleGridCellView: NSTableCellView {
         badge.layer?.cornerRadius = 4
         badge.isHidden = true
         badge.translatesAutoresizingMaskIntoConstraints = false
-        label.lineBreakMode = .byTruncatingTail
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for field in [label, originalLabel] {
+            field.lineBreakMode = .byTruncatingTail
+            field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
+        originalLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        originalLabel.isHidden = true
         addSubview(badge)
-        addSubview(label)
+        addSubview(textStack)
         textField = label
         NSLayoutConstraint.activate([
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            textStack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            textStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            textStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            label.widthAnchor.constraint(equalTo: textStack.widthAnchor),
+            originalLabel.widthAnchor.constraint(equalTo: textStack.widthAnchor),
             badge.centerYAnchor.constraint(equalTo: centerYAnchor),
             badge.heightAnchor.constraint(equalToConstant: 18),
             badge.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
@@ -55,7 +70,8 @@ final class SubtitleGridCellView: NSTableCellView {
         isPlaying: Bool = false,
         isOverlapping: Bool = false,
         isDoubtful: Bool = false,
-        readingSpeedWarning: Double = 0
+        readingSpeedWarning: Double = 0,
+        original: String? = nil
     ) {
         self.role = role
         self.isDoubtful = isDoubtful
@@ -63,8 +79,11 @@ final class SubtitleGridCellView: NSTableCellView {
         self.isOverlapping = isOverlapping
         label.stringValue = text
         label.alignment = alignment
-        label.toolTip = role == .text || role == .source ? text : nil
-        label.font = role == .text || role == .source
+        originalLabel.stringValue = original ?? ""
+        originalLabel.isHidden = original == nil
+        label.toolTip = role == .text ? text : nil
+        originalLabel.toolTip = original
+        label.font = role == .text
             ? .systemFont(ofSize: NSFont.systemFontSize)
             : .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: isPlaying ? .semibold : .regular)
         // Aegisub: from 15 CPS the cell turns red, fully at 30.
@@ -80,14 +99,16 @@ final class SubtitleGridCellView: NSTableCellView {
     private func applyColors() {
         if backgroundStyle == .emphasized {
             label.textColor = .alternateSelectedControlTextColor  // white on the selection
+            originalLabel.textColor = .alternateSelectedControlTextColor.withAlphaComponent(0.75)
             return
         }
+        originalLabel.textColor = .secondaryLabelColor
         label.textColor = switch role {
         case _ where isOverlapping: .systemRed
         case .number where isPlaying: .controlAccentColor
         case .number where isDoubtful: .systemOrange
         case .text: .labelColor
-        case .number, .time, .source: .secondaryLabelColor
+        case .number, .time: .secondaryLabelColor
         }
     }
 }
