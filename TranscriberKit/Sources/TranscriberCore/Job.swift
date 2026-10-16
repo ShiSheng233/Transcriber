@@ -22,6 +22,9 @@ public struct Job: Identifiable, Hashable, Sendable {
     /// While transcribing, each finished chunk's subtitles (a preview); the
     /// final subtitles once the job completed; empty if it failed.
     public var segments: [TimedText]
+    /// The lines as they were before the language model changed them, so
+    /// chosen lines can be sent again; empty if it never ran.
+    public var linesBeforeLanguageModel: [TimedText]
     /// Subtitle files written for this job.
     public var outputURLs: [URL]
     /// Set when the job finished but an optional step (the LLM) did not.
@@ -52,6 +55,7 @@ public struct Job: Identifiable, Hashable, Sendable {
         self.mediaURL = mediaURL
         self.status = .queued
         self.segments = []
+        self.linesBeforeLanguageModel = []
         self.outputURLs = []
         self.warning = nil
     }

@@ -331,6 +331,42 @@ struct SubtitleTranslationJobTests {
         #expect(try String(contentsOf: saved[0], encoding: .utf8).contains("改好了"))
     }
 
+    @Test func retranslatesChosenLinesFromTheirOriginalText() async throws {
+        var settings = LLMSettings.defaults
+        settings.isEnabled = true
+        settings.model = "test/model"
+        let llm = JobQueue.LLMConfiguration(settings: settings, apiKey: "sk-test")
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let subtitleURL = folder.appendingPathComponent("movie.srt")
+        try "1\n00:00:01,000 --> 00:00:02,000\nこんにちは\n\n2\n00:00:03,000 --> 00:00:04,000\nさようなら\n"
+            .write(to: subtitleURL, atomically: true, encoding: .utf8)
+
+        let queue = JobQueue(makeChatClient: { _, _ in StubChat(fails: false) })
+        await queue.addSubtitleTranslations([(subtitleURL, nil)])
+        await queue.start(configuration: JobQueue.Configuration(
+            engine: EngineSettings(modelsDirectory: URL(fileURLWithPath: "/nonexistent"), backend: .whisperCpp, concurrentChunkCount: 1),
+            output: OutputSettings(formats: [.srt], directory: nil),
+            llm: llm
+        ))
+        var finished: Job?
+        for await jobs in await queue.snapshots() where jobs.first?.status.isFinished == true {
+            finished = jobs.first
+            break
+        }
+        let job = try #require(finished)
+
+        // The user broke line 2 and added a line of their own.
+        var edited = job.segments
+        edited[1].text = "wrong"
+        edited.append(TimedText(start: AudioTime(seconds: 5), end: AudioTime(seconds: 6), text: "ありがとう"))
+        let result = try await queue.retranslate([1, 2], of: edited, in: job.id, with: llm)
+
+        #expect(result.lines.map(\.text) == ["EN: こんにちは", "EN: さようなら", "EN: ありがとう"])
+        #expect(result.unansweredCount == 0)
+    }
+
     @Test func failsClearlyWithoutTheLanguageModel() async throws {
         let (job, _, folder) = try await run(llm: nil)
         defer { try? FileManager.default.removeItem(at: folder) }

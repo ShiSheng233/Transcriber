@@ -41,6 +41,8 @@ public actor JobQueue {
 
     private let engine: TranscriptionEngine
     private let makeChatClient: @Sendable (_ baseURL: URL, _ apiKey: String) -> any StructuredChatCompleting
+    /// Keeps finished LLM batches, so a run started again reuses them.
+    private let llmReplyCache: LLMReplyCache?
     private var jobs: [Job] = []
     private var runningTask: Task<Void, Never>?
     private var runningJobID: UUID?
@@ -58,10 +60,12 @@ public actor JobQueue {
 
     public init(
         engine: TranscriptionEngine = TranscriptionEngine(),
-        makeChatClient: @escaping @Sendable (_ baseURL: URL, _ apiKey: String) -> any StructuredChatCompleting = { ChatCompletionsClient(baseURL: $0, apiKey: $1) }
+        makeChatClient: @escaping @Sendable (_ baseURL: URL, _ apiKey: String) -> any StructuredChatCompleting = { ChatCompletionsClient(baseURL: $0, apiKey: $1) },
+        llmReplyCache: LLMReplyCache? = nil
     ) {
         self.engine = engine
         self.makeChatClient = makeChatClient
+        self.llmReplyCache = llmReplyCache
     }
 
     /// Current jobs first, then every change.
@@ -144,6 +148,73 @@ public actor JobQueue {
     /// The editor's version of a finished job's subtitles; `save` writes them.
     public func replaceSegments(of jobID: UUID, with segments: [TimedText]) {
         update(jobID) { $0.segments = segments }
+    }
+
+    public struct Retranslation: Sendable {
+        /// The lines given, with the answered ones replaced.
+        public let lines: [TimedText]
+        /// Chosen lines the model did not answer; they keep their text.
+        public let unansweredCount: Int
+    }
+
+    /// Sends chosen lines of a job through the language model again, e.g.
+    /// after a batch failed or a translation came out wrong. Each line is
+    /// sent as it was before the language model ran (matched by its times),
+    /// or as it is now if it is new or its times changed; its neighbors go
+    /// along as context. Cached replies are not reused.
+    /// - Parameter lines: the job's lines as the editor has them.
+    public func retranslate(_ lineIndices: [Int], of lines: [TimedText], in jobID: UUID, with llm: LLMConfiguration) async throws -> Retranslation {
+        guard let job = jobs.first(where: { $0.id == jobID }), llm.isUsable else {
+            throw JobQueueError.languageModelRequired
+        }
+        let refinerJob: SubtitleRefiner.Job = switch job.model?.llmMode {
+        case .polish: .polishChinese
+        case .translate: .translate(targetLanguage: llm.settings.targetLanguage)
+        case nil: .translateSubtitles(targetLanguage: llm.settings.targetLanguage)
+        }
+        var originalByTimes: [TimeRange: String] = [:]
+        for line in job.linesBeforeLanguageModel where originalByTimes[TimeRange(line)] == nil {
+            originalByTimes[TimeRange(line)] = line.text
+        }
+        let sources = lines.map { line in
+            TimedText(start: line.start, end: line.end, text: originalByTimes[TimeRange(line)] ?? line.text)
+        }
+        let chosen = lineIndices.filter(lines.indices.contains)
+        log(.info, jobID, "Sending \(chosen.count) line(s) to \(llm.settings.model) again…")
+        let result = try await makeRefiner(for: llm).refine(
+            sources, job: refinerJob, glossary: llm.settings.glossaryEntries, lineIndices: chosen, reusesCachedReplies: false
+        )
+        let keepsOriginal = llm.settings.keepsOriginalLine && !(job.model?.llmMode == .polish)
+        var updated = lines
+        for (index, text) in result.answeredLines where chosen.contains(index) {
+            // Bilingual only when the source is known; otherwise it may be a translation already.
+            let hasSource = originalByTimes[TimeRange(lines[index])] != nil
+            updated[index].text = keepsOriginal && hasSource ? "\(text)\n\(sources[index].text)" : text
+        }
+        let unanswered = chosen.count - result.answeredLines.count
+        log(unanswered > 0 ? .warning : .info, jobID, unanswered > 0
+            ? "\(unanswered) of \(chosen.count) line(s) got no answer and kept their text (\(result.firstFailure ?? "incomplete reply"))"
+            : "\(chosen.count) line(s) updated")
+        return Retranslation(lines: updated, unansweredCount: unanswered)
+    }
+
+    /// A line's times, to find it again after editing.
+    private struct TimeRange: Hashable {
+        let start: AudioTime
+        let end: AudioTime
+
+        init(_ line: TimedText) {
+            start = line.start
+            end = line.end
+        }
+    }
+
+    private func makeRefiner(for llm: LLMConfiguration) -> SubtitleRefiner {
+        SubtitleRefiner(
+            client: makeChatClient(llm.settings.baseURL, llm.apiKey),
+            configuration: SubtitleRefiner.Configuration(model: llm.settings.model),
+            cache: llmReplyCache
+        )
     }
 
     /// Writes a finished job's current subtitles over the files it produced.
@@ -382,13 +453,11 @@ public actor JobQueue {
     /// Runs the language model over `segments`; translations keep the
     /// original line underneath when the settings ask for bilingual subtitles.
     private func refine(_ segments: [TimedText], jobID: UUID, as refinerJob: SubtitleRefiner.Job, with llm: LLMConfiguration) async throws -> [TimedText] {
-        let refiner = SubtitleRefiner(
-            client: makeChatClient(llm.settings.baseURL, llm.apiKey),
-            configuration: SubtitleRefiner.Configuration(model: llm.settings.model)
-        )
+        let refiner = makeRefiner(for: llm)
         update(jobID) {
             $0.status = .refining(completedBatches: 0, totalBatches: 1)
             $0.segments = segments  // finished batches replace their lines as they arrive
+            $0.linesBeforeLanguageModel = segments
         }
         let action = if case .polishChinese = refinerJob { "Polishing" } else { "Translating" }
         log(.info, jobID, "\(action) \(segments.count) subtitles with \(llm.settings.model)…")
@@ -405,6 +474,9 @@ public actor JobQueue {
             try await refiner.refine(segments, job: refinerJob, glossary: llm.settings.glossaryEntries, progress: report)
         }
         log(.info, jobID, "LLM step finished in \(ActivityFormatting.seconds(ContinuousClock.now - start))")
+        if result.reusedBatchCount > 0 {
+            log(.detail, jobID, "\(result.reusedBatchCount) of \(result.batchCount) LLM batches reused from an earlier run")
+        }
         if result.failedBatchCount > 0 {
             let warning = "\(result.failedBatchCount) of \(result.batchCount) LLM batches failed; those lines kept their original text (\(result.firstFailure ?? "unknown error"))"
             update(jobID) { $0.warning = warning }

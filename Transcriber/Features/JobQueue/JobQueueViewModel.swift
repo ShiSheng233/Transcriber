@@ -1,5 +1,6 @@
 import Foundation
 import JobQueue
+import LLMTranslation
 import Observation
 import TranscriberCore
 
@@ -38,6 +39,8 @@ final class JobQueueViewModel {
     private(set) var pendingSubtitleChoice: FileIntake?
     /// Jobs whose subtitles were edited since they were last written.
     private(set) var unsavedJobIDs: Set<UUID> = []
+    /// Jobs with lines at the language model again (one request each at a time).
+    private(set) var retranslatingJobIDs: Set<UUID> = []
 
     private let queue: JobQueue
     private let settingsStore: SettingsStore
@@ -183,6 +186,23 @@ final class JobQueueViewModel {
     func updateSubtitles(of jobID: UUID, to lines: [TimedText]) {
         unsavedJobIDs.insert(jobID)
         Task { await queue.replaceSegments(of: jobID, with: lines) }
+    }
+
+    /// The language model is on and has a model to send lines to.
+    var canUseLanguageModel: Bool {
+        let llm = settingsStore.settings.llm
+        return llm.isEnabled && !llm.model.isEmpty
+    }
+
+    /// Sends the chosen lines through the language model again; see
+    /// `JobQueue.retranslate`.
+    func retranslate(_ lineIndices: [Int], of lines: [TimedText], in jobID: UUID) async throws -> JobQueue.Retranslation {
+        guard let llm = settingsStore.settings.queueConfiguration(apiKeys: apiKeyStore).llm else {
+            throw JobQueueError.languageModelRequired
+        }
+        retranslatingJobIDs.insert(jobID)
+        defer { retranslatingJobIDs.remove(jobID) }
+        return try await queue.retranslate(lineIndices, of: lines, in: jobID, with: llm)
     }
 
     /// Writes the job's subtitle files again.

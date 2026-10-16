@@ -313,6 +313,34 @@ extension MainWindowController: SubtitleEditorCommands {
         detailViewModel.switchMode(to: .translate)
     }
 
+    /// Sends the selected lines through the language model again; the
+    /// answers replace them as one undo step.
+    @objc func retranslateLines(_ sender: Any?) {
+        detailViewController.editorView.commitPendingText()
+        guard let jobID = detailViewModel.shownJobID, !editor.selection.isEmpty,
+              !queueViewModel.retranslatingJobIDs.contains(jobID) else { return }
+        let sentLines = editor.lines
+        let lineIndices = editor.selection
+        Task {
+            do {
+                let result = try await queueViewModel.retranslate(lineIndices, of: sentLines, in: jobID)
+                if detailViewModel.shownJobID == jobID {
+                    editor.applyRetranslation(result.lines, sentLines: sentLines)
+                }
+                if result.unansweredCount > 0, let window {
+                    let alert = NSAlert()
+                    alert.messageText = String(localized: "Some lines were not retranslated")
+                    alert.informativeText = String(localized: "\(result.unansweredCount) of \(lineIndices.count) lines got no answer and kept their text. The Activity window has the details.")
+                    alert.beginSheetModal(for: window) { _ in }
+                }
+            } catch {
+                if let window {
+                    NSAlert(error: error).beginSheetModal(for: window) { _ in }
+                }
+            }
+        }
+    }
+
     @objc func saveSubtitles(_ sender: Any?) {
         detailViewController.editorView.commitPendingText()
         guard let jobID = detailViewModel.shownJobID else { return }
@@ -347,6 +375,9 @@ extension MainWindowController: NSMenuItemValidation {
             return editor.isEditable && !editor.lines.isEmpty
         case #selector(playLine(_:)):
             return editor.activeLine != nil && detailViewModel.showsPlayerArea
+        case #selector(retranslateLines(_:)):
+            return editor.canEditSelection && queueViewModel.canUseLanguageModel
+                && !(detailViewModel.shownJobID.map(queueViewModel.retranslatingJobIDs.contains) ?? false)
         case #selector(translateSubtitles(_:)):
             return detailViewModel.subtitleMode == .edit
         case #selector(saveSubtitles(_:)):

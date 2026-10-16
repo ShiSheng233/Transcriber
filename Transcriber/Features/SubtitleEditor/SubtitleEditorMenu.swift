@@ -21,6 +21,7 @@ import AppKit
     func showFindReplace(_ sender: Any?)
     func findNextSubtitle(_ sender: Any?)
     func translateSubtitles(_ sender: Any?)
+    func retranslateLines(_ sender: Any?)
     func saveSubtitles(_ sender: Any?)
 }
 
@@ -49,6 +50,9 @@ enum SubtitleEditorMenu {
             Item(title: String(localized: "Make Times Continuous (Change Start)"), action: #selector(SubtitleEditorCommands.makeStartsContinuous(_:)), key: "", modifiers: []),
             Item(title: String(localized: "Make Times Continuous (Change End)"), action: #selector(SubtitleEditorCommands.makeEndsContinuous(_:)), key: "", modifiers: []),
             Item(title: String(localized: "Shift Times…"), action: #selector(SubtitleEditorCommands.shiftTimes(_:)), key: "i", modifiers: .command),
+        ],
+        [
+            Item(title: String(localized: "Retranslate Selected Lines"), action: #selector(SubtitleEditorCommands.retranslateLines(_:)), key: "r", modifiers: [.command, .shift]),
         ],
         [
             Item(title: String(localized: "Insert Line Before"), action: #selector(SubtitleEditorCommands.insertLineBefore(_:)), key: "", modifiers: []),

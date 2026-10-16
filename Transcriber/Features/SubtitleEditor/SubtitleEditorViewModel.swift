@@ -301,6 +301,24 @@ final class SubtitleEditorViewModel {
         apply(SubtitleEditing.shift(selection, by: offset, in: lines), actionName: String(localized: "Shift Times"), keepsSelection: selection.isEmpty)
     }
 
+    /// New text for lines that were sent to the language model, as one undo
+    /// step. A line changed meanwhile (other times, or deleted) is left alone.
+    /// - Parameters:
+    ///   - sentLines: the lines as they were when the request was made.
+    ///   - newLines: the same lines with the answered ones replaced.
+    func applyRetranslation(_ newLines: [TimedText], sentLines: [TimedText]) {
+        guard isEditable, newLines.count == sentLines.count else { return }
+        var updated = lines
+        for index in newLines.indices where newLines[index] != sentLines[index] && updated.indices.contains(index) {
+            let current = updated[index]
+            if current.start == sentLines[index].start, current.end == sentLines[index].end {
+                updated[index].text = newLines[index].text
+            }
+        }
+        guard updated != lines else { return }
+        replace(lines: updated, selection: selection, actionName: String(localized: "Retranslate"))
+    }
+
     // MARK: Private
 
     private func setTimes(start: AudioTime? = nil, end: AudioTime? = nil) {
