@@ -54,6 +54,18 @@ struct TranscribeCommand: AsyncParsableCommand {
     @Flag(help: "Join audio frames end to end like the original, instead of filling timestamp holes.")
     var joinAudioFrames = false
 
+    @Flag(help: "Drop text still repetitive after every temperature (repetition loops).")
+    var dropLoops = false
+
+    @Flag(help: "Drop short lines of breathing or moaning sounds, music notes or an ellipsis.")
+    var dropNonverbal = false
+
+    @Flag(help: "Merge three or more identical lines in a row.")
+    var mergeRepeats = false
+
+    @Flag(help: "Drop lines read faster than 30 or (up to 4 characters) slower than 1 character per second.")
+    var dropImplausibleSpeed = false
+
     @Argument(help: "Media files.")
     var inputs: [String]
 
@@ -94,7 +106,15 @@ struct TranscribeCommand: AsyncParsableCommand {
         let settings = TranscriptionPipeline.Settings(model: recognitionModel, concurrentChunkCount: concurrency)
         let pipeline = TranscriptionPipeline(vadModel: vadModel, segmentGenerator: segmentGenerator, settings: settings)
 
-        let options = TranscriptionPipeline.Options(timestampHandling: joinAudioFrames ? .joinFrames : .followTimestamps)
+        let options = TranscriptionPipeline.Options(
+            timestampHandling: joinAudioFrames ? .joinFrames : .followTimestamps,
+            filter: SubtitleFilterSettings(
+                dropsRepetitionLoops: dropLoops,
+                dropsNonverbalLines: dropNonverbal,
+                mergesRepeatedLines: mergeRepeats,
+                dropsImplausibleReadingSpeed: dropImplausibleSpeed
+            )
+        )
         for input in inputs {
             let inputURL = URL(fileURLWithPath: input)
             let start = ContinuousClock.now

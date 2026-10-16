@@ -10,12 +10,15 @@ import TranscriptionPipeline
 public actor JobQueue {
     public struct Configuration: Sendable {
         public var engine: EngineSettings
+        /// Optional removal of likely-wrong subtitles; off reproduces the original.
+        public var filter: SubtitleFilterSettings
         public var output: OutputSettings
         /// `nil` skips the LLM step.
         public var llm: LLMConfiguration?
 
-        public init(engine: EngineSettings, output: OutputSettings, llm: LLMConfiguration? = nil) {
+        public init(engine: EngineSettings, filter: SubtitleFilterSettings = .none, output: OutputSettings, llm: LLMConfiguration? = nil) {
             self.engine = engine
+            self.filter = filter
             self.output = output
             self.llm = llm
         }
@@ -271,7 +274,7 @@ public actor JobQueue {
 
     /// Speech recognition, then (optionally) the language model.
     private func transcribe(_ job: Job, with model: RecognitionModel, configuration: Configuration) async throws -> [TimedText] {
-        var segments = try await recognizeSpeech(in: job, with: model, settings: configuration.engine)
+        var segments = try await recognizeSpeech(in: job, with: model, settings: configuration.engine, filter: configuration.filter)
 
         if let llm = configuration.llm, llm.isUsable, !segments.isEmpty {
             // The language model can take minutes; don't hold gigabytes of
@@ -295,7 +298,12 @@ public actor JobQueue {
 
     /// Speech recognition alone. The pipeline lives only in this scope, so
     /// unloading the engine afterwards frees the model.
-    private func recognizeSpeech(in job: Job, with model: RecognitionModel, settings: EngineSettings) async throws -> [TimedText] {
+    private func recognizeSpeech(
+        in job: Job,
+        with model: RecognitionModel,
+        settings: EngineSettings,
+        filter: SubtitleFilterSettings
+    ) async throws -> [TimedText] {
         update(job.id) { $0.status = .loadingModel }
         let pipeline = try await loadPipeline(model, for: job.id, settings: settings)
         update(job.id) { $0.status = .decodingAudio }
@@ -307,7 +315,7 @@ public actor JobQueue {
         let segments = try await withOrderedProgress { queue, progress in
             queue.record(progress, for: jobID)
         } work: { report in
-            try await pipeline.transcribe(fileAt: job.sourceURL, progress: report)
+            try await pipeline.transcribe(fileAt: job.sourceURL, options: .init(filter: filter), progress: report)
         }
         try Task.checkCancellation()
         logTranscriptionSpeed(for: job.id, segmentCount: segments.count)

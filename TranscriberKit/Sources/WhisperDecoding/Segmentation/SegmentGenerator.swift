@@ -36,21 +36,34 @@ public struct SegmentGenerator: Sendable {
     public func text(
         for features: LogMelFeatures,
         generator: inout some RandomNumberGenerator
-    ) throws -> String? {
+    ) throws -> DecodedSegment? {
         let settings = decoder.windowDecoder.settings
         let frameCount = min(LogMelSpectrogram.windowFrameCount, features.frameCount - 1)
         guard frameCount > 0 else {
             return nil
         }
         let window = features.paddedWindow(startingAt: 0, frameCount: frameCount)
-        let decoding = try decoder.decode(try backend.makeSession(window: window), generator: &generator).decoding
+        let result = try decoder.decode(try backend.makeSession(window: window), generator: &generator)
+        let decoding = result.decoding
         let isSilence = Double(decoding.noSpeechProbability) > settings.noSpeechThreshold
             && !(decoding.averageLogProbability > settings.logProbabilityThreshold)
         if isSilence {
             return nil
         }
         let text = decoder.windowDecoder.tokenizer.decode(decoding.tokens).pythonStripped
-        return text.isEmpty ? nil : text
+        guard !text.isEmpty else {
+            return nil
+        }
+        return DecodedSegment(
+            start: 0,
+            end: Double(frameCount) * Self.secondsPerFrame,
+            text: text,
+            tokens: decoding.tokens,
+            temperature: decoding.temperature,
+            averageLogProbability: decoding.averageLogProbability,
+            compressionRatio: result.compressionRatio,
+            noSpeechProbability: decoding.noSpeechProbability
+        )
     }
 
     /// - Parameter features: the whole signal in faster-whisper framing (`.wholeSignal`).

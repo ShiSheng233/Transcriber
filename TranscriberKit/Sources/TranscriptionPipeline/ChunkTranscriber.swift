@@ -13,7 +13,9 @@ struct ChunkTranscriber: Sendable {
     let spectrogram: LogMelSpectrogram
     let samplingSeed: UInt64
 
-    func transcribe(_ chunk: AudioChunk, of samples: [Float]) throws -> [TimedText] {
+    /// - Parameter dropsRepetitionLoops: leave out text still repetitive
+    ///   after every temperature (`SubtitleFilterSettings`).
+    func transcribe(_ chunk: AudioChunk, of samples: [Float], dropsRepetitionLoops: Bool) throws -> [TimedText] {
         let chunkSamples = Array(samples[chunk.sampleRange(inAudioOfLength: samples.count)])
         guard !chunkSamples.isEmpty else {
             return []
@@ -26,7 +28,11 @@ struct ChunkTranscriber: Sendable {
         let timeline = SpeechTimeline(spans: speech)
         let features = spectrogram.features(for: SpeechTimeline.joinedSpeech(from: chunkSamples, spans: speech))
         var generator = SeededRandomNumberGenerator(seed: samplingSeed &+ UInt64(chunk.index))
-        let decoded = try segmentGenerator.segments(for: features, generator: &generator)
+        var decoded = try segmentGenerator.segments(for: features, generator: &generator)
+        if dropsRepetitionLoops {
+            let decodingSettings = segmentGenerator.decoder.windowDecoder.settings
+            decoded.removeAll { $0.isRepetitionLoop(decodingSettings) }
+        }
 
         return decoded.compactMap { segment in
             let start = timeline.originalTime(segment.start, isEnd: false)

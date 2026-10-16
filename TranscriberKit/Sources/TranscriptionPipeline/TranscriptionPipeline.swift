@@ -67,9 +67,11 @@ public struct TranscriptionPipeline: Sendable {
     /// Choices that do not depend on the model, made per file.
     public struct Options: Sendable {
         public var timestampHandling: MediaDecoder.TimestampHandling
+        public var filter: SubtitleFilterSettings
 
-        public init(timestampHandling: MediaDecoder.TimestampHandling = .followTimestamps) {
+        public init(timestampHandling: MediaDecoder.TimestampHandling = .followTimestamps, filter: SubtitleFilterSettings = .none) {
             self.timestampHandling = timestampHandling
+            self.filter = filter
         }
     }
 
@@ -116,10 +118,14 @@ public struct TranscriptionPipeline: Sendable {
     ) async throws -> [TimedText] {
         let audio = try MediaDecoder(timestampHandling: options.timestampHandling).decodeAudio(at: url)
         progress(.decodedAudio(duration: audio.duration, timestampJumps: audio.timestampJumps))
-        return try await transcribe(samples: audio.samples, progress: progress)
+        return try await transcribe(samples: audio.samples, filter: options.filter, progress: progress)
     }
 
-    public func transcribe(samples: [Float], progress: @escaping @Sendable (Progress) -> Void = { _ in }) async throws -> [TimedText] {
+    public func transcribe(
+        samples: [Float],
+        filter: SubtitleFilterSettings = .none,
+        progress: @escaping @Sendable (Progress) -> Void = { _ in }
+    ) async throws -> [TimedText] {
         let speech = try voiceActivityDetector.speechSpans(in: samples)
         let speechSamples = speech.reduce(0) { $0 + max(($1.end - $1.start).samples, 0) }
         progress(.detectedSpeech(spanCount: speech.count, speechDuration: AudioTime(samples: speechSamples)))
@@ -131,19 +137,22 @@ public struct TranscriptionPipeline: Sendable {
         let segments: [TimedText]
         switch settings.segmentation.mode {
         case .chunks:
-            segments = try await transcribeInChunks(samples: samples, speech: speech, progress: progress)
+            segments = try await transcribeInChunks(
+                samples: samples, speech: speech, dropsRepetitionLoops: filter.dropsRepetitionLoops, progress: progress
+            )
         case .vadGroups:
             let groups = SpeechGrouper.groups(speech, settings: settings.segmentation)
             progress(.plannedChunks(count: groups.count))
             let groupTranscriber = groupTranscriber
             segments = try await transcribeConcurrently(groups, progress: progress) { group in
-                try groupTranscriber.transcribe(group, of: samples)
+                try groupTranscriber.transcribe(group, of: samples, dropsRepetitionLoops: filter.dropsRepetitionLoops)
             }
         }
-        let subtitles = SubtitleTextCleanup.apply(
+        let cleaned = SubtitleTextCleanup.apply(
             SubtitlePostProcessor.process(segments, settings: settings.merge),
             settings: settings.cleanup
         )
+        let subtitles = SubtitleFilter.apply(cleaned, settings: filter)
         progress(.postProcessed(segmentCount: subtitles.count))
         return subtitles
     }
@@ -153,6 +162,7 @@ public struct TranscriptionPipeline: Sendable {
     private func transcribeInChunks(
         samples: [Float],
         speech: [SpeechSpan],
+        dropsRepetitionLoops: Bool,
         progress: @escaping @Sendable (Progress) -> Void
     ) async throws -> [TimedText] {
         let durationSeconds = Double(samples.count) / Double(AudioTime.sampleRate)
@@ -170,7 +180,7 @@ public struct TranscriptionPipeline: Sendable {
 
         let chunkTranscriber = chunkTranscriber
         return try await transcribeConcurrently(chunks, progress: progress) { chunk in
-            try chunkTranscriber.transcribe(chunk, of: samples)
+            try chunkTranscriber.transcribe(chunk, of: samples, dropsRepetitionLoops: dropsRepetitionLoops)
         }
     }
 
