@@ -25,6 +25,9 @@ public struct Job: Identifiable, Hashable, Sendable {
     /// The lines as they were before the language model changed them, so
     /// chosen lines can be sent again; empty if it never ran.
     public var linesBeforeLanguageModel: [TimedText]
+    /// Files carry each line's original under it (bilingual subtitles): set
+    /// when the language model translated with the original kept.
+    public var writesOriginalLines: Bool
     /// Where the VAD heard speech, without its padding, for snapping times
     /// in the editor; empty for subtitle files and jobs not yet transcribed.
     public var speechSpans: [SpeechSpan]
@@ -59,6 +62,7 @@ public struct Job: Identifiable, Hashable, Sendable {
         self.status = .queued
         self.segments = []
         self.linesBeforeLanguageModel = []
+        self.writesOriginalLines = false
         self.speechSpans = []
         self.outputURLs = []
         self.warning = nil
@@ -66,6 +70,12 @@ public struct Job: Identifiable, Hashable, Sendable {
 }
 
 extension Job {
+    /// What goes under each of `lines` in a bilingual file: its original,
+    /// found by times (see `SubtitleSources`); empty when files are monolingual.
+    public func originalsToWrite(for lines: [TimedText]) -> [String?] {
+        writesOriginalLines ? SubtitleSources.originals(of: lines, in: linesBeforeLanguageModel) : []
+    }
+
     /// The speech model of a transcription job.
     public var model: RecognitionModel? {
         if case .transcription(let model) = kind { model } else { nil }

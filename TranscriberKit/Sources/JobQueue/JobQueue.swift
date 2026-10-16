@@ -286,17 +286,14 @@ public actor JobQueue {
         let result = try await makeRefiner(for: llm).refine(
             sources, job: refinerJob, glossary: llm.settings.glossaryEntries, lineIndices: chosen, reusesCachedReplies: false
         )
-        let keepsOriginal = llm.settings.keepsOriginalLine && !(job.model?.llmMode == .polish)
         var updated = lines
         var correctedByTimes: [TimeRange: String] = [:]
         for (index, text) in result.answeredLines where chosen.contains(index) {
-            // Bilingual only when the source is known; otherwise it may be a translation already.
-            let hasSource = originalByTimes[TimeRange(lines[index])] != nil
-            let source = hasSource ? result.correctedSources[index] ?? sources[index].text : sources[index].text
-            if hasSource, source != sources[index].text {
+            updated[index].text = text
+            // Only a known original is corrected; a new line's text may be a translation already.
+            if originalByTimes[TimeRange(lines[index])] != nil, let source = result.correctedSources[index], source != sources[index].text {
                 correctedByTimes[TimeRange(lines[index])] = source
             }
-            updated[index].text = keepsOriginal && hasSource ? "\(text)\n\(source)" : text
         }
         if !correctedByTimes.isEmpty {
             update(jobID) { job in
@@ -340,7 +337,7 @@ public actor JobQueue {
         guard let job = jobs.first(where: { $0.id == jobID }), job.status.isFinished, !job.outputURLs.isEmpty else {
             throw JobQueueError.nothingToSave
         }
-        try SubtitleFileWriter.rewrite(job.segments, to: job.outputURLs)
+        try SubtitleFileWriter.rewrite(job.segments, originals: job.originalsToWrite(for: job.segments), to: job.outputURLs)
         log(.info, jobID, "Saved \(job.outputURLs.map(\.lastPathComponent).joined(separator: ", "))")
         return job.outputURLs
     }
@@ -509,8 +506,9 @@ public actor JobQueue {
                 return
             }
             update(job.id) { $0.status = .exporting }
+            let originals = jobs.first { $0.id == job.id }?.originalsToWrite(for: finished.segments) ?? []
             let outputURLs = try SubtitleFileWriter.write(
-                finished.segments, for: job.sourceURL, settings: configuration.output, nameSuffix: finished.nameSuffix
+                finished.segments, originals: originals, for: job.sourceURL, settings: configuration.output, nameSuffix: finished.nameSuffix
             )
             update(job.id) {
                 $0.segments = finished.segments
@@ -729,8 +727,8 @@ public actor JobQueue {
         log(.info, jobID, "Transcribed \(ActivityFormatting.clock(audioDuration.seconds)) of audio in \(ActivityFormatting.seconds(elapsed))\(speed)")
     }
 
-    /// Runs the language model over `segments`; translations keep the
-    /// original line underneath when the settings ask for bilingual subtitles.
+    /// Runs the language model over `segments`, keeping them as the job's
+    /// originals (for bilingual files, which add them when written).
     /// With `removesHallucinations`, lines the model marks as not speech are
     /// left out of the result.
     private func refine(
@@ -741,10 +739,15 @@ public actor JobQueue {
         with llm: LLMConfiguration
     ) async throws -> [TimedText] {
         let refiner = makeRefiner(for: llm, marksHallucinations: removesHallucinations)
+        let writesOriginalLines = switch refinerJob {
+        case .translate, .translateSubtitles: llm.settings.keepsOriginalLine
+        case .polishChinese: false  // the original is a rougher Chinese line
+        }
         update(jobID) {
             $0.status = .refining(completedBatches: 0, totalBatches: 1)
             $0.segments = segments  // finished batches replace their lines as they arrive
             $0.linesBeforeLanguageModel = segments
+            $0.writesOriginalLines = writesOriginalLines
         }
         let action = switch refinerJob {
         case .polishChinese: "Polishing"
@@ -783,12 +786,7 @@ public actor JobQueue {
             log(.info, jobID, "\(changed) recognized line(s) corrected")
             update(jobID) { $0.linesBeforeLanguageModel = originals }
         }
-        var refined = result.segments
-        if case .translate = refinerJob, llm.settings.keepsOriginalLine {
-            refined = refined.withOriginalLines(from: originals)
-        } else if case .translateSubtitles = refinerJob, llm.settings.keepsOriginalLine {
-            refined = refined.withOriginalLines(from: originals)
-        }
+        let refined = result.segments
         guard !result.droppedLines.isEmpty else {
             return refined
         }

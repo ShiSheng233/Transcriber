@@ -106,11 +106,6 @@ struct SubtitleRefinerTests {
         #expect(settings.glossaryEntries.count == 2)
     }
 
-    @Test func bilingualLinesPutTheOriginalUnderneath() {
-        let original = [TimedText(start: .zero, end: AudioTime(seconds: 1), text: "こんにちは")]
-        let translated = [TimedText(start: .zero, end: AudioTime(seconds: 1), text: "你好")]
-        #expect(translated.withOriginalLines(from: original).map(\.text) == ["你好\nこんにちは"])
-    }
 }
 
 /// Fails the batches whose first id is listed, with `error`.

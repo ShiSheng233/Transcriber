@@ -95,8 +95,8 @@ final class LLMSettingsViewController: SettingsPaneViewController {
             ], footer: String(localized: "Any OpenAI-compatible API. OpenRouter lists only models with structured output.")),
             SettingsForm.section(String(localized: "Translation"), rows: [
                 SettingsForm.row(String(localized: "Translate into"), description: String(localized: "When the LLM translates"), control: SettingsForm.field(languageBox)),
-                SettingsForm.row(String(localized: "Keep the Japanese line"), description: String(localized: "Bilingual subtitles"), control: keepsOriginalSwitch),
-            ]),
+                SettingsForm.row(String(localized: "Bilingual subtitles"), description: String(localized: "The original under each translated line"), control: keepsOriginalSwitch),
+            ], footer: String(localized: "Applies to every format: a second line in SRT, VTT and TXT, a smaller grey line in ASS, a second lyric at the same time in LRC. The editor shows the translation only.")),
             SettingsForm.section(String(localized: "Glossary"), rows: [
                 SettingsForm.row(control: glossaryScroll),
             ], footer: String(localized: "One per line: source = translation")),

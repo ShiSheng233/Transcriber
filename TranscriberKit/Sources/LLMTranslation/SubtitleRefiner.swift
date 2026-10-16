@@ -400,14 +400,3 @@ extension SubtitlePrompt.Reply {
         SubtitlePrompt.Reply(lines: lines.filter { ids.contains($0.id) }, batchSummary: batchSummary, sceneSummary: sceneSummary)
     }
 }
-
-extension Array where Element == TimedText {
-    /// Bilingual lines: each translation followed by its original on the next line.
-    public func withOriginalLines(from originals: [TimedText]) -> [TimedText] {
-        zip(self, originals).map { translated, original in
-            var bilingual = translated
-            bilingual.text = "\(translated.text)\n\(original.text)"
-            return bilingual
-        }
-    }
-}

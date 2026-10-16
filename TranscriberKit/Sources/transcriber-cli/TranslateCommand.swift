@@ -17,6 +17,9 @@ struct TranslateCommand: AsyncParsableCommand {
     @Option(help: "Target language, as the model should read it.")
     var language: String = "简体中文"
 
+    @Flag(help: "Write the original under each translated line (bilingual subtitles).")
+    var bilingual = false
+
     @Argument(help: "Subtitle files.")
     var inputs: [String]
 
@@ -34,7 +37,8 @@ struct TranslateCommand: AsyncParsableCommand {
             }
             let translated = result.segments
             let outputURL = url.deletingLastPathComponent().appendingPathComponent("\(url.deletingPathExtension().lastPathComponent).\(language).srt")
-            try SubtitleRenderer.render(translated, as: .srt).write(to: outputURL, atomically: true, encoding: .utf8)
+            let originals = bilingual ? original.map(\.text) : []
+            try SubtitleRenderer.render(translated, as: .srt, originals: originals).write(to: outputURL, atomically: true, encoding: .utf8)
             print("  wrote \(outputURL.path)")
         }
     }

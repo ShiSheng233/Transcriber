@@ -16,7 +16,14 @@ public struct OutputSettings: Hashable, Sendable, Codable {
 
 /// Writes `<source name><suffix>.<format>` files, replacing existing ones.
 enum SubtitleFileWriter {
-    static func write(_ segments: [TimedText], for sourceURL: URL, settings: OutputSettings, nameSuffix: String = "") throws -> [URL] {
+    /// - Parameter originals: written under each line (bilingual files); empty for none.
+    static func write(
+        _ segments: [TimedText],
+        originals: [String?] = [],
+        for sourceURL: URL,
+        settings: OutputSettings,
+        nameSuffix: String = ""
+    ) throws -> [URL] {
         let directory = settings.directory ?? sourceURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let stem = sourceURL.deletingPathExtension().lastPathComponent
@@ -26,19 +33,19 @@ enum SubtitleFileWriter {
             guard url.standardizedFileURL != sourceURL.standardizedFileURL else {
                 throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: url.path])
             }
-            try SubtitleRenderer.render(segments, as: format).write(to: url, atomically: true, encoding: .utf8)
+            try SubtitleRenderer.render(segments, as: format, originals: originals).write(to: url, atomically: true, encoding: .utf8)
             return url
         }
     }
 
     /// Renders `segments` again into files written earlier, each in the
     /// format its extension names.
-    static func rewrite(_ segments: [TimedText], to urls: [URL]) throws {
+    static func rewrite(_ segments: [TimedText], originals: [String?] = [], to urls: [URL]) throws {
         for url in urls {
             guard let format = SubtitleFormat.allCases.first(where: { $0.fileExtension == url.pathExtension.lowercased() }) else {
                 continue
             }
-            try SubtitleRenderer.render(segments, as: format).write(to: url, atomically: true, encoding: .utf8)
+            try SubtitleRenderer.render(segments, as: format, originals: originals).write(to: url, atomically: true, encoding: .utf8)
         }
     }
 

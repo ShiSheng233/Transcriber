@@ -150,7 +150,11 @@ struct JobQueueTests {
         #expect(job.status == .completed)
         #expect(job.warning == nil)
         #expect(job.segments.count == 6)
-        #expect(job.segments.allSatisfy { $0.text.hasPrefix("EN: ") && $0.text.contains("\n") })
+        // The translation stays clean; the original is added only to the files.
+        #expect(job.segments.allSatisfy { $0.text.hasPrefix("EN: ") && !$0.text.contains("\n") })
+        #expect(job.writesOriginalLines)
+        let originals = job.originalsToWrite(for: job.segments)
+        #expect(originals.count == 6 && originals.allSatisfy { $0 != nil && !($0?.hasPrefix("EN: ") ?? true) })
     }
 
     @Test(.enabled(if: isAvailable), .timeLimit(.minutes(5)))

@@ -387,6 +387,7 @@ JobQueue、JobDetail 预览、Settings（含后端选择、Core ML 编码器开�
 ✅ `LLMTranslation` 模块与接入：
 
 - **模式由模型配置的 `llm_mode` 决定**：polish（海南鸡中文）→ 润色；translate（whisper-ja / anime-whisper 日文）→ 翻译到目标语言（默认简体中文），可选双语（译文在上、原文在下）。
+- **双语字幕在导出时合成**：任务里的字幕只存译文，原文存在 `linesBeforeLanguageModel`（打开校对时是改正后的日文），`Job.writesOriginalLines` 记录这次翻译是否要双语。写文件（完成时和编辑后保存）时按时间找回每行原文（`SubtitleSources`），由 `SubtitleRenderer.render(_:as:originals:)` 按格式排版：SRT/VTT/TXT 是同一条里的第二行；ASS 用较小的灰色 `Original` 样式（`\N{\rOriginal}`）；LRC 用同一时间戳再写一行（歌词播放器会一起显示，原文里的换行变成空格）。没有原文或原文与译文相同的行不重复。这样编辑器不会把原文当成译文的一部分，改时间、拆分合并后原文也能跟上。polish 模式不出双语。CLI：`transcribe --llm-bilingual`、`translate --bilingual`。
 - **任意 OpenAI 兼容 API**（OpenRouter、OpenAI、DeepSeek、Ollama、LM Studio 或自定义 Base URL；本地服务不需要 key，key 按服务分别存 Keychain）。结构化输出逐级降级：`json_schema` → `json_object` + 提示词里的 schema → 只有提示词，成功的模式会被记住。评估过 MacPaw/OpenAI：它丢失 HTTP 状态码（无法按 429/5xx 重试、按 401/402 提示），`.relaxed` 解析可能把错误响应当成空的成功响应，也不能附带 OpenRouter 的 `provider` 参数，所以继续用自己的 URLSession 客户端（只用到 `/chat/completions` 和 `/models`）。
 - **OpenRouter 专属**：`response_format` 严格 JSON Schema（`{lines: [{id, text}]}`）+ `provider.require_parameters`；模型列表实时拉取（只列支持 structured output 的模型，排除 `:batch`），不在代码里写死模型名；429/5xx 退避重试，401/402 给出明确提示。API key 存 Keychain。
 - **逐行对齐**：每批 40 行，前后各带 8 行上下文；回复的 id 必须与本批完全一致，不一致重试一次，仍缺的行保留原文。

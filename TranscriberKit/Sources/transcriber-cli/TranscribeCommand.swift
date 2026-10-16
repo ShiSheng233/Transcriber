@@ -54,7 +54,10 @@ struct TranscribeCommand: AsyncParsableCommand {
     @Flag(help: "While translating Japanese, also fix what the speech model misheard.")
     var llmProofread = false
 
-    @Flag(help: "Let the first LLM pass remove lines that cannot be speech.")
+    @Flag(help: "Write the original under each translated line (bilingual subtitles).")
+    var llmBilingual = false
+
+    @Flag(help: "Let the LLM remove lines that cannot be speech.")
     var llmRemoveHallucinations = false
 
     @Flag(help: "Join audio frames end to end like the original, instead of filling timestamp holes.")
@@ -168,8 +171,9 @@ struct TranscribeCommand: AsyncParsableCommand {
             print(String(format: "  %d segments, %.1f s audio in %.1f s (%.1fx realtime)",
                          segments.count, audioDuration.seconds, seconds, audioDuration.seconds / seconds))
 
+            var originals: [String?] = []
             if let llmModel {
-                segments = try await refineWithLLM(segments, recognitionModel: recognitionModel, model: llmModel)
+                (segments, originals) = try await refineWithLLM(segments, recognitionModel: recognitionModel, model: llmModel)
             }
 
             let directory = outputDirectory.map { URL(fileURLWithPath: $0) } ?? inputURL.deletingLastPathComponent()
@@ -177,18 +181,24 @@ struct TranscribeCommand: AsyncParsableCommand {
             let stem = inputURL.deletingPathExtension().lastPathComponent
             for format in subtitleFormats {
                 let outputURL = directory.appendingPathComponent("\(stem).\(format.fileExtension)")
-                try SubtitleRenderer.render(segments, as: format).write(to: outputURL, atomically: true, encoding: .utf8)
+                try SubtitleRenderer.render(segments, as: format, originals: originals).write(to: outputURL, atomically: true, encoding: .utf8)
                 print("  wrote \(outputURL.path)")
             }
         }
     }
 
-    private func refineWithLLM(_ segments: [TimedText], recognitionModel: RecognitionModel, model: String) async throws -> [TimedText] {
+    /// The refined lines, and with `--llm-bilingual` each translation's
+    /// original (proofread with `--llm-proofread`) to write under it.
+    private func refineWithLLM(
+        _ segments: [TimedText], recognitionModel: RecognitionModel, model: String
+    ) async throws -> (lines: [TimedText], originals: [String?]) {
         let job: SubtitleRefiner.Job = recognitionModel.llmMode == .polish ? .polishChinese : .translate(targetLanguage: llmTargetLanguage)
         return try await refineWithLLM(segments, job: job, model: model, removesHallucinations: llmRemoveHallucinations)
     }
 
-    private func refineWithLLM(_ segments: [TimedText], job: SubtitleRefiner.Job, model: String, removesHallucinations: Bool) async throws -> [TimedText] {
+    private func refineWithLLM(
+        _ segments: [TimedText], job: SubtitleRefiner.Job, model: String, removesHallucinations: Bool
+    ) async throws -> (lines: [TimedText], originals: [String?]) {
         var configuration = SubtitleRefiner.Configuration(model: model)
         configuration.marksHallucinations = removesHallucinations
         configuration.correctsSources = llmProofread
@@ -208,6 +218,9 @@ struct TranscribeCommand: AsyncParsableCommand {
             print("  removed as not speech: \(segments[index].text)")
         }
         print("  LLM (\(model)) finished in \(ContinuousClock.now - start)")
-        return result.segments.enumerated().filter { !result.droppedLines.contains($0.offset) }.map(\.element)
+        let kept = segments.indices.filter { !result.droppedLines.contains($0) }
+        let writesOriginals: Bool = if case .translate = job { llmBilingual } else { false }
+        let originals = writesOriginals ? kept.map { result.correctedSources[$0] ?? segments[$0].text } : []
+        return (kept.map { result.segments[$0] }, originals)
     }
 }
