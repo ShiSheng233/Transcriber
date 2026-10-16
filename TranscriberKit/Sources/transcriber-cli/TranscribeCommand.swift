@@ -51,6 +51,9 @@ struct TranscribeCommand: AsyncParsableCommand {
     @Option(help: "Target language when the LLM translates.")
     var llmTargetLanguage: String = "简体中文"
 
+    @Flag(help: "Join audio frames end to end like the original, instead of filling timestamp holes.")
+    var joinAudioFrames = false
+
     @Argument(help: "Media files.")
     var inputs: [String]
 
@@ -91,14 +94,19 @@ struct TranscribeCommand: AsyncParsableCommand {
         let settings = TranscriptionPipeline.Settings(model: recognitionModel, concurrentChunkCount: concurrency)
         let pipeline = TranscriptionPipeline(vadModel: vadModel, segmentGenerator: segmentGenerator, settings: settings)
 
+        let options = TranscriptionPipeline.Options(timestampHandling: joinAudioFrames ? .joinFrames : .followTimestamps)
         for input in inputs {
             let inputURL = URL(fileURLWithPath: input)
             let start = ContinuousClock.now
             let fileName = inputURL.lastPathComponent
             let decodedDuration = Mutex(AudioTime.zero)
-            var segments = try await pipeline.transcribe(fileAt: inputURL) { progress in
+            var segments = try await pipeline.transcribe(fileAt: inputURL, options: options) { progress in
                 switch progress {
-                case .decodedAudio(let duration): decodedDuration.withLock { $0 = duration }
+                case .decodedAudio(let duration, let timestampJumps):
+                    decodedDuration.withLock { $0 = duration }
+                    for jump in timestampJumps {
+                        print("  timestamp jump of \(jump.offset.seconds) s at \(jump.position.seconds) s")
+                    }
                 case .plannedChunks(let count): print("\(fileName): \(count) chunk(s)")
                 case .transcribedChunk(let completed, let count, _, _): print("  chunk \(completed)/\(count)")
                 case .detectedSpeech, .postProcessed: break

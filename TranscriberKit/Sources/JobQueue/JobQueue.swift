@@ -1,5 +1,6 @@
 import Foundation
 import LLMTranslation
+import MediaDecoding
 import SubtitleExport
 import TranscriberCore
 import TranscriptionPipeline
@@ -342,6 +343,24 @@ public actor JobQueue {
         return pipeline
     }
 
+    /// Holes would otherwise shift every later subtitle; say they were fixed.
+    private func logTimestampJumps(_ jumps: [AudioTimestampJump], for jobID: UUID) {
+        let holes = jumps.filter { $0.offset > .zero }
+        let overlaps = jumps.count - holes.count
+        let filledSeconds = holes.reduce(0) { $0 + $1.offset.seconds }
+        var parts: [String] = []
+        if !holes.isEmpty {
+            parts.append("\(holes.count) hole(s) in the audio timeline (\(String(format: "%.1f", filledSeconds)) s) filled with silence")
+        }
+        if overlaps > 0 {
+            parts.append("\(overlaps) overlap(s) trimmed")
+        }
+        log(.warning, jobID, parts.joined(separator: ", ") + ", so subtitles stay in sync")
+        for jump in jumps {
+            log(.detail, jobID, "Timestamp jump of \(String(format: "%+.2f", jump.offset.seconds)) s at \(ActivityFormatting.clock(jump.position.seconds))")
+        }
+    }
+
     private func logTranscriptionSpeed(for jobID: UUID, segmentCount: Int) {
         guard let transcriptionStart, let audioDuration else {
             return
@@ -394,9 +413,12 @@ public actor JobQueue {
 
     private func record(_ progress: TranscriptionPipeline.Progress, for jobID: UUID) {
         switch progress {
-        case .decodedAudio(let duration):
+        case .decodedAudio(let duration, let timestampJumps):
             audioDuration = duration
             log(.detail, jobID, "Audio: \(ActivityFormatting.clock(duration.seconds)) at 16 kHz mono")
+            if !timestampJumps.isEmpty {
+                logTimestampJumps(timestampJumps, for: jobID)
+            }
             update(jobID) { $0.status = .detectingSpeech }
             log(.info, jobID, "Detecting speech…")
         case .detectedSpeech(let spanCount, let speechDuration):

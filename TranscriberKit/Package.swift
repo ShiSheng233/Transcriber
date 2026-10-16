@@ -30,7 +30,7 @@ let package = Package(
         .target(
             name: "JobQueue",
             dependencies: [
-                "TranscriberCore", "LLMTranslation", "SpeechDetection", "SubtitleExport", "TranscriptionPipeline",
+                "TranscriberCore", "LLMTranslation", "MediaDecoding", "SpeechDetection", "SubtitleExport", "TranscriptionPipeline",
                 "WhisperCpp", "WhisperDecoding", "WhisperMLX",
             ]
         ),
@@ -40,7 +40,7 @@ let package = Package(
         ),
         .target(
             name: "MediaDecoding",
-            dependencies: ["libavcodec", "libavformat", "libavutil", "libswresample"]
+            dependencies: ["TranscriberCore", "libavcodec", "libavformat", "libavutil", "libswresample"]
         ),
         .target(
             name: "SpeechDetection",
@@ -113,7 +113,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MediaDecodingTests",
-            dependencies: ["MediaDecoding"],
+            dependencies: ["MediaDecoding", "TranscriberCore"],
             resources: [.copy("Fixtures")]
         ),
         .testTarget(

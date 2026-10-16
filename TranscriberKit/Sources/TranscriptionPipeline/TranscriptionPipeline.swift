@@ -64,8 +64,18 @@ public struct TranscriptionPipeline: Sendable {
         }
     }
 
+    /// Choices that do not depend on the model, made per file.
+    public struct Options: Sendable {
+        public var timestampHandling: MediaDecoder.TimestampHandling
+
+        public init(timestampHandling: MediaDecoder.TimestampHandling = .followTimestamps) {
+            self.timestampHandling = timestampHandling
+        }
+    }
+
     public enum Progress: Sendable {
-        case decodedAudio(duration: AudioTime)
+        /// `timestampJumps`: holes and overlaps in the file's audio timeline.
+        case decodedAudio(duration: AudioTime, timestampJumps: [AudioTimestampJump])
         /// The outer VAD pass: speech spans and their total length.
         case detectedSpeech(spanCount: Int, speechDuration: AudioTime)
         case plannedChunks(count: Int)
@@ -76,7 +86,6 @@ public struct TranscriptionPipeline: Sendable {
         case postProcessed(segmentCount: Int)
     }
 
-    private let mediaDecoder = MediaDecoder()
     private let voiceActivityDetector: VoiceActivityDetector
     private let chunkTranscriber: ChunkTranscriber
     private let groupTranscriber: GroupTranscriber
@@ -100,10 +109,14 @@ public struct TranscriptionPipeline: Sendable {
         )
     }
 
-    public func transcribe(fileAt url: URL, progress: @escaping @Sendable (Progress) -> Void = { _ in }) async throws -> [TimedText] {
-        let samples = try mediaDecoder.decodeAudio(at: url)
-        progress(.decodedAudio(duration: AudioTime(samples: samples.count)))
-        return try await transcribe(samples: samples, progress: progress)
+    public func transcribe(
+        fileAt url: URL,
+        options: Options = Options(),
+        progress: @escaping @Sendable (Progress) -> Void = { _ in }
+    ) async throws -> [TimedText] {
+        let audio = try MediaDecoder(timestampHandling: options.timestampHandling).decodeAudio(at: url)
+        progress(.decodedAudio(duration: audio.duration, timestampJumps: audio.timestampJumps))
+        return try await transcribe(samples: audio.samples, progress: progress)
     }
 
     public func transcribe(samples: [Float], progress: @escaping @Sendable (Progress) -> Void = { _ in }) async throws -> [TimedText] {

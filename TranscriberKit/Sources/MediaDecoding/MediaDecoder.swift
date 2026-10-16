@@ -2,13 +2,25 @@ import Foundation
 import libavcodec
 import libavformat
 import libavutil
+import TranscriberCore
 
 /// Decodes the first audio stream of any supported media file to 16 kHz mono
 /// `Float` samples, reproducing faster-whisper's `decode_audio` (PyAV/FFmpeg):
 /// frames that fail with invalid data are skipped, and the resampler is
 /// flushed at the end.
 public struct MediaDecoder: Sendable {
-    public init() {
+    public enum TimestampHandling: Sendable {
+        /// Fill holes with silence and drop overlaps, so the audio keeps the
+        /// file's timeline. Identical to `joinFrames` for files without holes.
+        case followTimestamps
+        /// The original pipeline: frames end to end, whatever their timestamps.
+        case joinFrames
+    }
+
+    private let timestampHandling: TimestampHandling
+
+    public init(timestampHandling: TimestampHandling = .followTimestamps) {
+        self.timestampHandling = timestampHandling
         _ = Self.loggingConfigured
     }
 
@@ -18,10 +30,9 @@ public struct MediaDecoder: Sendable {
         av_log_set_level(AV_LOG_ERROR)
     }()
 
-    public func decodeAudio(at url: URL) throws -> [Float] {
+    public func decodeAudio(at url: URL) throws -> DecodedAudio {
         let input = try MediaInput(url: url)
-        let resampler = AudioResampler()
-        var samples: [Float] = []
+        var output = Output(resampler: AudioResampler(followsTimestamps: timestampHandling == .followTimestamps), timeBase: input.timeBase)
 
         guard let packet = av_packet_alloc(), let frame = av_frame_alloc() else {
             throw MediaDecodingError.decodingFailed(FFmpegError(code: -ENOMEM))
@@ -39,21 +50,44 @@ public struct MediaDecoder: Sendable {
             guard packet.pointee.stream_index == input.audioStreamIndex else {
                 continue
             }
-            try decode(packet, with: input.codecContext, frame: frame, resampler: resampler, into: &samples)
+            try decode(packet, with: input.codecContext, frame: frame, into: &output)
         }
 
         // A nil packet drains the decoder's delayed frames.
-        try decode(nil, with: input.codecContext, frame: frame, resampler: resampler, into: &samples)
-        try resampler.flush(into: &samples)
-        return samples
+        try decode(nil, with: input.codecContext, frame: frame, into: &output)
+        try output.resampler.flush(into: &output.samples)
+        return DecodedAudio(samples: output.samples, timestampJumps: output.timestampJumps)
+    }
+
+    /// What decoding has produced so far.
+    private struct Output {
+        let resampler: AudioResampler
+        let timeBase: AVRational
+        var samples: [Float] = []
+        var timestampJumps: [AudioTimestampJump] = []
+        var timestampTracker = AudioTimestampTracker()
+
+        mutating func append(_ frame: UnsafeMutablePointer<AVFrame>) throws(MediaDecodingError) {
+            let timestamp = frame.pointee.best_effort_timestamp
+            if timestamp != AudioResampler.noTimestamp, frame.pointee.sample_rate > 0 {
+                let startSeconds = Double(timestamp) * av_q2d(timeBase)
+                let durationSeconds = Double(frame.pointee.nb_samples) / Double(frame.pointee.sample_rate)
+                if let jump = timestampTracker.jump(atFrameStartingAt: startSeconds, durationSeconds: durationSeconds) {
+                    timestampJumps.append(AudioTimestampJump(
+                        position: AudioTime(samples: samples.count),
+                        offset: AudioTime(seconds: jump)
+                    ))
+                }
+            }
+            try resampler.resample(frame, timeBase: timeBase, into: &samples)
+        }
     }
 
     private func decode(
         _ packet: UnsafeMutablePointer<AVPacket>?,
         with codecContext: UnsafeMutablePointer<AVCodecContext>,
         frame: UnsafeMutablePointer<AVFrame>,
-        resampler: AudioResampler,
-        into samples: inout [Float]
+        into output: inout Output
     ) throws {
         let sendStatus = avcodec_send_packet(codecContext, packet)
         if sendStatus == FFmpegError.invalidData.code {
@@ -75,7 +109,7 @@ public struct MediaDecoder: Sendable {
                 throw MediaDecodingError.decodingFailed(FFmpegError(code: receiveStatus))
             }
             defer { av_frame_unref(frame) }
-            try resampler.resample(frame, into: &samples)
+            try output.append(frame)
         }
     }
 }
@@ -85,6 +119,8 @@ private final class MediaInput {
     let formatContext: UnsafeMutablePointer<AVFormatContext>
     let codecContext: UnsafeMutablePointer<AVCodecContext>
     let audioStreamIndex: Int32
+    /// The unit of the stream's packet and frame timestamps.
+    let timeBase: AVRational
 
     init(url: URL) throws(MediaDecodingError) {
         var formatContext: UnsafeMutablePointer<AVFormatContext>?
@@ -116,6 +152,7 @@ private final class MediaInput {
         }
         self.formatContext = formatContext
         self.audioStreamIndex = audioStream.pointee.index
+        self.timeBase = audioStream.pointee.time_base
     }
 
     deinit {

@@ -1,6 +1,7 @@
 import ArgumentParser
 import Foundation
 import MediaDecoding
+import TranscriberCore
 
 struct DecodeAudioCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
@@ -14,11 +15,18 @@ struct DecodeAudioCommand: ParsableCommand {
     @Argument(help: "Output file for the raw float32 samples.")
     var outputPath: String
 
+    @Flag(help: "Join frames end to end like the original, instead of filling timestamp holes.")
+    var joinFrames = false
+
     func run() throws {
         let decodeStart = ContinuousClock.now
-        let samples = try MediaDecoder().decodeAudio(at: URL(fileURLWithPath: inputPath))
+        let decoder = MediaDecoder(timestampHandling: joinFrames ? .joinFrames : .followTimestamps)
+        let audio = try decoder.decodeAudio(at: URL(fileURLWithPath: inputPath))
         let decodeDuration = ContinuousClock.now - decodeStart
-        try samples.withUnsafeBytes { try Data($0).write(to: URL(fileURLWithPath: outputPath)) }
-        print("\(samples.count) samples (\(Double(samples.count) / 16_000) s) in \(decodeDuration)")
+        try audio.samples.withUnsafeBytes { try Data($0).write(to: URL(fileURLWithPath: outputPath)) }
+        print("\(audio.samples.count) samples (\(audio.duration.seconds) s) in \(decodeDuration)")
+        for jump in audio.timestampJumps {
+            print("Timestamp jump of \(jump.offset.seconds) s at \(jump.position.seconds) s")
+        }
     }
 }
