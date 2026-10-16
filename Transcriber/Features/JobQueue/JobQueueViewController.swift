@@ -12,6 +12,8 @@ final class JobQueueViewController: NSViewController {
     )
     private var binder: ObservationBinder?
     private var displayedRows: [JobQueueViewModel.Row] = []
+    /// "Recognition Model" or "Transcribe Again With", filled when the menu opens.
+    private let modelMenuItem = NSMenuItem(title: String(localized: "Recognition Model"), action: nil, keyEquivalent: "")
 
     init(viewModel: JobQueueViewModel, activityViewModel: ActivityViewModel, showActivity: @escaping () -> Void) {
         self.viewModel = viewModel
@@ -101,9 +103,41 @@ final class JobQueueViewController: NSViewController {
         menu.addItem(withTitle: String(localized: "Show Subtitles in Finder"), action: #selector(showOutputsInFinder(_:)), keyEquivalent: "")
         menu.addItem(withTitle: String(localized: "Show Source in Finder"), action: #selector(showSourceInFinder(_:)), keyEquivalent: "")
         menu.addItem(.separator())
+        modelMenuItem.submenu = NSMenu()
+        menu.addItem(modelMenuItem)
+        menu.addItem(.separator())
         menu.addItem(withTitle: String(localized: "Cancel"), action: #selector(cancelJob(_:)), keyEquivalent: "")
         menu.addItem(withTitle: String(localized: "Remove from List"), action: #selector(removeJob(_:)), keyEquivalent: "")
+        menu.delegate = self
         return menu
+    }
+
+    /// One item per installed model, the job's own checked.
+    private func updateModelMenu() {
+        guard let submenu = modelMenuItem.submenu else { return }
+        submenu.removeAllItems()
+        guard let row = clickedJob?.row, let change = viewModel.modelChange(for: row.id) else {
+            modelMenuItem.title = String(localized: "Recognition Model")
+            modelMenuItem.isEnabled = false
+            return
+        }
+        modelMenuItem.title = change == .switchModel
+            ? String(localized: "Recognition Model")
+            : String(localized: "Transcribe Again With")
+        modelMenuItem.isEnabled = true
+        for choice in viewModel.modelChoices(for: row.id) {
+            let item = NSMenuItem(title: choice.title, action: #selector(modelChosen(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = choice.modelID
+            item.state = choice.isCurrent ? .on : .off
+            submenu.addItem(item)
+        }
+    }
+
+    @objc private func modelChosen(_ sender: NSMenuItem) {
+        if let row = clickedJob?.row, let modelID = sender.representedObject as? String {
+            viewModel.changeModel(of: row.id, toModelWithID: modelID)
+        }
     }
 
     private var clickedJob: (row: JobQueueViewModel.Row, index: Int)? {
@@ -139,6 +173,12 @@ final class JobQueueViewController: NSViewController {
     }
 }
 
+extension JobQueueViewController: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        updateModelMenu()
+    }
+}
+
 extension JobQueueViewController: NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         guard let row = clickedJob?.row else {
@@ -147,6 +187,7 @@ extension JobQueueViewController: NSMenuItemValidation {
         switch menuItem.action {
         case #selector(showOutputsInFinder(_:)): return !row.outputURLs.isEmpty
         case #selector(cancelJob(_:)): return row.canCancel
+        case #selector(modelChosen(_:)): return viewModel.modelChange(for: row.id) != nil
         default: return true
         }
     }

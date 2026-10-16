@@ -22,6 +22,7 @@ import AppKit
     func findNextSubtitle(_ sender: Any?)
     func translateSubtitles(_ sender: Any?)
     func retranslateLines(_ sender: Any?)
+    func retranscribeLines(_ sender: Any?)
     func saveSubtitles(_ sender: Any?)
 }
 
@@ -52,6 +53,7 @@ enum SubtitleEditorMenu {
             Item(title: String(localized: "Shift Times…"), action: #selector(SubtitleEditorCommands.shiftTimes(_:)), key: "i", modifiers: .command),
         ],
         [
+            Item(title: String(localized: "Retranscribe Selected Lines"), action: #selector(SubtitleEditorCommands.retranscribeLines(_:)), key: "r", modifiers: [.command, .option]),
             Item(title: String(localized: "Retranslate Selected Lines"), action: #selector(SubtitleEditorCommands.retranslateLines(_:)), key: "r", modifiers: [.command, .shift]),
         ],
         [

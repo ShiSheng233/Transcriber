@@ -341,6 +341,36 @@ extension MainWindowController: SubtitleEditorCommands {
         }
     }
 
+    /// Transcribes the time the selected lines cover again (and translates
+    /// the new lines when the file was translated); one undo step.
+    @objc func retranscribeLines(_ sender: Any?) {
+        detailViewController.editorView.commitPendingText()
+        guard let jobID = detailViewModel.shownJobID, !editor.selection.isEmpty, queueViewModel.canRetranscribe(jobID: jobID) else { return }
+        let sentLines = editor.lines
+        let lineIndices = editor.selection
+        Task {
+            do {
+                let result = try await queueViewModel.retranscribe(lineIndices, of: sentLines, in: jobID)
+                guard detailViewModel.shownJobID == jobID, let window else { return }
+                if !editor.applyRetranscription(result.lines, sentLines: sentLines, newLineIndices: result.newLineIndices) {
+                    let alert = NSAlert()
+                    alert.messageText = String(localized: "The lines changed meanwhile")
+                    alert.informativeText = String(localized: "The new transcription was not applied because the subtitles were edited while it ran. Try again.")
+                    alert.beginSheetModal(for: window) { _ in }
+                } else if let untranslated = result.untranslatedCount, untranslated > 0 {
+                    let alert = NSAlert()
+                    alert.messageText = String(localized: "Some new lines were not translated")
+                    alert.informativeText = String(localized: "\(untranslated) of \(result.newLineIndices.count) new lines got no answer from the language model; use Retranslate Selected Lines to try again.")
+                    alert.beginSheetModal(for: window) { _ in }
+                }
+            } catch {
+                if let window {
+                    NSAlert(error: error).beginSheetModal(for: window) { _ in }
+                }
+            }
+        }
+    }
+
     @objc func saveSubtitles(_ sender: Any?) {
         detailViewController.editorView.commitPendingText()
         guard let jobID = detailViewModel.shownJobID else { return }
@@ -375,9 +405,11 @@ extension MainWindowController: NSMenuItemValidation {
             return editor.isEditable && !editor.lines.isEmpty
         case #selector(playLine(_:)):
             return editor.activeLine != nil && detailViewModel.showsPlayerArea
+        case #selector(retranscribeLines(_:)):
+            return editor.canEditSelection && (detailViewModel.shownJobID.map(queueViewModel.canRetranscribe(jobID:)) ?? false)
         case #selector(retranslateLines(_:)):
             return editor.canEditSelection && queueViewModel.canUseLanguageModel
-                && !(detailViewModel.shownJobID.map(queueViewModel.retranslatingJobIDs.contains) ?? false)
+                && !(detailViewModel.shownJobID.map { queueViewModel.retranslatingJobIDs.contains($0) || queueViewModel.retranscribingJobIDs.contains($0) } ?? false)
         case #selector(translateSubtitles(_:)):
             return detailViewModel.subtitleMode == .edit
         case #selector(saveSubtitles(_:)):

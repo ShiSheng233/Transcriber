@@ -319,6 +319,16 @@ final class SubtitleEditorViewModel {
         replace(lines: updated, selection: selection, actionName: String(localized: "Retranslate"))
     }
 
+    /// The lines with a stretch transcribed again, as one undo step; the
+    /// new lines are selected. Nothing happens if the lines changed since
+    /// the request (returns false).
+    @discardableResult
+    func applyRetranscription(_ newLines: [TimedText], sentLines: [TimedText], newLineIndices: [Int]) -> Bool {
+        guard isEditable, lines == sentLines else { return false }
+        replace(lines: newLines, selection: newLineIndices, actionName: String(localized: "Retranscribe"))
+        return true
+    }
+
     // MARK: Private
 
     private func setTimes(start: AudioTime? = nil, end: AudioTime? = nil) {

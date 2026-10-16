@@ -41,6 +41,8 @@ final class JobQueueViewModel {
     private(set) var unsavedJobIDs: Set<UUID> = []
     /// Jobs with lines at the language model again (one request each at a time).
     private(set) var retranslatingJobIDs: Set<UUID> = []
+    /// Jobs with a stretch being transcribed again.
+    private(set) var retranscribingJobIDs: Set<UUID> = []
 
     private let queue: JobQueue
     private let settingsStore: SettingsStore
@@ -205,6 +207,27 @@ final class JobQueueViewModel {
         return try await queue.retranslate(lineIndices, of: lines, in: jobID, with: llm)
     }
 
+    /// Whether the job has media to transcribe part of again.
+    func canRetranscribe(jobID: UUID) -> Bool {
+        guard let job = jobs.first(where: { $0.id == jobID }) else {
+            return false
+        }
+        return job.mediaURL != nil && (job.model != nil || library.selectedModel != nil)
+            && !retranscribingJobIDs.contains(jobID) && !retranslatingJobIDs.contains(jobID)
+    }
+
+    /// Transcribes the time the chosen lines cover again (and translates
+    /// the new lines when the job was translated); see `JobQueue.retranscribe`.
+    /// A job without a model of its own uses the toolbar's.
+    func retranscribe(_ lineIndices: [Int], of lines: [TimedText], in jobID: UUID) async throws -> JobQueue.Retranscription {
+        let configuration = settingsStore.settings.queueConfiguration(apiKeys: apiKeyStore)
+        retranscribingJobIDs.insert(jobID)
+        defer { retranscribingJobIDs.remove(jobID) }
+        return try await queue.retranscribe(
+            lineIndices, of: lines, in: jobID, model: library.selectedModel, configuration: configuration
+        )
+    }
+
     /// Writes the job's subtitle files again.
     func saveSubtitles(of jobID: UUID) async throws {
         _ = try await queue.saveSubtitles(of: jobID)
@@ -281,6 +304,51 @@ final class JobQueueViewModel {
     /// Interrupts the current file (it goes back to waiting) and stops.
     func stopQueue() {
         Task { await queue.stop() }
+    }
+
+    /// What the job's Model menu does, or nil when it cannot change: a
+    /// waiting transcription switches models, a finished one is transcribed
+    /// again (not while it has unsaved edits).
+    enum ModelChange {
+        case switchModel
+        case transcribeAgain
+    }
+
+    func modelChange(for jobID: UUID) -> ModelChange? {
+        guard let job = jobs.first(where: { $0.id == jobID }), job.model != nil else {
+            return nil
+        }
+        if job.status == .queued {
+            return .switchModel
+        }
+        return job.status.isFinished && !unsavedJobIDs.contains(jobID) ? .transcribeAgain : nil
+    }
+
+    struct ModelChoice: Equatable {
+        let modelID: String
+        let title: String
+        /// The waiting job's current model.
+        let isCurrent: Bool
+    }
+
+    /// The installed models for the job's Model menu.
+    func modelChoices(for jobID: UUID) -> [ModelChoice] {
+        let change = modelChange(for: jobID)
+        let currentID = jobs.first { $0.id == jobID }?.model?.id
+        return models.map { model in
+            ModelChoice(modelID: model.id, title: model.displayName, isCurrent: change == .switchModel && model.id == currentID)
+        }
+    }
+
+    /// Transcribes the file with another model; a finished file starts again.
+    func changeModel(of jobID: UUID, toModelWithID modelID: String) {
+        guard modelChange(for: jobID) != nil, let model = models.first(where: { $0.id == modelID }) else {
+            return
+        }
+        Task {
+            await queue.changeModel(of: jobID, to: model)
+            startQueue()
+        }
     }
 
     func cancel(jobID: UUID) {
