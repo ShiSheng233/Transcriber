@@ -30,6 +30,8 @@ final class JobDetailViewController: NSViewController {
     private let splitView = NSSplitView()
     private var binder: ObservationBinder?
     private var timeObserver: Any?
+    /// Watches the player's volume and mute, which its own controls change.
+    private var volumeObservations: [NSKeyValueObservation] = []
     private var displayedPlayerURL: URL?
     /// Video needs room for the picture; audio only the control bar.
     private static let audioPlayerHeight: CGFloat = 64
@@ -72,6 +74,12 @@ final class JobDetailViewController: NSViewController {
     override func loadView() {
         playerView.player = player
         playerView.controlsStyle = .inline
+        player.volume = viewModel.playerVolume
+        player.isMuted = viewModel.isPlayerMuted
+        volumeObservations = [
+            player.observe(\.volume) { [weak self] _, _ in self?.rememberVolume() },
+            player.observe(\.isMuted) { [weak self] _, _ in self?.rememberVolume() },
+        ]
         // No Live Text over video: not needed here, and it runs a background
         // analysis service whose overlay logs Auto Layout conflicts.
         playerView.allowsVideoFrameAnalysis = false
@@ -156,6 +164,13 @@ final class JobDetailViewController: NSViewController {
         }
         if splitView.arrangedSubviews.count == 2 {
             splitView.setPosition(height, ofDividerAt: 0)
+        }
+    }
+
+    private nonisolated func rememberVolume() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            viewModel.setPlayerVolume(player.volume, isMuted: player.isMuted)
         }
     }
 

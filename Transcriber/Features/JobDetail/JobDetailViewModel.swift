@@ -11,6 +11,8 @@ final class JobDetailViewModel {
     private static let timingModeKey = "ShowsTimingMode"
     private static let editingToolsKey = "ShowsEditingTools"
     private static let sourceColumnKey = "ShowsSourceColumn"
+    private static let playerVolumeKey = "PlayerVolume"
+    private static let playerMutedKey = "PlayerMuted"
     private static let audioExtensions: Set<String> = ["mp3", "wav", "flac", "m4a", "aac", "ogg", "opus", "wma"]
     private let userDefaults: UserDefaults
 
@@ -23,6 +25,9 @@ final class JobDetailViewModel {
     private(set) var isTimingModeOn: Bool
     /// The editor's action bar; off by default, opened from the window toolbar.
     private(set) var showsEditingTools: Bool
+    /// The player's volume (0…1) and mute, kept between files and launches.
+    private(set) var playerVolume: Float
+    private(set) var isPlayerMuted: Bool
     private(set) var hasSelection = false
     /// Shown over the grid while it is empty.
     private(set) var subtitlesPlaceholder: String?
@@ -41,12 +46,23 @@ final class JobDetailViewModel {
         showsPlayer = userDefaults.object(forKey: Self.showsPlayerKey) == nil || userDefaults.bool(forKey: Self.showsPlayerKey)
         isTimingModeOn = userDefaults.bool(forKey: Self.timingModeKey)
         showsEditingTools = userDefaults.bool(forKey: Self.editingToolsKey)
+        playerVolume = userDefaults.object(forKey: Self.playerVolumeKey) == nil ? 1 : userDefaults.float(forKey: Self.playerVolumeKey)
+        isPlayerMuted = userDefaults.bool(forKey: Self.playerMutedKey)
         editor.setPrefersSourceColumn(userDefaults.object(forKey: Self.sourceColumnKey) == nil || userDefaults.bool(forKey: Self.sourceColumnKey))
         editor.onChange = { [weak self] lines in
             if let self, let jobID = shownJobID {
                 onEdit(jobID, lines)
             }
         }
+    }
+
+    /// Remembers what the player's controls were set to.
+    func setPlayerVolume(_ volume: Float, isMuted: Bool) {
+        guard volume != playerVolume || isMuted != isPlayerMuted else { return }
+        playerVolume = volume
+        isPlayerMuted = isMuted
+        userDefaults.set(volume, forKey: Self.playerVolumeKey)
+        userDefaults.set(isMuted, forKey: Self.playerMutedKey)
     }
 
     /// Audio files get only the playback controls, no picture area.
