@@ -99,7 +99,7 @@ final class LLMSettingsViewController: SettingsPaneViewController {
             ]),
             SettingsForm.section(String(localized: "Glossary"), rows: [
                 SettingsForm.row(control: glossaryScroll),
-            ], footer: String(localized: "One per line: source = translation, e.g. お兄ちゃん = 哥哥")),
+            ], footer: String(localized: "One per line: source = translation")),
         ])
     }
 
