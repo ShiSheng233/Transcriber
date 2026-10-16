@@ -268,6 +268,10 @@ queued → loadingModel → decodingAudio → detectingSpeech → transcribing(p
 
 **活动日志**：`JobQueue.logs()` 先重放历史再推送新条目（模型载入的引擎/权重/大小/耗时、音频时长、VAD 语音段、每个 chunk、合并、速度、LLM 批次、写出的文件、失败）。管线进度按顺序处理完才继续，日志不会乱序。App 侧边栏底部是状态栏（转圈、最新一步、队列位置、日志按钮），Window ▸ Activity（⌥⌘L）显示完整日志。
 
+**两条线**：识别一次只跑一个文件（已经占满 GPU）；识别完、需要 LLM 的文件交给另一条线，LLM 步骤按顺序一次一个，与下一个文件的识别同时进行。还有文件等着识别时模型保持加载，没有了才卸载（下一个文件约 0.5 s 重新加载）。编辑器里的“重新转写”与队列的识别共用同一把锁，不会同时抢 GPU。停止会把两条线上的任务都放回队列（LLM 已完成的批次在缓存里，重跑不再花钱）；取消只作用于那一个文件，无论它在哪条线上。
+
+**编辑器命令**：Retranscribe Selected Lines（⌥⌘R）重新识别选中行覆盖的时间段（前后各多解码 1 s 作上下文，保留中点落在该段内的新字幕并裁到段内），替换这些行；这个文件走过 LLM 且 LLM 开着时，新行再送去翻译。Retranslate Selected Lines（⇧⌘R）见 §10 Phase 3。队列里右键 › Recognition Model 给等待中的文件换模型；已结束的文件变为 Transcribe Again With，换模型重新识别（有未保存的编辑时不可用）。
+
 **退出**：退出前取消当前任务并释放模型——ggml 的 Metal 设备在进程退出时断言所有缓冲已释放，否则直接 abort。
 
 ## 8. App target 结构
