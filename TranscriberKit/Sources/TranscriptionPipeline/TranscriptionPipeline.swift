@@ -184,7 +184,7 @@ public struct TranscriptionPipeline: Sendable {
             SubtitlePostProcessor.process(segments, settings: settings.merge),
             settings: settings.cleanup
         )
-        let subtitles = SubtitleFilter.apply(cleaned, settings: filter)
+        let subtitles = SubtitleFilter.apply(cleaned, settings: filter, audioDuration: AudioTime(samples: samples.count))
         progress(.postProcessed(segmentCount: subtitles.count))
         return subtitles
     }

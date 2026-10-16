@@ -60,6 +60,9 @@ struct TranscribeCommand: AsyncParsableCommand {
     @Flag(help: "Drop short lines of breathing or moaning sounds, music notes or an ellipsis.")
     var dropNonverbal = false
 
+    @Flag(help: "Drop video outros and subtitle credits invented over silence.")
+    var dropHallucinations = false
+
     @Flag(help: "Merge three or more identical lines in a row.")
     var mergeRepeats = false
 
@@ -111,6 +114,7 @@ struct TranscribeCommand: AsyncParsableCommand {
             filter: SubtitleFilterSettings(
                 dropsRepetitionLoops: dropLoops,
                 dropsNonverbalLines: dropNonverbal,
+                dropsHallucinatedPhrases: dropHallucinations,
                 mergesRepeatedLines: mergeRepeats,
                 dropsImplausibleReadingSpeed: dropImplausibleSpeed
             )

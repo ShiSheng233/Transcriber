@@ -245,12 +245,13 @@ whisper.cpp 以 `WHISPER_COREML=ON` + `WHISPER_COREML_ALLOW_FALLBACK=ON` 自行�
 
 ### 6.5 可选的字幕过滤（参照 WhisperJAV 的 sanitizer）
 
-设置 › Output › Cleanup 四个开关，默认全关（= 原版输出），CLI 对应 `--drop-loops` `--drop-nonverbal` `--merge-repeats` `--drop-implausible-speed`。顺序与 WhisperJAV 一致：
+设置 › Output › Cleanup 五个开关，默认全关（= 原版输出），CLI 对应 `--drop-loops` `--drop-nonverbal` `--drop-hallucinations` `--merge-repeats` `--drop-implausible-speed`。顺序与 WhisperJAV 一致，幻觉短语插在声音行之后：
 
 | 开关 | 规则 | 出处 |
 | --- | --- | --- |
 | 丢弃重复循环 | 窗口结果在所有温度下压缩比仍超阈值时丢弃。faster-whisper 在全部失败时仍保留最好的那次（`below_cr_threshold_results or all_results`），重复循环就是这样进字幕的。WhisperJAV 另按 avg_logprob < −1 删行，未采用：在对拍样本上它删掉了海南鸡一句原版也输出的正确台词（翻译模型的 log 概率天然偏低） | CHANGELOG v1.9.2 |
 | 丢弃声音行 | 只有 ♪、省略号、≤6 字的喘息类假名（あんっはふ…）或括号描述（[喘ぎ声]）的行。与原版不同：关键词只在括号描述或整行时生效（否则会删掉含“喘”的中文句子），另把 ♡♥ 当标点、加入常见中文语气词 | `segment_filters.py` |
+| 丢弃幻觉短语 | Whisper 从训练数据里的视频结尾和字幕署名学来、在静音处编出的行。比较前做 NFKC、小写，去掉空格与标点。署名类（ご視聴ありがとうございました、チャンネル登録…、字幕制作…、字幕由…提供、请不吝点赞订阅…、明镜与点点栏目、Amara.org）整行由这些短语组成就删；客套类（ありがとうございました、お疲れ様でした、谢谢观看）常是真台词，只在前后各空 ≥ 2 s 且位于音频首尾 60 s 内时删。avg_logprob 不作证据（原因同上） | `HallucinationPhraseFilter` |
 | 合并重复行 | 连续 ≥3 条文本相同、间隔 < 600 ms 的合成一条 | `subtitle_sanitizer.py` |
 | 丢弃时长异常行 | 先删没有任何字母数字的行，再删 > 30 字/秒、或 ≤4 字且 < 1 字/秒的行 | `subtitle_sanitizer.py` |
 

@@ -8,6 +8,9 @@ public struct SubtitleFilterSettings: Hashable, Sendable, Codable {
     /// Drop short lines that are only breathing or moaning sounds, music
     /// notes or an ellipsis.
     public var dropsNonverbalLines: Bool
+    /// Drop video outros and subtitle credits Whisper invents over silence
+    /// ("ご視聴ありがとうございました", "字幕由…提供").
+    public var dropsHallucinatedPhrases: Bool
     /// Merge three or more identical lines in a row into one.
     public var mergesRepeatedLines: Bool
     /// Drop lines too fast to read or short lines stretched too long, and
@@ -17,11 +20,13 @@ public struct SubtitleFilterSettings: Hashable, Sendable, Codable {
     public init(
         dropsRepetitionLoops: Bool,
         dropsNonverbalLines: Bool,
+        dropsHallucinatedPhrases: Bool,
         mergesRepeatedLines: Bool,
         dropsImplausibleReadingSpeed: Bool
     ) {
         self.dropsRepetitionLoops = dropsRepetitionLoops
         self.dropsNonverbalLines = dropsNonverbalLines
+        self.dropsHallucinatedPhrases = dropsHallucinatedPhrases
         self.mergesRepeatedLines = mergesRepeatedLines
         self.dropsImplausibleReadingSpeed = dropsImplausibleReadingSpeed
     }
@@ -29,6 +34,7 @@ public struct SubtitleFilterSettings: Hashable, Sendable, Codable {
     public static let none = SubtitleFilterSettings(
         dropsRepetitionLoops: false,
         dropsNonverbalLines: false,
+        dropsHallucinatedPhrases: false,
         mergesRepeatedLines: false,
         dropsImplausibleReadingSpeed: false
     )
@@ -41,6 +47,7 @@ extension SubtitleFilterSettings {
         self.init(
             dropsRepetitionLoops: try container.decodeIfPresent(Bool.self, forKey: .dropsRepetitionLoops) ?? false,
             dropsNonverbalLines: try container.decodeIfPresent(Bool.self, forKey: .dropsNonverbalLines) ?? false,
+            dropsHallucinatedPhrases: try container.decodeIfPresent(Bool.self, forKey: .dropsHallucinatedPhrases) ?? false,
             mergesRepeatedLines: try container.decodeIfPresent(Bool.self, forKey: .mergesRepeatedLines) ?? false,
             dropsImplausibleReadingSpeed: try container.decodeIfPresent(Bool.self, forKey: .dropsImplausibleReadingSpeed) ?? false
         )

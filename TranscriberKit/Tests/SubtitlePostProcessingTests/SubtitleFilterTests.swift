@@ -48,6 +48,6 @@ struct SubtitleFilterTests {
 
     @Test func noneLeavesSubtitlesAlone() {
         let lines = [Self.line(0, 100, "…"), Self.line(0, 100, "…"), Self.line(0, 100, "…")]
-        #expect(SubtitleFilter.apply(lines, settings: .none) == lines)
+        #expect(SubtitleFilter.apply(lines, settings: .none, audioDuration: AudioTime(milliseconds: 100)) == lines)
     }
 }
