@@ -25,7 +25,7 @@ final class SubtitleEditorView: NSView {
 
     let actionBar = SubtitleEditorActionBar()
     private var actionBarSeparator = NSBox()
-    private let tableView = NSTableView()
+    private let tableView = SubtitleGridTableView()
     private let sourceLabel = NSTextField(wrappingLabelWithString: "")
     private let startField = NSTextField()
     private let endField = NSTextField()
@@ -144,6 +144,8 @@ final class SubtitleEditorView: NSView {
         tableView.rowHeight = 24
         tableView.usesAlternatingRowBackgroundColors = true
         tableView.allowsMultipleSelection = true
+        // Letters are playback keys in the grid, not a search for a line.
+        tableView.allowsTypeSelect = false
         tableView.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         tableView.dataSource = self
         tableView.delegate = self

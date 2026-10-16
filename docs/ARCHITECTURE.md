@@ -281,9 +281,9 @@ queued → loadingModel → decodingAudio → detectingSpeech → transcribing(p
 
 **编辑器命令**：Retranscribe Selected Lines（⌥⌘R）重新识别选中行覆盖的时间段（前后各多解码 1 s 作上下文，保留中点落在该段内的新字幕并裁到段内），替换这些行；这个文件走过 LLM 且 LLM 开着时，新行再送去翻译。Retranslate Selected Lines（⇧⌘R）与 Proofread Selected Lines（⇧⌘P）见 §10 Phase 3。队列里右键 › Recognition Model 给等待中的文件换模型；已结束的文件变为 Transcribe Again With，换模型重新识别（有未保存的编辑时不可用）。
 
-**编辑器（参照 Aegisub）**：编辑面板自上而下是操作栏、编辑框、网格；调时间模式下波形取代视频画面显示在上半区（播放器继续放声音，可以只看波形调时间）。操作栏默认收起，从窗口工具栏右上角的 Editing Tools 按钮（View › Show Editing Tools ⌥⌘E）打开，和播放器开关一样全局记住。操作栏的按钮与菜单项发同一个 action，由 `MainWindowController.isCommandEnabled` 统一判断可用；分组：行（插入、删除、拆分▾、合并▾、交换）、时间（设起点/终点到播放头、平移到播放头、连续▾、Shift Times…、Adjust Timing…）、播放（Play Line、播放▾）、选择（Select Lines…、查找替换、Check Consistency…），右侧两个开关：调时间模式、原文列。
+**编辑器（参照 Aegisub）**：编辑面板自上而下是操作栏、编辑框、网格；调时间模式下波形取代视频画面显示在上半区（播放器继续放声音，可以只看波形调时间）。操作栏默认收起，从窗口工具栏右上角的 Editing Tools 按钮（View › Show Editing Tools ⌥⌘E）打开，和播放器开关一样全局记住。操作栏的按钮与菜单项发同一个 action，由 `MainWindowController.isCommandEnabled` 统一判断可用；分组：行（插入、删除、拆分▾、合并▾、交换）、时间（设起点/终点到播放头、平移到播放头、连续▾、Shift Times…、Adjust Timing…）、播放（Play Line、播放▾）、选择（Select Lines…、查找替换、Check Consistency…），右侧两个开关：调时间模式、原文列。焦点在网格上时（不论是否开调时间模式，只要有媒体）Space 播放/暂停，Q/E/D/W/S 同波形上的播放键，发的是菜单的同一个 action（`SubtitleEditorMenu.playbackKeyAction`）；网格关掉了按字母跳行（type select），↑↓ 仍是表格自己的换行；编辑框和时间字段里照常打字。
 - **识别置信度**：没通过 Whisper 自身检查的行在网格里行号标橙，悬停显示 avg log prob、no speech、压缩比；Select Lines 可按它筛选，再批量重新识别或重翻。
-- **调时间模式**（View › Timing Mode ⌥⌘A，默认关，全局记住）：关着时不显示波形也不读取。开着时上半区显示波形而不是视频（即使播放器被隐藏也照样载入声音）：拖活动行两端调时间（⇧ 带动相接的邻行，⌥ 关吸附；吸附到 6 pt 内的邻行边、播放头、语音边界：转写过的文件用识别时存下的 VAD 语音段，字幕文件用波形响度），拖行中间平移所选行，松手才写入、一步撤销；拖动时网格与时间字段实时跟随。单击定位，点行号条选行；⌥/⌘ 滚动或捏合缩放（10–2000 pt/s），播放时整页翻。焦点在波形上时 Space 播放/暂停，Q/E/D/W 播放起点前/后、终点前/后 500 ms，S 播放选区，↑↓ 换行，←→ 移播放头 0.1 s（⇧ 1 s）。播放头用 display link 每帧刷新。
+- **调时间模式**（View › Timing Mode ⌥⌘A，默认关，全局记住）：关着时不显示波形也不读取。开着时上半区显示波形而不是视频（即使播放器被隐藏也照样载入声音）：拖活动行两端调时间（⇧ 带动相接的邻行，⌥ 关吸附；吸附到 6 pt 内的邻行边、播放头、语音边界：转写过的文件用识别时存下的 VAD 语音段，字幕文件用波形响度），拖行中间平移所选行，松手才写入、一步撤销；拖动时网格与时间字段实时跟随。单击定位，点行号条选行；⌥/⌘ 滚动或捏合缩放（10–2000 pt/s），播放时整页翻。焦点在波形上时 Space 播放/暂停，Q/E/D/W 播放起点前/后、终点前/后 500 ms，S 播放选区（网格有焦点时同样可用），↑↓ 换行，←→ 移播放头 0.1 s（⇧ 1 s）。播放头用 display link 每帧刷新。
 - **Adjust Timing**（⇧⌘I，`TimingPostProcessing`）：lead-in 200 / lead-out 300 ms（只延伸到邻行，不制造重叠）→ 吸附到语音边界（起点 100、终点 150 ms 内；转写过的文件直接可用，字幕文件需先开调时间模式分析响度）→ 间隔 < 300 ms 的相邻行延长前一行接上。
 - **Shift Times**（⌘I）：按时间或帧（fps 可选），提前/推后，选中行 / 全部 / 活动行之后，两端 / 只起点 / 只终点。
 - **Select Lines**（⌘L）：CPS 超限、过短、过长、重叠、文本匹配（可正则）、空文本，可要求全部或任一条件，结果替换 / 加入 / 交集 / 减去当前选择；不进撤销栈。
@@ -291,7 +291,7 @@ queued → loadingModel → decodingAudio → detectingSpeech → transcribing(p
 - **原文**（View › Show Original Text ⌥⌘O）：文件走过 LLM 时，按时间找回 LLM 之前的原文（时间相同的行，否则中点落在行内的原文行），网格的 Text 单元格里原文以灰色小字显示在现文上方（行高 40），编辑框的文本框上方也多一行只读原文。
 - 其他：在播放头处拆分（⇧⌘D，文本在光标处或按时间比例切开）、合并保留首行文本（⇧⌘J）、交换两行文本、按开始时间排序；播放菜单 ⇧⌘↩ 播放选区、⌥⌘↩ 播放下一行、⌥⌘1/⌃⌘1 播放起点前/后、⌥⌘2/⌃⌘2 播放终点前/后。
 
-**快捷键一览**（Settings › Shortcuts）：只读，不提供自定义。菜单部分每次打开该页时遍历 `NSApp.mainMenu` 现读（`MenuShortcutCollector`，每个菜单和子菜单一节，跳过分隔线、隐藏项和重复项），不另维护一张会漂移的表；不在菜单里的波形按键（Space、Q/E/D/W、S、↑↓、←→、拖动与滚动的修饰键）由 `WaveformView.keyboardShortcuts` 列出，紧挨处理这些键的代码。`KeyCapFormatter` 把 keyEquivalent + 修饰键（原始位值，不依赖 AppKit）按 ⌃⌥⇧⌘ 顺序转成键帽符号，菜单按钮的 tooltip 也用它；`KeyCapView` 自绘键帽。顶部搜索框按命令名过滤（`ShortcutsViewModel`）。
+**快捷键一览**（Settings › Shortcuts）：只读，不提供自定义。菜单部分每次打开该页时遍历 `NSApp.mainMenu` 现读（`MenuShortcutCollector`，每个菜单和子菜单一节，跳过分隔线、隐藏项和重复项），不另维护一张会漂移的表；不在菜单里的波形按键（Space、Q/E/D/W、S、↑↓、←→、拖动与滚动的修饰键）由 `WaveformView.keyboardShortcuts` 列出，紧挨处理这些键的代码；其中的播放键也是网格的键，由 `SubtitleEditorMenu.playbackKeyShortcuts` 列出（另成一节），和 `playbackKeyAction` 放在一起。`KeyCapFormatter` 把 keyEquivalent + 修饰键（原始位值，不依赖 AppKit）按 ⌃⌥⇧⌘ 顺序转成键帽符号，菜单按钮的 tooltip 也用它；`KeyCapView` 自绘键帽。顶部搜索框按命令名过滤（`ShortcutsViewModel`）。
 
 **退出**：退出前取消当前任务并释放模型——ggml 的 Metal 设备在进程退出时断言所有缓冲已释放，否则直接 abort。
 

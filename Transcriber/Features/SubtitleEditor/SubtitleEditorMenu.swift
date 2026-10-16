@@ -81,6 +81,34 @@ enum SubtitleEditorMenu {
         Item(title: String(localized: "Jump to Line End"), action: #selector(Commands.jumpToLineEnd(_:)), key: "2"),
     ]
 
+    /// Single keys, after Aegisub's audio display, for the views that take
+    /// them while they have focus (the waveform and the grid, never a text
+    /// field): Space plays or pauses; Q/E/D/W play 500 ms around the active
+    /// line's edges, S the selection.
+    static func playbackKeyAction(for characters: String) -> Selector? {
+        switch characters.lowercased() {
+        case " ": #selector(Commands.togglePlayback(_:))
+        case "q": #selector(Commands.playBeforeStart(_:))
+        case "e": #selector(Commands.playAfterStart(_:))
+        case "d": #selector(Commands.playBeforeEnd(_:))
+        case "w": #selector(Commands.playAfterEnd(_:))
+        case "s": #selector(Commands.playSelection(_:))
+        default: nil
+        }
+    }
+
+    /// The keys above, for the Shortcuts settings page; keep the two in step.
+    static var playbackKeyShortcuts: [KeyboardShortcut] {
+        [
+            KeyboardShortcut(name: String(localized: "Play or Pause"), keyEquivalent: " "),
+            KeyboardShortcut(name: String(localized: "Play 500 ms Before Start"), keyEquivalent: "q"),
+            KeyboardShortcut(name: String(localized: "Play 500 ms After Start"), keyEquivalent: "e"),
+            KeyboardShortcut(name: String(localized: "Play 500 ms Before End"), keyEquivalent: "d"),
+            KeyboardShortcut(name: String(localized: "Play 500 ms After End"), keyEquivalent: "w"),
+            KeyboardShortcut(name: String(localized: "Play Selection"), keyEquivalent: "s"),
+        ]
+    }
+
     static let continuousItems: Group = [
         Item(title: String(localized: "Make Times Continuous (Change Start)"), action: #selector(Commands.makeStartsContinuous(_:))),
         Item(title: String(localized: "Make Times Continuous (Change End)"), action: #selector(Commands.makeEndsContinuous(_:))),

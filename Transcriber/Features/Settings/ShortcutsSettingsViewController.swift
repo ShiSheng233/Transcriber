@@ -109,7 +109,12 @@ final class ShortcutsSettingsViewController: NSViewController {
             shortcuts: WaveformView.keyboardShortcuts,
             footer: String(localized: "In timing mode, while the waveform has the focus.")
         )
-        viewModel.showShortcuts(menuSections + [waveform])
+        let grid = KeyboardShortcut.Section(
+            title: String(localized: "Subtitle Grid"),
+            shortcuts: SubtitleEditorMenu.playbackKeyShortcuts,
+            footer: String(localized: "While the subtitle grid has the focus and the file has media.")
+        )
+        viewModel.showShortcuts(menuSections + [waveform, grid])
     }
 
     private func render() {

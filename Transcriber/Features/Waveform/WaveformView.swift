@@ -449,13 +449,7 @@ final class WaveformView: NSView {
     static var keyboardShortcuts: [KeyboardShortcut] {
         let drag = String(localized: "Drag")
         let scroll = String(localized: "Scroll")
-        return [
-            KeyboardShortcut(name: String(localized: "Play or Pause"), keyEquivalent: " "),
-            KeyboardShortcut(name: String(localized: "Play 500 ms Before Start"), keyEquivalent: "q"),
-            KeyboardShortcut(name: String(localized: "Play 500 ms After Start"), keyEquivalent: "e"),
-            KeyboardShortcut(name: String(localized: "Play 500 ms Before End"), keyEquivalent: "d"),
-            KeyboardShortcut(name: String(localized: "Play 500 ms After End"), keyEquivalent: "w"),
-            KeyboardShortcut(name: String(localized: "Play Selection"), keyEquivalent: "s"),
+        return SubtitleEditorMenu.playbackKeyShortcuts + [
             KeyboardShortcut(name: String(localized: "Select Previous Line"), keyEquivalent: String(NSEvent.SpecialKey.upArrow.unicodeScalar)),
             KeyboardShortcut(name: String(localized: "Select Next Line"), keyEquivalent: String(NSEvent.SpecialKey.downArrow.unicodeScalar)),
             KeyboardShortcut(name: String(localized: "Move Playhead Back 0.1 s"), keyEquivalent: String(NSEvent.SpecialKey.leftArrow.unicodeScalar)),
@@ -485,26 +479,13 @@ final class WaveformView: NSView {
         case .rightArrow?:
             onSeek(playheadTime + step)
         case nil:
-            if let action = event.charactersIgnoringModifiers.flatMap(Self.playbackAction(for:)) {
+            if let action = event.charactersIgnoringModifiers.flatMap(SubtitleEditorMenu.playbackKeyAction(for:)) {
                 NSApp.sendAction(action, to: nil, from: self)
             } else {
                 super.keyDown(with: event)
             }
         default:
             super.keyDown(with: event)
-        }
-    }
-
-    /// Space plays or pauses; Q/E/D/W play around the edges, S the selection.
-    static func playbackAction(for characters: String) -> Selector? {
-        switch characters.lowercased() {
-        case " ": #selector(SubtitleEditorCommands.togglePlayback(_:))
-        case "q": #selector(SubtitleEditorCommands.playBeforeStart(_:))
-        case "e": #selector(SubtitleEditorCommands.playAfterStart(_:))
-        case "d": #selector(SubtitleEditorCommands.playBeforeEnd(_:))
-        case "w": #selector(SubtitleEditorCommands.playAfterEnd(_:))
-        case "s": #selector(SubtitleEditorCommands.playSelection(_:))
-        default: nil
         }
     }
 }
