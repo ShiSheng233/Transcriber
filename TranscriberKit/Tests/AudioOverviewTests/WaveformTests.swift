@@ -30,3 +30,14 @@ struct WaveformTests {
         #expect(Waveform(samples: []).soundSpans().isEmpty)
     }
 }
+
+extension WaveformTests {
+    @Test func buildsTheSameWaveformFromPieces() {
+        let samples = (0..<1_000).map { Float(($0 * 37) % 100) / 100 - 0.5 }
+        var builder = Waveform.Builder()
+        for piece in [samples[..<7], samples[7..<500], samples[500...]] {
+            builder.append(Array(piece))
+        }
+        #expect(builder.finish() == Waveform(samples: samples))
+    }
+}

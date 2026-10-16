@@ -2,7 +2,8 @@ import Foundation
 import MediaDecoding
 import TranscriberCore
 
-/// Decodes media files into waveforms, one at a time, and keeps the most
+/// Decodes media files into waveforms, one at a time, without keeping the
+/// decoded audio, and keeps the most
 /// recent ones so going back to a file is instant.
 public actor WaveformLoader {
     /// Waveforms kept; each is about 1 MB per hour of audio.
@@ -19,9 +20,10 @@ public actor WaveformLoader {
             touch(url)
             return cached
         }
-        let audio = try decoder.decodeAudio(at: url)
-        try Task.checkCancellation()
-        let waveform = Waveform(samples: audio.samples)
+        // Summarized as it is decoded: a film's samples never sit in memory at once.
+        var builder = Waveform.Builder()
+        try decoder.decodeAudio(at: url) { builder.append($0) }
+        let waveform = builder.finish()
         cache[url] = waveform
         touch(url)
         if recentURLs.count > Self.cacheCapacity {

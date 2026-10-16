@@ -13,27 +13,56 @@ public struct Waveform: Sendable, Equatable {
     public let duration: AudioTime
 
     public init(samples: [Float]) {
-        let binSize = Self.binDuration.samples
-        let binCount = (samples.count + binSize - 1) / binSize
-        var peaks = [Float](repeating: 0, count: binCount)
-        var levels = [Float](repeating: 0, count: binCount)
-        samples.withUnsafeBufferPointer { buffer in
-            for bin in 0..<binCount {
-                let range = (bin * binSize)..<min((bin + 1) * binSize, buffer.count)
-                var peak: Float = 0
-                var sumOfSquares: Float = 0
-                for index in range {
-                    let sample = buffer[index]
-                    peak = max(peak, abs(sample))
-                    sumOfSquares += sample * sample
-                }
-                peaks[bin] = min(peak, 1)
-                levels[bin] = min((sumOfSquares / Float(range.count)).squareRoot(), 1)
-            }
-        }
+        var builder = Builder()
+        builder.append(samples)
+        self = builder.finish()
+    }
+
+    init(peaks: [Float], levels: [Float], duration: AudioTime) {
         self.peaks = peaks
         self.levels = levels
-        duration = AudioTime(samples: samples.count)
+        self.duration = duration
+    }
+
+    /// Builds a waveform from audio handed over in pieces of any size.
+    public struct Builder {
+        private var peaks: [Float] = []
+        private var levels: [Float] = []
+        private var sampleCount = 0
+        /// The bin being filled, carried over between pieces.
+        private var binPeak: Float = 0
+        private var binSumOfSquares: Float = 0
+        private var binFill = 0
+
+        public init() {}
+
+        public mutating func append(_ samples: [Float]) {
+            let binSize = Waveform.binDuration.samples
+            for sample in samples {
+                binPeak = max(binPeak, abs(sample))
+                binSumOfSquares += sample * sample
+                binFill += 1
+                if binFill == binSize {
+                    closeBin()
+                }
+            }
+            sampleCount += samples.count
+        }
+
+        public mutating func finish() -> Waveform {
+            if binFill > 0 {
+                closeBin()
+            }
+            return Waveform(peaks: peaks, levels: levels, duration: AudioTime(samples: sampleCount))
+        }
+
+        private mutating func closeBin() {
+            peaks.append(min(binPeak, 1))
+            levels.append(min((binSumOfSquares / Float(binFill)).squareRoot(), 1))
+            binPeak = 0
+            binSumOfSquares = 0
+            binFill = 0
+        }
     }
 
     /// The largest peak between two times, for one column of a drawing.
