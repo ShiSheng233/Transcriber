@@ -56,4 +56,12 @@ struct HallucinationRemovalTests {
         #expect(result.segments[1].confidence == Self.doubtful)  // the refiner keeps what it does not change
         #expect(!(model.recorded.first?.messages[0].content.contains("\"drop\"") ?? true))
     }
+
+    @Test func proofreadingUsesOnlyTheGlossarysSourceTerms() {
+        let glossary = [(source: "お兄ちゃん", target: "哥哥")]
+        let proofread = SubtitlePrompt.systemMessage(for: .proofread, glossary: glossary)
+        #expect(proofread.contains("- お兄ちゃん") && !proofread.contains("哥哥"))
+        let translate = SubtitlePrompt.systemMessage(for: .translate(targetLanguage: "简体中文"), glossary: glossary)
+        #expect(translate.contains("お兄ちゃん → 哥哥"))
+    }
 }

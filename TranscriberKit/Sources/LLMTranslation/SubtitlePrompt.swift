@@ -114,8 +114,15 @@ enum SubtitlePrompt {
                 """
         }
         if !glossary.isEmpty {
-            instructions += "\nAlways use these renderings:\n"
-            instructions += glossary.map { "- \($0.source) → \($0.target)" }.joined(separator: "\n")
+            if case .proofread = job {
+                // The glossary maps Japanese to the translation; proofreading stays
+                // in Japanese, so only its source terms help (as spellings to expect).
+                instructions += "\nThese names and terms occur; write them this way:\n"
+                instructions += glossary.map { "- \($0.source)" }.joined(separator: "\n")
+            } else {
+                instructions += "\nAlways use these renderings:\n"
+                instructions += glossary.map { "- \($0.source) → \($0.target)" }.joined(separator: "\n")
+            }
         }
         return instructions
     }
