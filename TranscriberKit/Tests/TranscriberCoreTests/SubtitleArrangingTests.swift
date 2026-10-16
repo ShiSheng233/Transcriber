@@ -12,10 +12,12 @@ struct SubtitleArrangingTests {
         #expect(result.selection == [0])
     }
 
-    @Test func swapsExactlyTwoLines() {
+    @Test func swapsTheTextsOfExactlyTwoLines() {
         let lines = [line(0, 1, "a"), line(1, 2, "b"), line(2, 3, "c")]
-        #expect(SubtitleEditing.swap([0, 2], in: lines).lines.map(\.text) == ["c", "b", "a"])
-        #expect(SubtitleEditing.swap([0], in: lines).lines == lines)
+        #expect(SubtitleEditing.swapTexts([0, 2], in: lines).lines == [line(0, 1, "c"), line(1, 2, "b"), line(2, 3, "a")])
+        #expect(SubtitleEditing.swapTexts([0], in: lines).lines == lines)
+        #expect(SubtitleEditing.isSortedByStart(lines))
+        #expect(!SubtitleEditing.isSortedByStart(lines.reversed()))
     }
 
     @Test func sortsByStartKeepingTheSelection() {
@@ -31,6 +33,8 @@ struct SubtitleArrangingTests {
         let wholeText = SubtitleEditing.split(0, at: AudioTime(seconds: 3), atCharacter: 11, in: lines)
         #expect(wholeText.lines == [line(0, 3, "Hello world"), line(3, 4, "Hello world")])
         #expect(SubtitleEditing.split(0, at: AudioTime(seconds: 5), atCharacter: 0, in: lines).lines == lines)  // outside the line
+        let estimated = SubtitleEditing.split(0, at: AudioTime(seconds: 2), atCharacter: nil, in: [line(0, 4, "あいうえ")])
+        #expect(estimated.lines.map(\.text) == ["あい", "うえ"])  // halfway through the time, halfway through the text
     }
 
     @Test func shiftsChosenEdges() {

@@ -1,6 +1,6 @@
 /// Aegisub's timing post-processor for machine-made times: pad lines with a
-/// lead-in and lead-out, close small gaps between neighbours, then snap
-/// starts and ends to nearby speech boundaries. Each step can be off.
+/// lead-in and lead-out, snap starts and ends to nearby speech boundaries,
+/// then close small gaps between neighbours. Each step can be off.
 public enum TimingPostProcessing {
     public struct Settings: Hashable, Sendable, Codable {
         /// Added before each start; `nil` skips the step.
@@ -13,27 +13,38 @@ public enum TimingPostProcessing {
         /// Where two neighbours meet, from 0 (the first line's end stays) to
         /// 1 (the second line's start stays).
         public var adjacentBias: Double
-        /// How far a start or end may move to reach a speech boundary;
-        /// `nil` skips the step.
-        public var snapDistance: AudioTime?
+        /// How far a start may move to reach where speech starts; `nil` skips.
+        public var startSnapDistance: AudioTime?
+        /// How far an end may move to reach where speech ends; `nil` skips.
+        public var endSnapDistance: AudioTime?
 
-        public init(leadIn: AudioTime?, leadOut: AudioTime?, adjacentThreshold: AudioTime?, adjacentBias: Double, snapDistance: AudioTime?) {
+        public init(
+            leadIn: AudioTime?,
+            leadOut: AudioTime?,
+            adjacentThreshold: AudioTime?,
+            adjacentBias: Double,
+            startSnapDistance: AudioTime?,
+            endSnapDistance: AudioTime?
+        ) {
             self.leadIn = leadIn
             self.leadOut = leadOut
             self.adjacentThreshold = adjacentThreshold
             self.adjacentBias = adjacentBias
-            self.snapDistance = snapDistance
+            self.startSnapDistance = startSnapDistance
+            self.endSnapDistance = endSnapDistance
         }
 
         /// Aegisub's defaults (`Audio/Lead/IN` 200, `OUT` 300,
-        /// `Tool/Timing Post Processor/Threshold/Adjacent` 300, bias 0.5),
-        /// with a 150 ms snap like its keyframe window.
+        /// `Tool/Timing Post Processor/Threshold/Adjacent` 300), closing gaps
+        /// by extending the earlier line, with snaps a little wider at the end,
+        /// where speech trails off.
         public static let aegisub = Settings(
             leadIn: AudioTime(milliseconds: 200),
             leadOut: AudioTime(milliseconds: 300),
             adjacentThreshold: AudioTime(milliseconds: 300),
-            adjacentBias: 0.5,
-            snapDistance: AudioTime(milliseconds: 150)
+            adjacentBias: 1,
+            startSnapDistance: AudioTime(milliseconds: 100),
+            endSnapDistance: AudioTime(milliseconds: 150)
         )
     }
 
@@ -71,6 +82,21 @@ public enum TimingPostProcessing {
             }
         }
 
+        if !speech.isEmpty {
+            let starts = speech.map(\.start).sorted()
+            let ends = speech.map(\.end).sorted()
+            for index in chosen {
+                if let distance = settings.startSnapDistance,
+                   let start = nearest(to: result[index].start, in: starts, within: distance), start < result[index].end {
+                    result[index].start = start
+                }
+                if let distance = settings.endSnapDistance,
+                   let end = nearest(to: result[index].end, in: ends, within: distance), end > result[index].start {
+                    result[index].end = end
+                }
+            }
+        }
+
         if let threshold = settings.adjacentThreshold {
             for (position, index) in order.enumerated().dropLast() {
                 let next = order[position + 1]
@@ -90,18 +116,6 @@ public enum TimingPostProcessing {
             }
         }
 
-        if let snapDistance = settings.snapDistance, !speech.isEmpty {
-            let starts = speech.map(\.start).sorted()
-            let ends = speech.map(\.end).sorted()
-            for index in chosen {
-                if let start = nearest(to: result[index].start, in: starts, within: snapDistance), start < result[index].end {
-                    result[index].start = start
-                }
-                if let end = nearest(to: result[index].end, in: ends, within: snapDistance), end > result[index].start {
-                    result[index].end = end
-                }
-            }
-        }
         return SubtitleEditing.Outcome(lines: result, selection: indices.isEmpty ? [] : chosen)
     }
 

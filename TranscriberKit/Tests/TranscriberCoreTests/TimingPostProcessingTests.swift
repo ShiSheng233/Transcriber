@@ -14,7 +14,8 @@ struct TimingPostProcessingTests {
             leadOut: leadOut.map(AudioTime.init(milliseconds:)),
             adjacentThreshold: adjacent.map(AudioTime.init(milliseconds:)),
             adjacentBias: bias,
-            snapDistance: snap.map(AudioTime.init(milliseconds:))
+            startSnapDistance: snap.map(AudioTime.init(milliseconds:)),
+            endSnapDistance: snap.map(AudioTime.init(milliseconds:))
         )
     }
 
@@ -30,6 +31,8 @@ struct TimingPostProcessingTests {
         #expect(result.lines == [line(0, 1.1), line(1.1, 1.95), line(1.95, 3), line(5, 6)])
         let keepFirstEnd = TimingPostProcessing.processed([0], in: lines, settings: settings(adjacent: 300, bias: 0))
         #expect(keepFirstEnd.lines[0] == line(0, 1) && keepFirstEnd.lines[1] == line(1, 2))
+        let extendEarlier = TimingPostProcessing.processed([0], in: lines, settings: .aegisub)
+        #expect(extendEarlier.lines[0].end == AudioTime(seconds: 1.2))  // the lead-out stops at the next line
     }
 
     @Test func snapsToNearbySpeechBoundaries() {
@@ -41,7 +44,7 @@ struct TimingPostProcessingTests {
 
     @Test func leavesUnchosenLinesAlone() {
         let lines = [line(1, 2), line(5, 6)]
-        let result = TimingPostProcessing.processed([1], in: lines, settings: .aegisub)
+        let result = TimingPostProcessing.processed([1], in: lines, settings: settings(leadIn: 200, leadOut: 300, adjacent: 300))
         #expect(result.lines[0] == line(1, 2))
         #expect(result.lines[1] == line(4.8, 6.3))
         #expect(result.selection == [1])
