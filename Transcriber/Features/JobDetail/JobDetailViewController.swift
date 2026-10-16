@@ -10,6 +10,9 @@ final class JobDetailViewController: NSViewController {
     private let subtitleOverlay = SubtitleOverlayView()
     private let player = AVPlayer()
     let editorView: SubtitleEditorView
+    private let waveformView: WaveformView
+    /// Moves the waveform's playhead every frame while timing mode is on.
+    private var displayLink: CADisplayLink?
     private let modeControl = NSSegmentedControl(
         labels: [String(localized: "Edit"), String(localized: "Translate")], trackingMode: .selectOne, target: nil, action: nil
     )
@@ -36,8 +39,16 @@ final class JobDetailViewController: NSViewController {
     init(viewModel: JobDetailViewModel) {
         self.viewModel = viewModel
         editorView = SubtitleEditorView(viewModel: viewModel.editor)
+        waveformView = WaveformView(editor: viewModel.editor, waveform: viewModel.waveform)
         super.init(nibName: nil, bundle: nil)
         editorView.onUserSelectedLine = { [weak self] index in
+            self?.seekToLine(index)
+        }
+        waveformView.onSeek = { [weak self] time in
+            self?.seek(to: time.seconds)
+        }
+        waveformView.onSelectLine = { [weak self] index in
+            self?.viewModel.editor.select([index])
             self?.seekToLine(index)
         }
     }
@@ -134,6 +145,7 @@ final class JobDetailViewController: NSViewController {
 
     override func viewDidAppear() {
         super.viewDidAppear()
+        renderWaveform()
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 10), queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -144,6 +156,8 @@ final class JobDetailViewController: NSViewController {
 
     override func viewDidDisappear() {
         super.viewDidDisappear()
+        displayLink?.invalidate()
+        displayLink = nil
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
         }
@@ -188,6 +202,30 @@ final class JobDetailViewController: NSViewController {
         placeholderLabel.stringValue = viewModel.subtitlesPlaceholder ?? ""
         placeholderLabel.isHidden = !viewModel.hasSelection || viewModel.subtitlesPlaceholder == nil
         subtitleOverlay.text = viewModel.isAudioOnly ? nil : viewModel.currentSubtitle
+        renderWaveform()
+    }
+
+    private func renderWaveform() {
+        let shows = viewModel.showsWaveform && viewModel.hasSelection
+        editorView.showWaveform(shows ? waveformView : nil)
+        if shows, displayLink == nil, view.window != nil {
+            let link = view.displayLink(target: self, selector: #selector(displayLinkFired(_:)))
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        } else if !shows {
+            displayLink?.invalidate()
+            displayLink = nil
+        }
+    }
+
+    @objc private func displayLinkFired(_ link: CADisplayLink) {
+        let seconds = player.currentTime().seconds
+        guard seconds.isFinite else { return }
+        let time = AudioTime(seconds: max(seconds, 0))
+        waveformView.playheadTime = time
+        if player.rate > 0 {
+            viewModel.waveform.follow(playhead: time, width: Double(waveformView.bounds.width))
+        }
     }
 
     @objc private func modeChanged(_ sender: NSSegmentedControl) {
@@ -204,21 +242,54 @@ final class JobDetailViewController: NSViewController {
 
     /// Plays the active line from its start and pauses at its end.
     func playActiveLine() {
-        guard let line = viewModel.editor.activeLine, player.currentItem != nil else { return }
+        play(.activeLine)
+    }
+
+    /// Plays one of the editor's ranges and pauses at its end.
+    func play(_ range: SubtitleEditorViewModel.PlaybackRange) {
+        guard let (start, end) = viewModel.editor.playbackRange(range), player.currentItem != nil else { return }
         if let lineEndObserver {
             player.removeTimeObserver(lineEndObserver)
         }
-        let end = CMTime(seconds: line.end.seconds, preferredTimescale: 1_000)
-        lineEndObserver = player.addBoundaryTimeObserver(forTimes: [NSValue(time: end)], queue: .main) { [weak self] in
+        let endTime = CMTime(seconds: end.seconds, preferredTimescale: 1_000)
+        lineEndObserver = player.addBoundaryTimeObserver(forTimes: [NSValue(time: endTime)], queue: .main) { [weak self] in
             MainActor.assumeIsolated {
                 self?.player.pause()
             }
         }
-        player.seek(to: CMTime(seconds: line.start.seconds, preferredTimescale: 1_000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+        player.seek(to: CMTime(seconds: start.seconds, preferredTimescale: 1_000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.player.play()
             }
         }
+    }
+
+    /// Space: pause, or play on from the playhead.
+    func togglePlayback() {
+        guard player.currentItem != nil else { return }
+        if player.rate > 0 {
+            player.pause()
+        } else {
+            if let lineEndObserver {
+                player.removeTimeObserver(lineEndObserver)
+                self.lineEndObserver = nil
+            }
+            player.play()
+        }
+    }
+
+    var canPlay: Bool {
+        player.currentItem != nil
+    }
+
+    func zoomWaveform(by factor: Double) {
+        let width = Double(waveformView.bounds.width)
+        viewModel.waveform.zoom(by: factor, anchorX: viewModel.waveform.x(of: waveformView.playheadTime).clamped(0, width), width: width)
+    }
+
+    func fitWaveformToActiveLine() {
+        guard let line = viewModel.editor.activeLine else { return }
+        viewModel.waveform.fit(line, width: Double(waveformView.bounds.width))
     }
 
     func jumpToActiveLine(end: Bool) {
@@ -227,7 +298,7 @@ final class JobDetailViewController: NSViewController {
         seek(to: (end ? line.end : line.start).seconds)
     }
 
-    private func seek(to seconds: Double) {
+    func seek(to seconds: Double) {
         player.seek(to: CMTime(seconds: seconds, preferredTimescale: 1_000), toleranceBefore: .zero, toleranceAfter: .zero)
         viewModel.playbackTimeChanged(to: seconds)
     }
@@ -238,5 +309,11 @@ extension JobDetailViewController: NSSplitViewDelegate {
     /// by the split view (which would hide it behind our back).
     func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool {
         false
+    }
+}
+
+private extension Double {
+    func clamped(_ low: Double, _ high: Double) -> Double {
+        Swift.min(Swift.max(self, low), high)
     }
 }

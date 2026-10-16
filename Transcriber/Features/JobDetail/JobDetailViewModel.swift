@@ -1,3 +1,4 @@
+import AudioOverview
 import Foundation
 import Observation
 import TranscriberCore
@@ -7,13 +8,18 @@ import TranscriberCore
 @Observable
 final class JobDetailViewModel {
     private static let showsPlayerKey = "ShowsPlayer"
+    private static let timingModeKey = "ShowsTimingMode"
+    private static let sourceColumnKey = "ShowsSourceColumn"
     private static let audioExtensions: Set<String> = ["mp3", "wav", "flac", "m4a", "aac", "ogg", "opus", "wma"]
     private let userDefaults: UserDefaults
 
     let editor = SubtitleEditorViewModel()
+    let waveform: WaveformViewModel
     private(set) var mediaURL: URL?
     /// Off: only the subtitles; the media is not loaded at all.
     private(set) var showsPlayer: Bool
+    /// The waveform and its timing tools; off: nothing is decoded for it.
+    private(set) var isTimingModeOn: Bool
     private(set) var hasSelection = false
     /// Shown over the grid while it is empty.
     private(set) var subtitlesPlaceholder: String?
@@ -26,9 +32,12 @@ final class JobDetailViewModel {
     /// Switches the shown subtitle file to the other mode, with the editor's lines.
     @ObservationIgnored var onSwitchMode: (UUID, JobQueueViewModel.SubtitleMode, [TimedText]) -> Void = { _, _, _ in }
 
-    init(userDefaults: UserDefaults = .standard) {
+    init(userDefaults: UserDefaults = .standard, waveformLoader: WaveformLoader = WaveformLoader()) {
         self.userDefaults = userDefaults
+        waveform = WaveformViewModel(loader: waveformLoader)
         showsPlayer = userDefaults.object(forKey: Self.showsPlayerKey) == nil || userDefaults.bool(forKey: Self.showsPlayerKey)
+        isTimingModeOn = userDefaults.bool(forKey: Self.timingModeKey)
+        editor.setPrefersSourceColumn(userDefaults.object(forKey: Self.sourceColumnKey) == nil || userDefaults.bool(forKey: Self.sourceColumnKey))
         editor.onChange = { [weak self] lines in
             if let self, let jobID = shownJobID {
                 onEdit(jobID, lines)
@@ -56,9 +65,36 @@ final class JobDetailViewModel {
         editor.playingIndex.flatMap { editor.lines.indices.contains($0) ? editor.lines[$0].text : nil }
     }
 
+    /// Timing mode needs something to play.
+    var canUseTimingMode: Bool {
+        mediaURL != nil
+    }
+
+    /// The waveform shows with the player, in timing mode.
+    var showsWaveform: Bool {
+        isTimingModeOn && showsPlayerArea
+    }
+
     func togglePlayer() {
         showsPlayer.toggle()
         userDefaults.set(showsPlayer, forKey: Self.showsPlayerKey)
+        updateWaveform()
+    }
+
+    func toggleTimingMode() {
+        isTimingModeOn.toggle()
+        userDefaults.set(isTimingModeOn, forKey: Self.timingModeKey)
+        updateWaveform()
+    }
+
+    func toggleSourceColumn() {
+        let prefers = !editor.prefersSourceColumn
+        editor.setPrefersSourceColumn(prefers)
+        userDefaults.set(prefers, forKey: Self.sourceColumnKey)
+    }
+
+    private func updateWaveform() {
+        waveform.show(showsWaveform ? mediaURL : nil)
     }
 
     /// Shows `job`, or nothing. A finished job with written files can be edited.
@@ -69,6 +105,7 @@ final class JobDetailViewModel {
             subtitleMode = nil
             mediaURL = nil
             editor.load([], isEditable: false)
+            updateWaveform()
             subtitlesPlaceholder = nil
             return
         }
@@ -77,9 +114,10 @@ final class JobDetailViewModel {
         if shownJobID != job.id {
             shownJobID = job.id
             mediaURL = job.mediaURL
-            editor.load(job.segments, isEditable: isEditable)
+            editor.load(job.segments, originalLines: job.linesBeforeLanguageModel, isEditable: isEditable)
+            updateWaveform()
         } else {
-            editor.follow(job.segments, isEditable: isEditable)
+            editor.follow(job.segments, originalLines: job.linesBeforeLanguageModel, isEditable: isEditable)
         }
         let isEmpty = editor.lines.isEmpty
         subtitlesPlaceholder = switch job.status {

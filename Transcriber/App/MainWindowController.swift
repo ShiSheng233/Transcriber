@@ -13,6 +13,11 @@ final class MainWindowController: NSWindowController {
     private let detailViewModel = JobDetailViewModel()
     private let detailViewController: JobDetailViewController
     private lazy var findReplaceSheet = FindReplaceSheet(editor: detailViewModel.editor)
+    private lazy var shiftTimesSheet = ShiftTimesSheet(editor: detailViewModel.editor)
+    private lazy var timingAdjustmentSheet = TimingAdjustmentSheet(editor: detailViewModel.editor) { [detailViewModel] in
+        detailViewModel.waveform.waveform == nil ? nil : detailViewModel.waveform.soundSpans
+    }
+    private lazy var selectLinesSheet = SelectLinesSheet(editor: detailViewModel.editor)
     private let openSettings: () -> Void
     private var binder: ObservationBinder?
     private lazy var modelPopUp: NSPopUpButton = {
@@ -61,6 +66,9 @@ final class MainWindowController: NSWindowController {
         window.center()
         super.init(window: window)
 
+        let actionBar = detailViewController.editorView.actionBar
+        actionBar.isCommandEnabled = { [weak self] action in self?.isCommandEnabled(action) ?? false }
+        actionBar.isCommandOn = { [weak self] action in self?.isCommandOn(action) ?? false }
         window.toolbar = makeToolbar()
         window.toolbarStyle = .unified
         binder = ObservationBinder { [weak self] in self?.render() }
@@ -285,27 +293,101 @@ extension MainWindowController: SubtitleEditorCommands {
         detailViewController.playActiveLine()
     }
 
-    /// Asks for an offset; applies it to the selected lines, or all of them.
     @objc func shiftTimes(_ sender: Any?) {
-        guard let window, window.attachedSheet == nil else { return }
+        guard let window else { return }
         detailViewController.editorView.commitPendingText()
-        let alert = NSAlert()
-        alert.messageText = String(localized: "Shift Times")
-        let target = editor.selection.isEmpty
-            ? String(localized: "all lines")
-            : String(localized: "the \(editor.selection.count) selected lines")
-        alert.informativeText = String(localized: "Seconds to move \(target) by; negative moves them earlier.")
-        let field = NSTextField(string: "0.0")
-        field.frame = NSRect(x: 0, y: 0, width: 120, height: 24)
-        alert.accessoryView = field
-        alert.addButton(withTitle: String(localized: "Shift"))
-        alert.addButton(withTitle: String(localized: "Cancel"))
-        alert.window.initialFirstResponder = field
-        alert.beginSheetModal(for: window) { [weak self] response in
-            let text = field.stringValue.replacingOccurrences(of: ",", with: ".")
-            guard response == .alertFirstButtonReturn, let seconds = Double(text) else { return }
-            self?.editor.shift(byMilliseconds: Int((seconds * 1_000).rounded()))
+        shiftTimesSheet.begin(on: window)
+    }
+
+    @objc func showTimingPostProcessor(_ sender: Any?) {
+        guard let window else { return }
+        detailViewController.editorView.commitPendingText()
+        timingAdjustmentSheet.begin(on: window)
+    }
+
+    @objc func showSelectLines(_ sender: Any?) {
+        guard let window else { return }
+        selectLinesSheet.begin(on: window)
+    }
+
+    @objc func playSelection(_ sender: Any?) {
+        detailViewController.play(.selection)
+    }
+
+    @objc func playNextLine(_ sender: Any?) {
+        if editor.selectNextLine() {
+            detailViewController.playActiveLine()
         }
+    }
+
+    @objc func playBeforeStart(_ sender: Any?) {
+        detailViewController.play(.beforeStart)
+    }
+
+    @objc func playAfterStart(_ sender: Any?) {
+        detailViewController.play(.afterStart)
+    }
+
+    @objc func playBeforeEnd(_ sender: Any?) {
+        detailViewController.play(.beforeEnd)
+    }
+
+    @objc func playAfterEnd(_ sender: Any?) {
+        detailViewController.play(.afterEnd)
+    }
+
+    @objc func togglePlayback(_ sender: Any?) {
+        detailViewController.togglePlayback()
+    }
+
+    @objc func selectNextLine(_ sender: Any?) {
+        if editor.selectNextLine(), let index = editor.activeIndex {
+            detailViewController.seekToLine(index)
+        }
+    }
+
+    @objc func selectPreviousLine(_ sender: Any?) {
+        if editor.selectPreviousLine(), let index = editor.activeIndex {
+            detailViewController.seekToLine(index)
+        }
+    }
+
+    @objc func splitLineAtPlayhead(_ sender: Any?) {
+        let editorView = detailViewController.editorView
+        let offset = editorView.isEditingText ? editorView.textCursorOffset : nil
+        editing { $0.splitAtPlayback(atCharacter: offset) }
+    }
+
+    @objc func joinLinesKeepingFirstText(_ sender: Any?) {
+        editing { $0.mergeKeepingFirstText() }
+    }
+
+    @objc func swapLines(_ sender: Any?) {
+        editing { $0.swapTexts() }
+    }
+
+    @objc func sortLinesByStart(_ sender: Any?) {
+        editing { $0.sortByStart() }
+    }
+
+    @objc func toggleWaveform(_ sender: Any?) {
+        detailViewModel.toggleTimingMode()
+    }
+
+    @objc func toggleSourceColumn(_ sender: Any?) {
+        detailViewModel.toggleSourceColumn()
+    }
+
+    @objc func zoomInWaveform(_ sender: Any?) {
+        detailViewController.zoomWaveform(by: WaveformViewModel.zoomStep)
+    }
+
+    @objc func zoomOutWaveform(_ sender: Any?) {
+        detailViewController.zoomWaveform(by: 1 / WaveformViewModel.zoomStep)
+    }
+
+    @objc func fitWaveformToLine(_ sender: Any?) {
+        detailViewController.fitWaveformToActiveLine()
     }
 
     @objc func translateSubtitles(_ sender: Any?) {
@@ -388,23 +470,67 @@ extension MainWindowController: SubtitleEditorCommands {
 
 extension MainWindowController: NSMenuItemValidation {
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        switch menuItem.action {
+        guard let action = menuItem.action else { return true }
+        switch action {
+        case #selector(togglePlayer(_:)):
+            menuItem.title = detailViewModel.showsPlayer ? String(localized: "Hide Player") : String(localized: "Show Player")
+        case #selector(toggleWaveform(_:)), #selector(toggleSourceColumn(_:)):
+            menuItem.state = isCommandOn(action) ? .on : .off
+        default:
+            break
+        }
+        return isCommandEnabled(action)
+    }
+
+    /// Whether a toggle command is on: the menu's check mark, the action bar's pressed state.
+    func isCommandOn(_ action: Selector) -> Bool {
+        switch action {
+        case #selector(toggleWaveform(_:)): detailViewModel.isTimingModeOn
+        case #selector(toggleSourceColumn(_:)): editor.showsSourceColumn
+        default: false
+        }
+    }
+
+    /// One answer for the menu bar, the context menus and the action bar.
+    func isCommandEnabled(_ action: Selector) -> Bool {
+        let canPlay = editor.activeLine != nil && detailViewModel.showsPlayerArea
+        switch action {
         case #selector(insertLineBefore(_:)), #selector(insertLineAfter(_:)):
             return editor.isEditable
         case #selector(duplicateLines(_:)), #selector(deleteLines(_:)), #selector(splitLine(_:)),
-             #selector(setStartToPlayback(_:)), #selector(setEndToPlayback(_:)), #selector(shiftToPlayback(_:)),
              #selector(makeStartsContinuous(_:)), #selector(makeEndsContinuous(_:)):
             return editor.canEditSelection
-        case #selector(jumpToLineStart(_:)), #selector(jumpToLineEnd(_:)):
-            return editor.activeLine != nil && detailViewModel.showsPlayerArea
-        case #selector(showFindReplace(_:)), #selector(findNextSubtitle(_:)):
+        case #selector(setStartToPlayback(_:)), #selector(setEndToPlayback(_:)), #selector(shiftToPlayback(_:)):
+            return editor.canEditSelection && detailViewModel.showsPlayerArea
+        case #selector(splitLineAtPlayhead(_:)):
+            return editor.canSplitAtPlayback && detailViewModel.showsPlayerArea
+        case #selector(jumpToLineStart(_:)), #selector(jumpToLineEnd(_:)), #selector(playLine(_:)), #selector(playSelection(_:)),
+             #selector(playBeforeStart(_:)), #selector(playAfterStart(_:)), #selector(playBeforeEnd(_:)), #selector(playAfterEnd(_:)):
+            return canPlay
+        case #selector(playNextLine(_:)):
+            return canPlay && (editor.activeIndex.map { $0 + 1 < editor.lines.count } ?? false)
+        case #selector(togglePlayback(_:)):
+            return detailViewModel.showsPlayerArea
+        case #selector(selectNextLine(_:)), #selector(selectPreviousLine(_:)):
+            return editor.activeLine != nil
+        case #selector(showFindReplace(_:)), #selector(findNextSubtitle(_:)), #selector(showSelectLines(_:)):
             return !editor.lines.isEmpty
-        case #selector(joinLines(_:)):
+        case #selector(joinLines(_:)), #selector(joinLinesKeepingFirstText(_:)):
             return editor.canMerge
-        case #selector(shiftTimes(_:)):
+        case #selector(swapLines(_:)):
+            return editor.canSwap
+        case #selector(sortLinesByStart(_:)):
+            return editor.canSort
+        case #selector(shiftTimes(_:)), #selector(showTimingPostProcessor(_:)):
             return editor.isEditable && !editor.lines.isEmpty
-        case #selector(playLine(_:)):
-            return editor.activeLine != nil && detailViewModel.showsPlayerArea
+        case #selector(toggleWaveform(_:)):
+            return detailViewModel.canUseTimingMode
+        case #selector(toggleSourceColumn(_:)):
+            return editor.hasSources
+        case #selector(zoomInWaveform(_:)), #selector(zoomOutWaveform(_:)):
+            return detailViewModel.showsWaveform
+        case #selector(fitWaveformToLine(_:)):
+            return detailViewModel.showsWaveform && editor.activeLine != nil
         case #selector(retranscribeLines(_:)):
             return editor.canEditSelection && (detailViewModel.shownJobID.map(queueViewModel.canRetranscribe(jobID:)) ?? false)
         case #selector(retranslateLines(_:)):
@@ -414,9 +540,6 @@ extension MainWindowController: NSMenuItemValidation {
             return detailViewModel.subtitleMode == .edit
         case #selector(saveSubtitles(_:)):
             return detailViewModel.shownJobID.map(queueViewModel.unsavedJobIDs.contains) ?? false
-        case #selector(togglePlayer(_:)):
-            menuItem.title = detailViewModel.showsPlayer ? String(localized: "Hide Player") : String(localized: "Show Player")
-            return true
         case #selector(startQueue(_:)):
             return queueViewModel.canStart && !queueViewModel.isRunning
         case #selector(stopQueue(_:)):

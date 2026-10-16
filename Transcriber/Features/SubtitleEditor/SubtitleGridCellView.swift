@@ -7,6 +7,8 @@ final class SubtitleGridCellView: NSTableCellView {
         case number
         case time
         case text
+        /// The original next to a translation: dimmed, not editable.
+        case source
     }
 
     private let label = NSTextField(labelWithString: "")
@@ -58,8 +60,8 @@ final class SubtitleGridCellView: NSTableCellView {
         self.isOverlapping = isOverlapping
         label.stringValue = text
         label.alignment = alignment
-        label.toolTip = role == .text ? text : nil
-        label.font = role == .text
+        label.toolTip = role == .text || role == .source ? text : nil
+        label.font = role == .text || role == .source
             ? .systemFont(ofSize: NSFont.systemFontSize)
             : .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: isPlaying ? .semibold : .regular)
         // Aegisub: from 15 CPS the cell turns red, fully at 30.
@@ -81,7 +83,7 @@ final class SubtitleGridCellView: NSTableCellView {
         case _ where isOverlapping: .systemRed
         case .number where isPlaying: .controlAccentColor
         case .text: .labelColor
-        case .number, .time: .secondaryLabelColor
+        case .number, .time, .source: .secondaryLabelColor
         }
     }
 }

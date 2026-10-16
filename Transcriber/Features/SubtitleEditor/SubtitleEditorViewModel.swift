@@ -19,6 +19,8 @@ final class SubtitleEditorViewModel {
         /// 0 up to 15 CPS, rising to 1 at 30: how red the CPS cell is (Aegisub).
         let readingSpeedWarning: Double
         let text: String
+        /// The line before the language model changed it; empty if unknown.
+        let source: String
         let isPlaying: Bool
         /// Overlaps the active line in time (Aegisub shows it in red).
         let overlapsActiveLine: Bool
@@ -31,6 +33,12 @@ final class SubtitleEditorViewModel {
     private static let typingUndoWindow: TimeInterval = 30
 
     private(set) var lines: [TimedText] = []
+    /// The lines before the language model ran, for the Source column.
+    private(set) var originalLines: [TimedText] = []
+    /// Times being dragged on the waveform, shown before they are applied.
+    private(set) var timingPreview: [TimedText]?
+    /// The selection once the preview is applied (a shift may re-sort).
+    @ObservationIgnored private(set) var timingPreviewSelection: [Int] = []
     /// Sorted line indices.
     private(set) var selection: [Int] = []
     private(set) var isEditable = false
@@ -48,8 +56,40 @@ final class SubtitleEditorViewModel {
 
     @ObservationIgnored private var lastTyping: (index: Int, date: Date)?
 
+    /// The lines as shown: with a drag in progress applied.
+    var displayedLines: [TimedText] {
+        timingPreview ?? lines
+    }
+
+    /// Each line's original, when the language model changed the file.
+    var sources: [String?] {
+        SubtitleSources.originals(of: displayedLines, in: originalLines)
+    }
+
+    var hasSources: Bool {
+        !originalLines.isEmpty
+    }
+
+    /// The user's choice; the column only shows when there are sources.
+    private(set) var prefersSourceColumn = true
+
+    var showsSourceColumn: Bool {
+        prefersSourceColumn && hasSources
+    }
+
+    func setPrefersSourceColumn(_ prefers: Bool) {
+        prefersSourceColumn = prefers
+    }
+
+    var activeSource: String? {
+        guard hasSources, let index = activeIndex else { return nil }
+        return SubtitleSources.originals(of: [displayedLines[index]], in: originalLines).first ?? nil
+    }
+
     var rows: [Row] {
+        let lines = displayedLines
         let overlaps = activeIndex.map { SubtitleEditing.overlapping($0, in: lines) } ?? []
+        let sources = hasSources ? sources : Array(repeating: nil, count: lines.count)
         return lines.enumerated().map { index, line in
             let speed = SubtitleEditing.charactersPerSecond(line)
             let warning = speed.map { speed in
@@ -65,6 +105,7 @@ final class SubtitleEditorViewModel {
                 readingSpeedWarning: warning,
                 // The grid shows breaks as Aegisub does; the edit box has the real text.
                 text: line.text.replacingOccurrences(of: "\n", with: " ⏎ "),
+                source: sources[index]?.replacingOccurrences(of: "\n", with: " ⏎ ") ?? "",
                 isPlaying: index == playingIndex,
                 overlapsActiveLine: overlaps.contains(index)
             )
@@ -82,7 +123,7 @@ final class SubtitleEditorViewModel {
     }
 
     var activeLine: TimedText? {
-        activeIndex.map { lines[$0] }
+        activeIndex.map { displayedLines[$0] }
     }
 
     var activeDuration: String {
@@ -100,9 +141,11 @@ final class SubtitleEditorViewModel {
     // MARK: Loading and playback
 
     /// A different job: its lines, no selection, no undo history.
-    func load(_ newLines: [TimedText], isEditable: Bool) {
+    func load(_ newLines: [TimedText], originalLines newOriginals: [TimedText] = [], isEditable: Bool) {
         undoManager?.removeAllActions(withTarget: self)
         lines = newLines
+        originalLines = newOriginals
+        timingPreview = nil
         selection = []
         playingIndex = nil
         self.isEditable = isEditable
@@ -110,7 +153,10 @@ final class SubtitleEditorViewModel {
 
     /// The same job changed in the queue. A running job's lines follow it;
     /// once editable, the editor's own lines win (a snapshot may be stale).
-    func follow(_ newLines: [TimedText], isEditable editable: Bool) {
+    func follow(_ newLines: [TimedText], originalLines newOriginals: [TimedText] = [], isEditable editable: Bool) {
+        if newOriginals != originalLines {
+            originalLines = newOriginals
+        }
         if !isEditable, newLines != lines {
             lines = newLines
             selection = selection.filter(newLines.indices.contains)
@@ -229,7 +275,7 @@ final class SubtitleEditorViewModel {
         return changed
     }
 
-    private static func pattern(for query: String, options: SearchOptions) -> NSRegularExpression? {
+    static func pattern(for query: String, options: SearchOptions) -> NSRegularExpression? {
         guard !query.isEmpty else {
             return nil
         }
@@ -338,13 +384,20 @@ final class SubtitleEditorViewModel {
         apply(outcome, actionName: String(localized: "Change Times"), keepsSelection: true)
     }
 
-    private func apply(_ outcome: SubtitleEditing.Outcome, actionName: String, keepsSelection: Bool = false) {
+    func setTimingPreview(_ preview: [TimedText]?, selection newSelection: [Int]) {
+        timingPreview = preview
+        timingPreviewSelection = newSelection
+    }
+
+    /// For the editing extensions in other files.
+    func apply(_ outcome: SubtitleEditing.Outcome, actionName: String, keepsSelection: Bool = false) {
         replace(lines: outcome.lines, selection: keepsSelection ? selection : outcome.selection, actionName: actionName)
     }
 
     /// One undo step; undoing registers the redo the same way.
-    private func replace(lines newLines: [TimedText], selection newSelection: [Int], actionName: String) {
+    func replace(lines newLines: [TimedText], selection newSelection: [Int], actionName: String) {
         lastTyping = nil
+        timingPreview = nil
         let previousLines = lines
         let previousSelection = selection
         undoManager?.registerUndo(withTarget: self) { editor in

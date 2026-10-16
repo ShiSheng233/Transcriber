@@ -82,6 +82,7 @@ enum MainMenuBuilder {
             withTitle: String(localized: "Hide Player"), action: #selector(MainWindowController.togglePlayer(_:)), keyEquivalent: "p"
         )
         player.keyEquivalentModifierMask = [.command, .option]
+        SubtitleEditorMenu.add(SubtitleEditorMenu.viewItems, to: menu)
         return menu
     }
 
