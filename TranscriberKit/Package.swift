@@ -8,6 +8,7 @@ let package = Package(
     products: [
         .library(name: "TranscriberCore", targets: ["TranscriberCore"]),
         .library(name: "AudioFeatures", targets: ["AudioFeatures"]),
+        .library(name: "AudioOverview", targets: ["AudioOverview"]),
         .library(name: "JobQueue", targets: ["JobQueue"]),
         .library(name: "LLMTranslation", targets: ["LLMTranslation"]),
         .library(name: "MediaDecoding", targets: ["MediaDecoding"]),
@@ -27,6 +28,10 @@ let package = Package(
     targets: [
         .target(name: "TranscriberCore"),
         .target(name: "AudioFeatures"),
+        .target(
+            name: "AudioOverview",
+            dependencies: ["TranscriberCore", "MediaDecoding"]
+        ),
         .target(
             name: "JobQueue",
             dependencies: [
@@ -97,6 +102,10 @@ let package = Package(
         .testTarget(
             name: "TranscriberCoreTests",
             dependencies: ["TranscriberCore"]
+        ),
+        .testTarget(
+            name: "AudioOverviewTests",
+            dependencies: ["AudioOverview", "TranscriberCore"]
         ),
         .testTarget(
             name: "AudioFeaturesTests",
