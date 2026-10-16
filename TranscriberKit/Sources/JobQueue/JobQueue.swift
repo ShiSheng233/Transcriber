@@ -305,12 +305,10 @@ public actor JobQueue {
         }
     }
 
-    private func makeRefiner(for llm: LLMConfiguration) -> SubtitleRefiner {
-        SubtitleRefiner(
-            client: makeChatClient(llm.settings.baseURL, llm.apiKey),
-            configuration: SubtitleRefiner.Configuration(model: llm.settings.model),
-            cache: llmReplyCache
-        )
+    private func makeRefiner(for llm: LLMConfiguration, marksHallucinations: Bool = false) -> SubtitleRefiner {
+        var configuration = SubtitleRefiner.Configuration(model: llm.settings.model)
+        configuration.marksHallucinations = marksHallucinations
+        return SubtitleRefiner(client: makeChatClient(llm.settings.baseURL, llm.apiKey), configuration: configuration, cache: llmReplyCache)
     }
 
     /// Writes a finished job's current subtitles over the files it produced.
@@ -604,7 +602,15 @@ public actor JobQueue {
             ? .polishChinese
             : .translate(targetLanguage: llm.settings.targetLanguage)
         do {
-            return try await refine(segments, jobID: job.id, as: refinerJob, with: llm)
+            var lines = segments
+            var removesHallucinations = llm.settings.removesHallucinations
+            // Japanese is proofread in Japanese first, so the translation starts
+            // from what was said; polishing already corrects Chinese output.
+            if llm.settings.proofreadsTranscript, model.llmMode == .translate {
+                lines = try await refine(lines, jobID: job.id, as: .proofread, removesHallucinations: removesHallucinations, with: llm)
+                removesHallucinations = false
+            }
+            return try await refine(lines, jobID: job.id, as: refinerJob, removesHallucinations: removesHallucinations, with: llm)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -646,7 +652,9 @@ public actor JobQueue {
         let original = job.segments.isEmpty ? try SubtitleParser.parse(fileAt: job.sourceURL) : job.segments
         log(.info, job.id, "Read \(original.count) subtitles")
         update(job.id) { $0.segments = original }  // shown while translating
-        return try await refine(original, jobID: job.id, as: .translateSubtitles(targetLanguage: llm.settings.targetLanguage), with: llm)
+        return try await refine(
+            original, jobID: job.id, as: .translateSubtitles(targetLanguage: llm.settings.targetLanguage), removesHallucinations: false, with: llm
+        )
     }
 
     private func loadPipeline(_ model: RecognitionModel, for jobID: UUID, settings: EngineSettings) async throws -> TranscriptionPipeline {
@@ -698,14 +706,26 @@ public actor JobQueue {
 
     /// Runs the language model over `segments`; translations keep the
     /// original line underneath when the settings ask for bilingual subtitles.
-    private func refine(_ segments: [TimedText], jobID: UUID, as refinerJob: SubtitleRefiner.Job, with llm: LLMConfiguration) async throws -> [TimedText] {
-        let refiner = makeRefiner(for: llm)
+    /// With `removesHallucinations`, lines the model marks as not speech are
+    /// left out of the result.
+    private func refine(
+        _ segments: [TimedText],
+        jobID: UUID,
+        as refinerJob: SubtitleRefiner.Job,
+        removesHallucinations: Bool,
+        with llm: LLMConfiguration
+    ) async throws -> [TimedText] {
+        let refiner = makeRefiner(for: llm, marksHallucinations: removesHallucinations)
         update(jobID) {
             $0.status = .refining(completedBatches: 0, totalBatches: 1)
             $0.segments = segments  // finished batches replace their lines as they arrive
             $0.linesBeforeLanguageModel = segments
         }
-        let action = if case .polishChinese = refinerJob { "Polishing" } else { "Translating" }
+        let action = switch refinerJob {
+        case .proofread: "Proofreading"
+        case .polishChinese: "Polishing"
+        case .translate, .translateSubtitles: "Translating"
+        }
         log(.info, jobID, "\(action) \(segments.count) subtitles with \(llm.settings.model)…")
         let start = ContinuousClock.now
         let result = try await withOrderedProgress { (queue, batch: SubtitleRefiner.BatchProgress) in
@@ -728,13 +748,24 @@ public actor JobQueue {
             update(jobID) { $0.warning = warning }
             log(.warning, jobID, warning)
         }
-        let refined = result.segments
-        switch refinerJob {
-        case .translate, .translateSubtitles:
-            return llm.settings.keepsOriginalLine ? refined.withOriginalLines(from: segments) : refined
-        case .polishChinese:
+        if case .proofread = refinerJob {
+            let changed = result.answeredLines.filter { segments[$0.key].text != $0.value }.count
+            log(.info, jobID, "\(changed) line(s) corrected")
+        }
+        var refined = result.segments
+        if case .translate = refinerJob, llm.settings.keepsOriginalLine {
+            refined = refined.withOriginalLines(from: segments)
+        } else if case .translateSubtitles = refinerJob, llm.settings.keepsOriginalLine {
+            refined = refined.withOriginalLines(from: segments)
+        }
+        guard !result.droppedLines.isEmpty else {
             return refined
         }
+        for index in result.droppedLines.sorted() where segments.indices.contains(index) {
+            log(.detail, jobID, "Removed as not speech: \(ActivityFormatting.clock(segments[index].start.seconds)) “\(segments[index].text)”")
+        }
+        log(.info, jobID, "\(result.droppedLines.count) line(s) removed as not speech")
+        return refined.enumerated().filter { !result.droppedLines.contains($0.offset) }.map(\.element)
     }
 
     private func record(_ progress: TranscriptionPipeline.Progress, for jobID: UUID) {

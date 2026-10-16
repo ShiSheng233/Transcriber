@@ -14,8 +14,14 @@ import TranscriberCore
 /// and is counted in the result; a rejected key, no credits, or every batch
 /// failing ends the whole run. Complete replies are kept in an optional
 /// cache, so running the same lines again reuses them.
+///
+/// Lines the speech model was unsure of are marked doubtful in the request.
+/// With `marksHallucinations`, the model may also mark lines that cannot be
+/// speech; they are reported in `droppedLines` for the caller to remove.
 public struct SubtitleRefiner: Sendable {
     public enum Job: Sendable {
+        /// Fix what the speech model misheard, in the subtitles' own language.
+        case proofread
         case polishChinese
         case translate(targetLanguage: String)
         /// Existing subtitles in any language, e.g. imported from a file.
@@ -37,6 +43,8 @@ public struct SubtitleRefiner: Sendable {
         public var maximumBatchesPerScene = 5
         /// Summaries of earlier batches in the scene sent with each request.
         public var earlierBatchSummaryCount = 5
+        /// Lets the model mark lines that cannot be speech, to be removed.
+        public var marksHallucinations = false
 
         public init(model: String) {
             self.model = model
@@ -57,6 +65,9 @@ public struct SubtitleRefiner: Sendable {
         public let segments: [TimedText]
         /// The new text of every line the model answered, by index.
         public let answeredLines: [Int: String]
+        /// Lines the model marked as not speech (with `marksHallucinations`);
+        /// they keep their text in `segments`.
+        public let droppedLines: Set<Int>
         /// Batches that kept their original text because the request failed.
         public let failedBatchCount: Int
         public let batchCount: Int
@@ -72,6 +83,8 @@ public struct SubtitleRefiner: Sendable {
         public let total: Int
         /// New text by line index; empty for a batch that failed.
         public let lines: [Int: String]
+        /// Lines marked as not speech.
+        public let droppedLines: Set<Int>
     }
 
     /// - Parameters:
@@ -97,20 +110,26 @@ public struct SubtitleRefiner: Sendable {
             maximumBatchesPerScene: configuration.maximumBatchesPerScene
         )
         guard plan.batchCount > 0 else {
-            return Result(segments: segments, answeredLines: [:], failedBatchCount: 0, batchCount: 0, reusedBatchCount: 0, firstFailure: nil)
+            return Result(
+                segments: segments, answeredLines: [:], droppedLines: [], failedBatchCount: 0, batchCount: 0, reusedBatchCount: 0, firstFailure: nil
+            )
         }
         let promptJob: SubtitlePrompt.Job = switch job {
+        case .proofread: .proofread
         case .polishChinese: .polishChinese
         case .translate(let language): .translate(targetLanguage: language)
         case .translateSubtitles(let language): .translateSubtitles(targetLanguage: language)
         }
-        let system = ChatMessage(role: .system, content: SubtitlePrompt.systemMessage(for: promptJob, glossary: glossary))
+        let system = ChatMessage(role: .system, content: SubtitlePrompt.systemMessage(
+            for: promptJob, glossary: glossary, marksHallucinations: configuration.marksHallucinations
+        ))
         let context = SceneContext(
             segments: segments, system: system, total: plan.batchCount,
             reusesCachedReplies: reusesCachedReplies, progress: progress
         )
 
         var answeredLines: [Int: String] = [:]
+        var droppedLines = Set<Int>()
         var failures: [any Error] = []
         var reusedCount = 0
         try await withThrowingTaskGroup(of: [BatchOutcome].self) { group in
@@ -126,8 +145,9 @@ public struct SubtitleRefiner: Sendable {
             while let outcomes = try await group.next() {
                 for outcome in outcomes {
                     switch outcome.result {
-                    case .success(let lines):
-                        answeredLines.merge(lines) { _, new in new }
+                    case .success(let answer):
+                        answeredLines.merge(answer.lines) { _, new in new }
+                        droppedLines.formUnion(answer.dropped)
                         reusedCount += outcome.wasCached ? 1 : 0
                     case .failure(let error):
                         failures.append(error)
@@ -150,6 +170,7 @@ public struct SubtitleRefiner: Sendable {
         return Result(
             segments: refined,
             answeredLines: answeredLines,
+            droppedLines: droppedLines,
             failedBatchCount: failures.count,
             batchCount: plan.batchCount,
             reusedBatchCount: reusedCount,
@@ -180,18 +201,24 @@ public struct SubtitleRefiner: Sendable {
             self.progress = progress
         }
 
-        func reportBatch(lines: [Int: String]) {
+        func reportBatch(lines: [Int: String], dropped: Set<Int>) {
             let completed = completedCount.withLock { count in
                 count += 1
                 return count
             }
-            progress(BatchProgress(completed: completed, total: total, lines: lines))
+            progress(BatchProgress(completed: completed, total: total, lines: lines, droppedLines: dropped))
         }
     }
 
-    private struct BatchOutcome: Sendable {
+    private struct BatchAnswer: Sendable {
         /// New text by line index.
-        let result: Swift.Result<[Int: String], any Error>
+        let lines: [Int: String]
+        /// Lines marked as not speech.
+        let dropped: Set<Int>
+    }
+
+    private struct BatchOutcome: Sendable {
+        let result: Swift.Result<BatchAnswer, any Error>
         let wasCached: Bool
     }
 
@@ -207,7 +234,7 @@ public struct SubtitleRefiner: Sendable {
                 continue
             }
             let request = BatchRequest(
-                lines: batch.map { (id: $0, text: segments[$0].text) },
+                lines: batch.map { SubtitlePrompt.Line(id: $0, text: segments[$0].text, isDoubtful: segments[$0].confidence?.isDoubtful ?? false) },
                 contextBefore: segments[max(0, first - configuration.contextLineCount)..<first].map(\.text),
                 contextAfter: segments[(last + 1)..<min(last + 1 + configuration.contextLineCount, segments.count)].map(\.text),
                 sceneSoFar: sceneSummary,
@@ -215,8 +242,9 @@ public struct SubtitleRefiner: Sendable {
             )
             do {
                 let (reply, wasCached) = try await requestLines(request, system: context.system, reusesCachedReplies: context.reusesCachedReplies)
+                let dropped = configuration.marksHallucinations ? reply.droppedIDs : []
                 var lines: [Int: String] = [:]
-                for (index, text) in reply.textByID where !text.pythonStripped.isEmpty {
+                for (index, text) in reply.textByID where !text.pythonStripped.isEmpty && !dropped.contains(index) {
                     lines[index] = text
                 }
                 if let summary = reply.batchSummary?.pythonStripped, !summary.isEmpty {
@@ -225,13 +253,13 @@ public struct SubtitleRefiner: Sendable {
                 if let summary = reply.sceneSummary?.pythonStripped, !summary.isEmpty {
                     sceneSummary = summary
                 }
-                outcomes.append(BatchOutcome(result: .success(lines), wasCached: wasCached))
-                context.reportBatch(lines: lines)
+                outcomes.append(BatchOutcome(result: .success(BatchAnswer(lines: lines, dropped: dropped)), wasCached: wasCached))
+                context.reportBatch(lines: lines, dropped: dropped)
             } catch let error where Self.endsTheRun(error) {
                 throw error
             } catch {
                 outcomes.append(BatchOutcome(result: .failure(error), wasCached: false))
-                context.reportBatch(lines: [:])
+                context.reportBatch(lines: [:], dropped: [])
             }
         }
         return outcomes
@@ -246,7 +274,7 @@ public struct SubtitleRefiner: Sendable {
     }
 
     private struct BatchRequest {
-        let lines: [(id: Int, text: String)]
+        let lines: [SubtitlePrompt.Line]
         let contextBefore: [String]
         let contextAfter: [String]
         let sceneSoFar: String?
@@ -287,7 +315,7 @@ public struct SubtitleRefiner: Sendable {
                 model: configuration.model,
                 messages: [system, user],
                 schemaName: SubtitlePrompt.schemaName,
-                schema: SubtitlePrompt.schema,
+                schema: SubtitlePrompt.schema(marksHallucinations: configuration.marksHallucinations),
                 temperature: configuration.temperature
             )
             guard let reply = Self.decode(data)?.limited(to: expectedIDs) else {

@@ -51,6 +51,12 @@ struct TranscribeCommand: AsyncParsableCommand {
     @Option(help: "Target language when the LLM translates.")
     var llmTargetLanguage: String = "简体中文"
 
+    @Flag(help: "Before translating Japanese, proofread it with the LLM.")
+    var llmProofread = false
+
+    @Flag(help: "Let the first LLM pass remove lines that cannot be speech.")
+    var llmRemoveHallucinations = false
+
     @Flag(help: "Join audio frames end to end like the original, instead of filling timestamp holes.")
     var joinAudioFrames = false
 
@@ -178,8 +184,20 @@ struct TranscribeCommand: AsyncParsableCommand {
     }
 
     private func refineWithLLM(_ segments: [TimedText], recognitionModel: RecognitionModel, model: String) async throws -> [TimedText] {
-        let refiner = SubtitleRefiner(client: try llmEndpoint.makeClient(), configuration: .init(model: model))
+        var lines = segments
+        var removesHallucinations = llmRemoveHallucinations
+        if llmProofread, recognitionModel.llmMode == .translate {
+            lines = try await refineWithLLM(lines, job: .proofread, model: model, removesHallucinations: removesHallucinations)
+            removesHallucinations = false
+        }
         let job: SubtitleRefiner.Job = recognitionModel.llmMode == .polish ? .polishChinese : .translate(targetLanguage: llmTargetLanguage)
+        return try await refineWithLLM(lines, job: job, model: model, removesHallucinations: removesHallucinations)
+    }
+
+    private func refineWithLLM(_ segments: [TimedText], job: SubtitleRefiner.Job, model: String, removesHallucinations: Bool) async throws -> [TimedText] {
+        var configuration = SubtitleRefiner.Configuration(model: model)
+        configuration.marksHallucinations = removesHallucinations
+        let refiner = SubtitleRefiner(client: try llmEndpoint.makeClient(), configuration: configuration)
         let start = ContinuousClock.now
         let result = try await refiner.refine(segments, job: job) { batch in
             print("  LLM batch \(batch.completed)/\(batch.total)")
@@ -187,8 +205,10 @@ struct TranscribeCommand: AsyncParsableCommand {
         if result.failedBatchCount > 0 {
             print("  warning: \(result.failedBatchCount) of \(result.batchCount) batches failed: \(result.firstFailure ?? "")")
         }
-        let refined = result.segments
+        for index in result.droppedLines.sorted() {
+            print("  removed as not speech: \(segments[index].text)")
+        }
         print("  LLM (\(model)) finished in \(ContinuousClock.now - start)")
-        return refined
+        return result.segments.enumerated().filter { !result.droppedLines.contains($0.offset) }.map(\.element)
     }
 }

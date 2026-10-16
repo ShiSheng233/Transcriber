@@ -16,14 +16,31 @@ public struct LLMSettings: Hashable, Sendable, Codable {
     public var glossary: String
     /// Translation only: keep the original line under the translation.
     public var keepsOriginalLine: Bool
+    /// Before translating Japanese, a pass that fixes what the speech model
+    /// misheard, in Japanese.
+    public var proofreadsTranscript: Bool
+    /// The first LLM pass may remove lines that cannot be speech (video
+    /// outros, subtitle credits, loops, text unrelated to the scene).
+    public var removesHallucinations: Bool
 
-    public init(isEnabled: Bool, baseURL: URL, model: String, targetLanguage: String, glossary: String, keepsOriginalLine: Bool) {
+    public init(
+        isEnabled: Bool,
+        baseURL: URL,
+        model: String,
+        targetLanguage: String,
+        glossary: String,
+        keepsOriginalLine: Bool,
+        proofreadsTranscript: Bool = false,
+        removesHallucinations: Bool = false
+    ) {
         self.isEnabled = isEnabled
         self.baseURL = baseURL
         self.model = model
         self.targetLanguage = targetLanguage
         self.glossary = glossary
         self.keepsOriginalLine = keepsOriginalLine
+        self.proofreadsTranscript = proofreadsTranscript
+        self.removesHallucinations = removesHallucinations
     }
 
     public static let defaults = LLMSettings(
@@ -57,5 +74,7 @@ extension LLMSettings {
         targetLanguage = try container.decodeIfPresent(String.self, forKey: .targetLanguage) ?? defaults.targetLanguage
         glossary = try container.decodeIfPresent(String.self, forKey: .glossary) ?? defaults.glossary
         keepsOriginalLine = try container.decodeIfPresent(Bool.self, forKey: .keepsOriginalLine) ?? defaults.keepsOriginalLine
+        proofreadsTranscript = try container.decodeIfPresent(Bool.self, forKey: .proofreadsTranscript) ?? defaults.proofreadsTranscript
+        removesHallucinations = try container.decodeIfPresent(Bool.self, forKey: .removesHallucinations) ?? defaults.removesHallucinations
     }
 }
