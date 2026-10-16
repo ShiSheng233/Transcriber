@@ -273,7 +273,7 @@ public actor JobQueue {
             originalByTimes[TimeRange(line)] = line.text
         }
         let sources = lines.map { line in
-            TimedText(start: line.start, end: line.end, text: originalByTimes[TimeRange(line)] ?? line.text)
+            TimedText(start: line.start, end: line.end, text: originalByTimes[TimeRange(line)] ?? line.text, confidence: line.confidence)
         }
         let chosen = lineIndices.filter(lines.indices.contains)
         log(.info, jobID, "Sending \(chosen.count) line(s) to \(llm.settings.model) again…")

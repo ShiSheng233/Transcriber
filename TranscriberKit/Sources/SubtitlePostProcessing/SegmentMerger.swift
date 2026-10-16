@@ -22,7 +22,9 @@ public enum SegmentMerger {
                 merged.append(segment)
                 continue
             }
-            merged[merged.count - 1] = TimedText(start: last.start, end: max(last.end, segment.end), text: keptText)
+            merged[merged.count - 1] = TimedText(
+                start: last.start, end: max(last.end, segment.end), text: keptText, confidence: last.confidence.combined(with: segment.confidence)
+            )
         }
         return merged
     }

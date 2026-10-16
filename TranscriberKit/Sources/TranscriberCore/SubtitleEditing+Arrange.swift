@@ -60,8 +60,8 @@ extension SubtitleEditing {
             second = String(characters[offset...]).trimmingCharacters(in: \.isWhitespace, fromEnd: false)
         }
         var result = lines
-        result[index] = TimedText(start: line.start, end: time, text: first)
-        result.insert(TimedText(start: time, end: line.end, text: second), at: index + 1)
+        result[index] = TimedText(start: line.start, end: time, text: first, confidence: line.confidence)
+        result.insert(TimedText(start: time, end: line.end, text: second, confidence: line.confidence), at: index + 1)
         return Outcome(lines: result, selection: [index + 1])
     }
 }

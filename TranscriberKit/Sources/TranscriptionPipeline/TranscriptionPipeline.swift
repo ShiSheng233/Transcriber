@@ -149,7 +149,7 @@ public struct TranscriptionPipeline: Sendable {
             guard middle >= start, middle < end else {
                 return nil
             }
-            return TimedText(start: max(segmentStart, start), end: min(segmentEnd, end), text: segment.text)
+            return TimedText(start: max(segmentStart, start), end: min(segmentEnd, end), text: segment.text, confidence: segment.confidence)
         }
     }
 

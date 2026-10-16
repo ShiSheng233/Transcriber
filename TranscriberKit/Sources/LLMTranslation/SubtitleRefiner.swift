@@ -143,7 +143,9 @@ public struct SubtitleRefiner: Sendable {
         }
 
         let refined = segments.enumerated().map { index, segment in
-            TimedText(start: segment.start, end: segment.end, text: answeredLines[index] ?? segment.text)
+            var refined = segment
+            refined.text = answeredLines[index] ?? segment.text
+            return refined
         }
         return Result(
             segments: refined,
@@ -318,7 +320,9 @@ extension Array where Element == TimedText {
     /// Bilingual lines: each translation followed by its original on the next line.
     public func withOriginalLines(from originals: [TimedText]) -> [TimedText] {
         zip(self, originals).map { translated, original in
-            TimedText(start: translated.start, end: translated.end, text: "\(translated.text)\n\(original.text)")
+            var bilingual = translated
+            bilingual.text = "\(translated.text)\n\(original.text)"
+            return bilingual
         }
     }
 }

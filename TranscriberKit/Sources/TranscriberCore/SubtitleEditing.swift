@@ -107,7 +107,8 @@ public enum SubtitleEditing {
         let merged = TimedText(
             start: parts.map(\.start).min() ?? parts[0].start,
             end: parts.map(\.end).max() ?? parts[0].end,
-            text: text
+            text: text,
+            confidence: parts.reduce(nil as RecognitionConfidence?) { $0.combined(with: $1.confidence) }
         )
         var result = lines
         for index in chosen.reversed() {
@@ -133,8 +134,8 @@ public enum SubtitleEditing {
         let duration = line.end - line.start
         let middle = line.start + AudioTime(samples: Int((Double(duration.samples) * fraction).rounded()))
         var result = lines
-        result[index] = TimedText(start: line.start, end: middle, text: before)
-        result.insert(TimedText(start: middle, end: line.end, text: after), at: index + 1)
+        result[index] = TimedText(start: line.start, end: middle, text: before, confidence: line.confidence)
+        result.insert(TimedText(start: middle, end: line.end, text: after, confidence: line.confidence), at: index + 1)
         return Outcome(lines: result, selection: [index + 1])
     }
 
@@ -148,7 +149,10 @@ public enum SubtitleEditing {
             }
             let duration = line.end.milliseconds - line.start.milliseconds
             let start = max(line.start.milliseconds + offsetMilliseconds, 0)
-            return (TimedText(start: AudioTime(milliseconds: start), end: AudioTime(milliseconds: start + duration), text: line.text), true)
+            var moved = line
+            moved.start = AudioTime(milliseconds: start)
+            moved.end = AudioTime(milliseconds: start + duration)
+            return (moved, true)
         }
         let sorted = moved.enumerated().sorted { ($0.element.line.start, $0.offset) < ($1.element.line.start, $1.offset) }
         return Outcome(
@@ -186,6 +190,8 @@ public enum SubtitleEditing {
         }
         var result = lines
         result[index].text = text
+        // Checked by a person now: no longer the model's guess.
+        result[index].confidence = nil
         return Outcome(lines: result, selection: [index])
     }
 

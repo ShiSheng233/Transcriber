@@ -57,6 +57,13 @@ struct HallucinationPhraseFilterTests {
         #expect(HallucinationPhraseFilter.filtered(lines, audioDuration: Self.tenMinutes) == lines)
     }
 
+    @Test func dropsClosingTheModelThoughtWasSilence() {
+        var closing = Self.line(300, 302, "ありがとうございました")
+        closing.confidence = RecognitionConfidence(averageLogProbability: -0.8, noSpeechProbability: 0.7, compressionRatio: 1.2, isDoubtful: false)
+        let lines = [Self.line(299, 299.5, "ねえ"), closing, Self.line(302.2, 303, "うん")]
+        #expect(HallucinationPhraseFilter.filtered(lines, audioDuration: Self.tenMinutes).map(\.text) == ["ねえ", "うん"])
+    }
+
     @Test func keepsClosingAloneMidway() {
         let lines = [Self.line(100, 101, "ねえ"), Self.line(300, 302, "ありがとうございました"), Self.line(400, 401, "うん")]
         #expect(HallucinationPhraseFilter.filtered(lines, audioDuration: Self.tenMinutes) == lines)

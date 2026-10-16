@@ -7,8 +7,9 @@ import TranscriberCore
 /// - Credit and outro phrases ("チャンネル登録よろしくお願いします",
 ///   "字幕由…提供") are never dialogue: a line made only of them goes.
 /// - Polite closings ("ありがとうございました", "谢谢观看") are often real
-///   speech, so they go only when the line stands alone near the start or
-///   end of the audio, where Whisper fills silence with an outro.
+///   speech, so they go only with more evidence: the line stands alone near
+///   the start or end of the audio, where Whisper fills silence with an
+///   outro, or the model itself thought the window was probably silence.
 ///
 /// Lines are compared after NFKC, lowercasing, and removing spaces and
 /// punctuation, so "ご視聴、ありがとうございました！" matches.
@@ -40,6 +41,8 @@ public enum HallucinationPhraseFilter {
     static let isolationGap = AudioTime(seconds: 2)
     /// How close to either end of the audio a closing must be.
     static let edgeWindow = AudioTime(seconds: 60)
+    /// A closing in a window the model rated this likely to be silence goes too.
+    static let likelySilence = 0.5
 
     public static func filtered(_ segments: [TimedText], audioDuration: AudioTime) -> [TimedText] {
         segments.indices.compactMap { index in
@@ -51,8 +54,9 @@ public enum HallucinationPhraseFilter {
             if isCovered(normalized, by: creditPatterns) {
                 return nil
             }
+            let soundsSilent = (segment.confidence?.noSpeechProbability ?? 0) > likelySilence
             if isCovered(normalized, by: closingPatterns + creditPatterns),
-               isAloneNearEdge(at: index, in: segments, audioDuration: audioDuration) {
+               soundsSilent || isAloneNearEdge(at: index, in: segments, audioDuration: audioDuration) {
                 return nil
             }
             return segment

@@ -34,10 +34,16 @@ struct ChunkTranscriber: Sendable {
             decoded.removeAll { $0.isRepetitionLoop(decodingSettings) }
         }
 
+        let decodingSettings = segmentGenerator.decoder.windowDecoder.settings
         return decoded.compactMap { segment in
             let start = timeline.originalTime(segment.start, isEnd: false)
             let end = timeline.originalTime(segment.end, isEnd: true)
             return collected(start: start, end: end, text: segment.text, in: chunk)
+                .map { line in
+                    var line = line
+                    line.confidence = segment.confidence(settings: decodingSettings)
+                    return line
+                }
         }
     }
 

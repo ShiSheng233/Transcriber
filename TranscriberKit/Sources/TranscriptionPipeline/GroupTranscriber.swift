@@ -25,6 +25,11 @@ struct GroupTranscriber: Sendable {
         if dropsRepetitionLoops, decoded.isRepetitionLoop(segmentGenerator.decoder.windowDecoder.settings) {
             return []
         }
-        return [TimedText(start: AudioTime(seconds: group.startSeconds), end: AudioTime(seconds: group.endSeconds), text: decoded.text)]
+        return [TimedText(
+            start: AudioTime(seconds: group.startSeconds),
+            end: AudioTime(seconds: group.endSeconds),
+            text: decoded.text,
+            confidence: decoded.confidence(settings: segmentGenerator.decoder.windowDecoder.settings)
+        )]
     }
 }

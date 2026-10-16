@@ -20,7 +20,8 @@ public enum RepeatedLineMerger {
                 runEnd += 1
             }
             if runEnd - index >= minimumRunLength {
-                merged.append(TimedText(start: first.start, end: segments[runEnd - 1].end, text: first.text))
+                let confidence = segments[index..<runEnd].reduce(nil as RecognitionConfidence?) { $0.combined(with: $1.confidence) }
+                merged.append(TimedText(start: first.start, end: segments[runEnd - 1].end, text: first.text, confidence: confidence))
                 index = runEnd
             } else {
                 merged.append(first)

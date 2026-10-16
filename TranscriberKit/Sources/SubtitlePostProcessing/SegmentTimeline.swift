@@ -12,7 +12,7 @@ public enum SegmentTimeline {
             guard end > start else {
                 continue
             }
-            normalized.append(TimedText(start: start, end: end, text: segment.text))
+            normalized.append(TimedText(start: start, end: end, text: segment.text, confidence: segment.confidence))
         }
         return normalized
     }
