@@ -4,73 +4,151 @@ import TranscriberCore
 
 /// The editor's ViewModel without any view: built from the app's sources
 /// that do not import AppKit (the test target never launches the app).
+/// Text and line commands, and their undo steps.
 struct SubtitleEditorViewModelTests {
-    private static func line(_ start: Double, _ text: String) -> TimedText {
-        TimedText(start: AudioTime(seconds: start), end: AudioTime(seconds: start + 1), text: text)
-    }
+    private let undoManager = UndoManager()
 
     @Test func loadsLines() {
         let editor = SubtitleEditorViewModel()
-        editor.load([TimedText(start: .zero, end: AudioTime(seconds: 1), text: "a")], originalLines: [], isEditable: true)
+        editor.load([TestLines.line(0, 1_000, "a")], originalLines: [], isEditable: true)
         #expect(editor.rows.count == 1)
     }
 
-    @Test func proofreadingIsOneUndoStepAndSkipsLinesChangedMeanwhile() {
-        let editor = SubtitleEditorViewModel()
-        let undoManager = UndoManager()
-        undoManager.groupsByEvent = false
-        editor.undoManager = undoManager
-        let sent = [Self.line(0, "ゆいちゃん"), Self.line(2, "おはよう"), Self.line(4, "またね")]
-        editor.load(sent, isEditable: true)
-        editor.select([2])
-        // Without an event loop, each step is grouped by hand.
-        func step(_ change: () -> Void) {
-            undoManager.beginUndoGrouping()
-            change()
-            undoManager.endUndoGrouping()
-        }
-        step { editor.setStart("0:00:04.50") }  // retimed while the request ran
-
-        var corrected = sent
-        corrected[0].text = "結衣ちゃん"
-        corrected[2].text = "又ね"
-        step { editor.applyProofreading(corrected, sentLines: sent) }
-
-        #expect(editor.lines.map(\.text) == ["結衣ちゃん", "おはよう", "またね"])
-        #expect(undoManager.undoActionName == "Proofread")
+    @Test func typingIntoOneLineIsOneUndoStep() {
+        let editor = TestLines.editor(undoManager: undoManager)
+        editor.select([0])
+        undoManager.step { editor.setText("o") }
+        undoManager.step { editor.setText("on") }
+        undoManager.step { editor.setText("one!") }
+        #expect(editor.lines[0].text == "one!")
         undoManager.undo()
-        #expect(editor.lines[0].text == "ゆいちゃん")
+        #expect(editor.lines[0].text == "one")
+        #expect(!undoManager.canUndo)
     }
 
-    @Test func unifiesTheChosenSpellingsAsOneUndoStep() throws {
-        let editor = SubtitleEditorViewModel()
-        let undoManager = UndoManager()
-        undoManager.groupsByEvent = false
-        editor.undoManager = undoManager
-        let original = [Self.line(0, "ナナミ、来て"), Self.line(2, "ななみ、待って"), Self.line(4, "ﾅﾅﾐちゃん"), Self.line(6, "おはよう")]
-        editor.load(original, isEditable: true)
+    @Test func typingInAnotherLineStartsAnotherUndoStep() {
+        let editor = TestLines.editor(undoManager: undoManager)
+        editor.select([0])
+        undoManager.step { editor.setText("first") }
+        editor.select([1])
+        undoManager.step { editor.setText("second") }
+        undoManager.undo()
+        #expect(editor.lines.map(\.text) == ["first", "two", "three"])
+    }
+
+    @Test func editedTextIsNoLongerDoubtfulAndIsReported() {
+        let editor = TestLines.editor([TestLines.line(0, 1_000, "guess", isDoubtful: true)])
         var reported: [TimedText] = []
         editor.onChange = { reported = $0 }
-
-        let group = try #require(editor.termVariantGroups(glossaryTerms: []).first)
-        #expect(group.suggestedSpelling == "ナナミ")
-        undoManager.beginUndoGrouping()
-        let changed = editor.unifySpellings([group.key: group.suggestedSpelling])
-        undoManager.endUndoGrouping()
-
-        #expect(changed == 2)
-        #expect(editor.lines.map(\.text) == ["ナナミ、来て", "ナナミ、待って", "ナナミちゃん", "おはよう"])
-        #expect(reported == editor.lines)
-        #expect(editor.termVariantGroups(glossaryTerms: []).isEmpty)
-        #expect(undoManager.undoActionName == "Unify Spellings")
-        undoManager.undo()
-        #expect(editor.lines == original)
+        #expect(editor.rows[0].isDoubtful)
+        editor.select([0])
+        editor.setText("checked")
+        #expect(!editor.rows[0].isDoubtful)
+        #expect(editor.lines[0].confidence == nil)
+        #expect(reported.map(\.text) == ["checked"])
     }
 
-    @Test func aGlossaryTermKeepsTheGlossarySpelling() {
+    @Test func nothingChangesWhileNotEditable() {
         let editor = SubtitleEditorViewModel()
-        editor.load([Self.line(0, "ｱﾘｽだよ")], isEditable: true)
-        let groups = editor.termVariantGroups(glossaryTerms: ["アリス", "爱丽丝"])
-        #expect(groups.map(\.suggestedSpelling) == ["アリス"])
+        editor.load(TestLines.three, isEditable: false)
+        editor.select([0])
+        editor.setText("changed")
+        editor.insertAfter()
+        editor.delete()
+        #expect(editor.lines == TestLines.three)
+        #expect(!editor.canEditSelection)
+    }
+
+    @Test func deleteUndoesAndRedoesWithItsSelection() {
+        let editor = TestLines.editor(undoManager: undoManager)
+        editor.select([1])
+        undoManager.step { editor.delete() }
+        #expect(editor.lines.map(\.text) == ["one", "three"])
+        #expect(editor.selection == [1])
+        undoManager.undo()
+        #expect(editor.lines == TestLines.three)
+        #expect(editor.selection == [1])
+        undoManager.redo()
+        #expect(editor.lines.map(\.text) == ["one", "three"])
+    }
+
+    @Test func insertAfterStartsAtTheLineEndAndStopsAtTheNextLine() {
+        let editor = TestLines.editor()
+        editor.select([0])
+        editor.insertAfter()
+        #expect(editor.lines.count == 4)
+        #expect(editor.selection == [1])
+        #expect(editor.lines[1] == TestLines.line(1_000, 2_000, ""))
+    }
+
+    @Test func returnOnTheLastLineMakesANewOne() {
+        let editor = TestLines.editor()
+        editor.select([1])
+        editor.advance()
+        #expect(editor.selection == [2])
+        editor.advance()
+        #expect(editor.lines.count == 4)
+        #expect(editor.selection == [3])
+        #expect(editor.lines[3].start == AudioTime(milliseconds: 5_000))
+    }
+
+    @Test func splitAtTheCursorDividesTheTimeByTheText() {
+        let editor = TestLines.editor([TestLines.line(0, 1_000, "abcd")])
+        editor.select([0])
+        editor.split(atCharacter: 1)
+        #expect(editor.lines == [TestLines.line(0, 250, "a"), TestLines.line(250, 1_000, "bcd")])
+        #expect(editor.selection == [1])
+    }
+
+    @Test func joinSpansTheLinesAndJoinsTheirText() {
+        let editor = TestLines.editor()
+        editor.select([0])
+        #expect(!editor.canMerge)
+        editor.select([0, 1])
+        editor.merge()
+        #expect(editor.lines.map(\.text) == ["one two", "three"])
+        #expect(editor.lines[0].end == AudioTime(milliseconds: 3_000))
+        #expect(editor.selection == [0])
+    }
+
+    @Test func joinKeepingFirstTextDropsTheOthers() {
+        let editor = TestLines.editor()
+        editor.select([1, 2])
+        editor.mergeKeepingFirstText()
+        #expect(editor.lines.map(\.text) == ["one", "two"])
+        #expect(editor.lines[1].end == AudioTime(milliseconds: 5_000))
+    }
+
+    @Test func swapExchangesTextsOfExactlyTwoLines() {
+        let editor = TestLines.editor()
+        editor.select([0, 1, 2])
+        #expect(!editor.canSwap)
+        editor.select([0, 2])
+        editor.swapTexts()
+        #expect(editor.lines.map(\.text) == ["three", "two", "one"])
+        #expect(editor.lines.map(\.start) == TestLines.three.map(\.start))
+    }
+
+    @Test func sortKeepsTheSameLinesSelected() {
+        let editor = TestLines.editor([TestLines.line(4_000, 5_000, "late"), TestLines.line(0, 1_000, "early")])
+        editor.select([0])
+        #expect(editor.canSort)
+        editor.sortByStart()
+        #expect(editor.lines.map(\.text) == ["early", "late"])
+        #expect(editor.activeLine?.text == "late")
+        #expect(!editor.canSort)
+    }
+
+    @Test func timeFieldsAcceptOnlyTimes() {
+        let editor = TestLines.editor()
+        editor.select([1])
+        #expect(!editor.setStart("soon"))
+        #expect(editor.lines == TestLines.three)
+        #expect(editor.setStart("0:00:01.50"))
+        #expect(editor.lines[1].start == AudioTime(milliseconds: 1_500))
+        // An end before the start takes the start along.
+        #expect(editor.setEnd("1"))
+        #expect(editor.lines[1].start == AudioTime(milliseconds: 1_000))
+        #expect(editor.lines[1].end == AudioTime(milliseconds: 1_000))
     }
 }
