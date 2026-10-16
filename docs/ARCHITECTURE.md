@@ -189,6 +189,8 @@ whisper.cpp 以 `WHISPER_COREML=ON` + `WHISPER_COREML_ALLOW_FALLBACK=ON` 自行�
 
 **全部格式都用 FFmpeg**（不再优先 AVFoundation）：原项目通过 PyAV 用 FFmpeg 解码，用 libswresample 默认参数转成 16 kHz mono s16。用同一套库可以得到逐样本相同的结果（PCM 已验证完全一致；AAC 只有末尾填充的裁剪不同，FFmpeg 9 会裁掉，PyAV 自带的 FFmpeg 7.1 不裁）。FFmpeg 9.0.2 以 LGPL 配置自行构建（`make ffmpeg-xcframeworks`），只含 file 协议、常用 demuxer 和音频 decoder，动态 framework 随 App 分发；关于窗口附 LGPL 声明与源码获取方式。
 
+**时间戳空洞**（参照 WhisperJAV v1.9.4 实测）：有些文件的 AAC 包声称几秒时长、实际只有 64 ms 声音，原版把帧首尾相接，空洞之后的字幕全部提前（WhisperJAV 在一部 2 小时的片子上测到末尾偏 10 s，40 部里有 4 部）。默认按时间戳解码，等价于 FFmpeg 的 `aresample=async=1`：前后帧时间差超过 0.1 s（swresample 的 `min_hard_comp`）时补静音或裁掉重叠，小于它不动，所以没有空洞的文件逐样本不变（对拍 fixture 与 6 个 MOV/AAC 实测一致）。每处跳变写进活动日志。`--join-frames`（CLI）恢复原版行为。
+
 ## 6. 模型
 
 ### 6.1 由我们转换并托管的模型
@@ -239,7 +241,20 @@ whisper.cpp 以 `WHISPER_COREML=ON` + `WHISPER_COREML_ALLOW_FALLBACK=ON` 自行�
 - **分词器**：模型只带 slow tokenizer 文件，借用 kotoba-whisper-v2.0 的 `tokenizer.json`，Makefile 先校验 51866 个 token 的 id 完全一致。
 - **许可**：模型 MIT，但训练数据集条款禁止商用基于它训练的模型——商业发行前要处理。
 
-未照搬：WhisperJAV 的场景切分（只为限制内存与对齐器）、“谷底”切分超长段、非语言行过滤、按 CPS 调整起点。
+未照搬：WhisperJAV 的场景切分（只为限制内存与对齐器）、按 CPS 调整起点。非语言行过滤见 §6.5（可选，所有模型通用）。
+
+### 6.5 可选的字幕过滤（参照 WhisperJAV 的 sanitizer）
+
+设置 › Output › Cleanup 四个开关，默认全关（= 原版输出），CLI 对应 `--drop-loops` `--drop-nonverbal` `--merge-repeats` `--drop-implausible-speed`。顺序与 WhisperJAV 一致：
+
+| 开关 | 规则 | 出处 |
+| --- | --- | --- |
+| 丢弃重复循环 | 窗口结果在所有温度下压缩比仍超阈值时丢弃。faster-whisper 在全部失败时仍保留最好的那次（`below_cr_threshold_results or all_results`），重复循环就是这样进字幕的。WhisperJAV 另按 avg_logprob < −1 删行，未采用：在对拍样本上它删掉了海南鸡一句原版也输出的正确台词（翻译模型的 log 概率天然偏低） | CHANGELOG v1.9.2 |
+| 丢弃声音行 | 只有 ♪、省略号、≤6 字的喘息类假名（あんっはふ…）或括号描述（[喘ぎ声]）的行。与原版不同：关键词只在括号描述或整行时生效（否则会删掉含“喘”的中文句子），另把 ♡♥ 当标点、加入常见中文语气词 | `segment_filters.py` |
+| 合并重复行 | 连续 ≥3 条文本相同、间隔 < 600 ms 的合成一条 | `subtitle_sanitizer.py` |
+| 丢弃时长异常行 | 先删没有任何字母数字的行，再删 > 30 字/秒、或 ≤4 字且 < 1 字/秒的行 | `subtitle_sanitizer.py` |
+
+注意：最后一项会删掉拉得很长的短回应（如 2.5 s 的「うん」）。
 
 ## 7. Job 状态机
 
@@ -350,10 +365,14 @@ JobQueue、JobDetail 预览、Settings（含后端选择、Core ML 编码器开�
 - **模式由模型配置的 `llm_mode` 决定**：polish（海南鸡中文）→ 润色；translate（whisper-ja / anime-whisper 日文）→ 翻译到目标语言（默认简体中文），可选双语（译文在上、原文在下）。
 - **任意 OpenAI 兼容 API**（OpenRouter、OpenAI、DeepSeek、Ollama、LM Studio 或自定义 Base URL；本地服务不需要 key，key 按服务分别存 Keychain）。结构化输出逐级降级：`json_schema` → `json_object` + 提示词里的 schema → 只有提示词，成功的模式会被记住。评估过 MacPaw/OpenAI：它丢失 HTTP 状态码（无法按 429/5xx 重试、按 401/402 提示），`.relaxed` 解析可能把错误响应当成空的成功响应，也不能附带 OpenRouter 的 `provider` 参数，所以继续用自己的 URLSession 客户端（只用到 `/chat/completions` 和 `/models`）。
 - **OpenRouter 专属**：`response_format` 严格 JSON Schema（`{lines: [{id, text}]}`）+ `provider.require_parameters`；模型列表实时拉取（只列支持 structured output 的模型，排除 `:batch`），不在代码里写死模型名；429/5xx 退避重试，401/402 给出明确提示。API key 存 Keychain。
-- **逐行对齐**：每批 40 行，前后各带 8 行上下文（前文用已处理的结果）；回复的 id 必须与本批完全一致，不一致重试一次，仍缺的行保留原文；时间轴从不改动。
+- **逐行对齐**：每批 40 行，前后各带 8 行原文上下文；回复的 id 必须与本批完全一致，不一致重试一次，仍缺的行保留原文；时间轴从不改动。
 - **术语表**：每行 `源 = 译`，写进系统提示。
 - **失败不丢结果**：LLM 步骤出错时仍写出机器字幕，任务标记完成并附警告。
 - CLI：`transcriber-cli llm-models`、`transcribe --llm-model <id>`（key 读 `OPENROUTER_API_KEY`）。
+
+- **场景与滚动摘要**（参照 WhisperJAV / PySubtrans）：相邻两行间隔 > 120 s 切成新场景；场景内的批次依次发送，每批要求模型额外返回 `batch_summary` 与 `scene_summary`，后续批次带上 `scene_so_far` 和最近 5 条批次摘要，名字、关系、语气更一致。场景之间并行（4 个）；超过 5 批的场景再切开，保证没有长停顿的片子也能并行。
+- **续跑**：完整回复按“模型 + 指令 + 本批行与上下文”（不含摘要）的 SHA-256 存进 `~/Library/Caches/Transcriber/LLMReplies`，保留 14 天；任务停止、部分失败或重跑时已完成的批次直接复用，活动日志会写复用了几批。
+- **单句重翻**：字幕编辑器选中若干行 › Retranslate Selected Lines（⇧⌘R）。每行按时间找回 LLM 之前的原文（新加或改过时间的行用当前文本），前后行作为上下文，不复用缓存；结果作为一个可撤销步骤写回，没回答的行保持不变并提示。
 
 待做：用真实 API key 做端到端试跑与提示词调优；按 token 用量估算费用。
 
