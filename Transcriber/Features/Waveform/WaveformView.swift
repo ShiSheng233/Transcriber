@@ -31,6 +31,8 @@ final class WaveformView: NSView {
         /// The ruler aims for at least this much room between labels.
         static let minimumTickSpacing: CGFloat = 60
         static let scrollZoomSensitivity: CGFloat = 0.01
+        /// Between the status message and the line through the middle.
+        static let statusSpacing: CGFloat = 4
     }
 
     /// Ruler intervals to choose from, in seconds.
@@ -67,11 +69,24 @@ final class WaveformView: NSView {
     private var dragLabel: String?
     private var displayedActiveIndex: Int?
     private var binder: ObservationBinder?
+    /// Under the failure message.
+    private let retryButton = NSButton(title: String(localized: "Try Again"), target: nil, action: nil)
 
     init(editor: SubtitleEditorViewModel, waveform: WaveformViewModel) {
         self.editor = editor
         self.waveform = waveform
         super.init(frame: .zero)
+        retryButton.target = self
+        retryButton.action = #selector(retryClicked(_:))
+        retryButton.controlSize = .small
+        retryButton.isHidden = true
+        retryButton.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(retryButton)
+        // Just below the middle of the area under the ruler, where the message sits above.
+        NSLayoutConstraint.activate([
+            retryButton.centerXAnchor.constraint(equalTo: centerXAnchor),
+            retryButton.topAnchor.constraint(equalTo: centerYAnchor, constant: Metrics.rulerHeight / 2 + Metrics.statusSpacing),
+        ])
         binder = ObservationBinder { [weak self] in self?.render() }
     }
 
@@ -89,7 +104,7 @@ final class WaveformView: NSView {
     /// Reads what the drawing uses, so any change redraws.
     private func render() {
         _ = (editor.displayedLines, editor.selection, editor.isEditable, editor.playbackTime)
-        _ = (waveform.waveform, waveform.snapSpans, waveform.isLoading, waveform.loadFailed, waveform.pointsPerSecond, waveform.visibleStart)
+        _ = (waveform.waveform, waveform.snapSpans, waveform.isLoading, waveform.pointsPerSecond, waveform.visibleStart)
         if editor.activeIndex != displayedActiveIndex {
             displayedActiveIndex = editor.activeIndex
             if let line = editor.activeLine {
@@ -99,7 +114,12 @@ final class WaveformView: NSView {
         if drag == nil {
             playheadTime = editor.playbackTime
         }
+        retryButton.isHidden = waveform.loadFailureMessage == nil
         needsDisplay = true
+    }
+
+    @objc private func retryClicked(_ sender: Any?) {
+        waveform.retry()
     }
 
     override func updateTrackingAreas() {
@@ -261,10 +281,8 @@ final class WaveformView: NSView {
     private func drawStatus(in body: NSRect) {
         let message: String? = if waveform.isLoading {
             String(localized: "Loading waveform…")
-        } else if waveform.loadFailed {
-            String(localized: "The audio could not be read.")
         } else {
-            nil
+            waveform.loadFailureMessage
         }
         guard let message else { return }
         if waveform.isLoading {
@@ -276,7 +294,7 @@ final class WaveformView: NSView {
             .foregroundColor: NSColor.secondaryLabelColor,
         ]
         let size = (message as NSString).size(withAttributes: attributes)
-        (message as NSString).draw(at: NSPoint(x: body.midX - size.width / 2, y: body.midY - size.height - 4), withAttributes: attributes)
+        (message as NSString).draw(at: NSPoint(x: body.midX - size.width / 2, y: body.midY - size.height - Metrics.statusSpacing), withAttributes: attributes)
     }
 
     private func rect(of line: TimedText, in body: NSRect) -> NSRect {

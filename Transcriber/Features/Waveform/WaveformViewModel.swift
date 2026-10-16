@@ -19,7 +19,8 @@ final class WaveformViewModel {
     /// Where the VAD heard speech when the file was transcribed.
     private(set) var speechSpans: [SpeechSpan] = []
     private(set) var isLoading = false
-    private(set) var loadFailed = false
+    /// Why the waveform could not be loaded; `nil` unless loading failed.
+    private(set) var loadFailureMessage: String?
     private(set) var pointsPerSecond = defaultPointsPerSecond
     /// The time at the left edge.
     private(set) var visibleStart = AudioTime.zero
@@ -59,7 +60,7 @@ final class WaveformViewModel {
         loadedURL = url
         waveform = nil
         soundSpans = []
-        loadFailed = false
+        loadFailureMessage = nil
         visibleStart = .zero
         guard let url else {
             isLoading = false
@@ -77,9 +78,24 @@ final class WaveformViewModel {
                 self.waveform = waveform
                 soundSpans = spans
             } else {
-                loadFailed = true
+                loadFailureMessage = Self.failureMessage(for: url)
             }
         }
+    }
+
+    /// Loads the shown file again after it failed (its drive reconnected,
+    /// the file put back). The loader keeps only waveforms it read, so
+    /// this decodes again.
+    func retry() {
+        guard loadFailureMessage != nil, let url = loadedURL else { return }
+        loadedURL = nil
+        show(url)
+    }
+
+    private static func failureMessage(for url: URL) -> String {
+        FileManager.default.fileExists(atPath: url.path)
+            ? String(localized: "The audio could not be read.")
+            : String(localized: "The file could not be found.")
     }
 
     // MARK: Zoom and scroll
