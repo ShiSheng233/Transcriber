@@ -68,10 +68,18 @@ public struct TranscriptionPipeline: Sendable {
     public struct Options: Sendable {
         public var timestampHandling: MediaDecoder.TimestampHandling
         public var filter: SubtitleFilterSettings
+        /// Handed the whole file's decoded audio once, before transcription,
+        /// e.g. to keep a waveform without decoding the file again.
+        public var audioDecoded: (@Sendable (_ samples: [Float]) -> Void)?
 
-        public init(timestampHandling: MediaDecoder.TimestampHandling = .followTimestamps, filter: SubtitleFilterSettings = .none) {
+        public init(
+            timestampHandling: MediaDecoder.TimestampHandling = .followTimestamps,
+            filter: SubtitleFilterSettings = .none,
+            audioDecoded: (@Sendable (_ samples: [Float]) -> Void)? = nil
+        ) {
             self.timestampHandling = timestampHandling
             self.filter = filter
+            self.audioDecoded = audioDecoded
         }
     }
 
@@ -118,6 +126,7 @@ public struct TranscriptionPipeline: Sendable {
     ) async throws -> [TimedText] {
         let audio = try MediaDecoder(timestampHandling: options.timestampHandling).decodeAudio(at: url)
         progress(.decodedAudio(duration: audio.duration, timestampJumps: audio.timestampJumps))
+        options.audioDecoded?(audio.samples)
         return try await transcribe(samples: audio.samples, filter: options.filter, progress: progress)
     }
 

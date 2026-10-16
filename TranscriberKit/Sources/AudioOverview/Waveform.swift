@@ -1,3 +1,4 @@
+import Accelerate
 import TranscriberCore
 
 /// A file's audio reduced to one peak and one loudness value per 10 ms, small
@@ -24,44 +25,54 @@ public struct Waveform: Sendable, Equatable {
         self.duration = duration
     }
 
-    /// Builds a waveform from audio handed over in pieces of any size.
+    /// Builds a waveform from audio handed over in pieces of any size. Whole
+    /// bins are measured with vDSP: a film has over a hundred million samples.
     public struct Builder {
         private var peaks: [Float] = []
         private var levels: [Float] = []
         private var sampleCount = 0
-        /// The bin being filled, carried over between pieces.
-        private var binPeak: Float = 0
-        private var binSumOfSquares: Float = 0
-        private var binFill = 0
+        /// The start of a bin left unfinished by the previous piece.
+        private var carry: [Float] = []
 
         public init() {}
 
         public mutating func append(_ samples: [Float]) {
             let binSize = Waveform.binDuration.samples
-            for sample in samples {
-                binPeak = max(binPeak, abs(sample))
-                binSumOfSquares += sample * sample
-                binFill += 1
-                if binFill == binSize {
-                    closeBin()
+            sampleCount += samples.count
+            var start = 0
+            if !carry.isEmpty {
+                let needed = min(binSize - carry.count, samples.count)
+                carry += samples[..<needed]
+                start = needed
+                guard carry.count == binSize else { return }
+                closeBin(carry[...])
+                carry.removeAll(keepingCapacity: true)
+            }
+            let wholeBinCount = (samples.count - start) / binSize
+            samples.withUnsafeBufferPointer { buffer in
+                peaks.reserveCapacity(peaks.count + wholeBinCount)
+                levels.reserveCapacity(levels.count + wholeBinCount)
+                for bin in 0..<wholeBinCount {
+                    let binStart = start + bin * binSize
+                    let slice = UnsafeBufferPointer(rebasing: buffer[binStart..<(binStart + binSize)])
+                    peaks.append(min(vDSP.maximumMagnitude(slice), 1))
+                    levels.append(min(vDSP.rootMeanSquare(slice), 1))
                 }
             }
-            sampleCount += samples.count
+            carry += samples[(start + wholeBinCount * binSize)...]
         }
 
         public mutating func finish() -> Waveform {
-            if binFill > 0 {
-                closeBin()
+            if !carry.isEmpty {
+                closeBin(carry[...])
+                carry.removeAll()
             }
             return Waveform(peaks: peaks, levels: levels, duration: AudioTime(samples: sampleCount))
         }
 
-        private mutating func closeBin() {
-            peaks.append(min(binPeak, 1))
-            levels.append(min((binSumOfSquares / Float(binFill)).squareRoot(), 1))
-            binPeak = 0
-            binSumOfSquares = 0
-            binFill = 0
+        private mutating func closeBin(_ samples: ArraySlice<Float>) {
+            peaks.append(min(vDSP.maximumMagnitude(samples), 1))
+            levels.append(min(vDSP.rootMeanSquare(samples), 1))
         }
     }
 

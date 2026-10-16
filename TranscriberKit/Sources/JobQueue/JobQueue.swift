@@ -1,3 +1,4 @@
+import AudioOverview
 import Foundation
 import LLMTranslation
 import MediaDecoding
@@ -43,6 +44,9 @@ public actor JobQueue {
     private let makeChatClient: @Sendable (_ baseURL: URL, _ apiKey: String) -> any StructuredChatCompleting
     /// Keeps finished LLM batches, so a run started again reuses them.
     private let llmReplyCache: LLMReplyCache?
+    /// Gets each transcribed file's waveform, made from the audio the
+    /// transcription decodes anyway, so the editor need not decode it again.
+    private let waveformCache: WaveformCache?
     private var jobs: [Job] = []
     private var runningTask: Task<Void, Never>?
     /// The stage each started job is in (recognition, or waiting for or in
@@ -74,11 +78,13 @@ public actor JobQueue {
     public init(
         engine: TranscriptionEngine = TranscriptionEngine(),
         makeChatClient: @escaping @Sendable (_ baseURL: URL, _ apiKey: String) -> any StructuredChatCompleting = { ChatCompletionsClient(baseURL: $0, apiKey: $1) },
-        llmReplyCache: LLMReplyCache? = nil
+        llmReplyCache: LLMReplyCache? = nil,
+        waveformCache: WaveformCache? = nil
     ) {
         self.engine = engine
         self.makeChatClient = makeChatClient
         self.llmReplyCache = llmReplyCache
+        self.waveformCache = waveformCache
     }
 
     /// Current jobs first, then every change.
@@ -638,11 +644,20 @@ public actor JobQueue {
         let segments = try await withOrderedProgress { queue, progress in
             queue.record(progress, for: jobID)
         } work: { report in
-            try await pipeline.transcribe(fileAt: job.sourceURL, options: .init(filter: filter), progress: report)
+            let options = TranscriptionPipeline.Options(filter: filter, audioDecoded: waveformKeeper(for: job.sourceURL))
+            return try await pipeline.transcribe(fileAt: job.sourceURL, options: options, progress: report)
         }
         try Task.checkCancellation()
         logTranscriptionSpeed(for: job.id, segmentCount: segments.count)
         return segments
+    }
+
+    /// Stores the waveform of audio the transcription decoded; `nil` without a cache.
+    private nonisolated func waveformKeeper(for mediaURL: URL) -> (@Sendable ([Float]) -> Void)? {
+        guard let cache = waveformCache else { return nil }
+        return { @Sendable samples in
+            cache.store(Waveform(samples: samples), for: mediaURL)
+        }
     }
 
     /// An existing subtitle file through the language model; here the

@@ -35,7 +35,7 @@ let package = Package(
         .target(
             name: "JobQueue",
             dependencies: [
-                "TranscriberCore", "LLMTranslation", "MediaDecoding", "SpeechDetection", "SubtitleExport", "TranscriptionPipeline",
+                "TranscriberCore", "AudioOverview", "LLMTranslation", "MediaDecoding", "SpeechDetection", "SubtitleExport", "TranscriptionPipeline",
                 "WhisperCpp", "WhisperDecoding", "WhisperMLX",
             ]
         ),
