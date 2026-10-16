@@ -16,19 +16,39 @@ public struct SubtitleFilterSettings: Hashable, Sendable, Codable {
     /// Drop lines too fast to read or short lines stretched too long, and
     /// lines with no letters or digits.
     public var dropsImplausibleReadingSpeed: Bool
+    /// Even out widths, ellipses and Japanese punctuation, without NFKC.
+    public var normalizesText: Bool
+    /// "ああああ" → "ああ", "ダメダメダメダメ" → "ダメダメ".
+    public var shortensStretchedSounds: Bool
+    /// Cut a line that loops to two copies and "…", instead of dropping its window.
+    public var repairsLoopingLines: Bool
+    /// Drop lines that are only "えーと", "あの" and the like.
+    public var dropsFillerLines: Bool
+    /// At least 5/6 s and at most 7 s on screen, small gaps closed.
+    public var fixesTiming: Bool
 
     public init(
         dropsRepetitionLoops: Bool,
         dropsNonverbalLines: Bool,
         dropsHallucinatedPhrases: Bool,
         mergesRepeatedLines: Bool,
-        dropsImplausibleReadingSpeed: Bool
+        dropsImplausibleReadingSpeed: Bool,
+        normalizesText: Bool = false,
+        shortensStretchedSounds: Bool = false,
+        repairsLoopingLines: Bool = false,
+        dropsFillerLines: Bool = false,
+        fixesTiming: Bool = false
     ) {
         self.dropsRepetitionLoops = dropsRepetitionLoops
         self.dropsNonverbalLines = dropsNonverbalLines
         self.dropsHallucinatedPhrases = dropsHallucinatedPhrases
         self.mergesRepeatedLines = mergesRepeatedLines
         self.dropsImplausibleReadingSpeed = dropsImplausibleReadingSpeed
+        self.normalizesText = normalizesText
+        self.shortensStretchedSounds = shortensStretchedSounds
+        self.repairsLoopingLines = repairsLoopingLines
+        self.dropsFillerLines = dropsFillerLines
+        self.fixesTiming = fixesTiming
     }
 
     public static let none = SubtitleFilterSettings(
@@ -49,7 +69,12 @@ extension SubtitleFilterSettings {
             dropsNonverbalLines: try container.decodeIfPresent(Bool.self, forKey: .dropsNonverbalLines) ?? false,
             dropsHallucinatedPhrases: try container.decodeIfPresent(Bool.self, forKey: .dropsHallucinatedPhrases) ?? false,
             mergesRepeatedLines: try container.decodeIfPresent(Bool.self, forKey: .mergesRepeatedLines) ?? false,
-            dropsImplausibleReadingSpeed: try container.decodeIfPresent(Bool.self, forKey: .dropsImplausibleReadingSpeed) ?? false
+            dropsImplausibleReadingSpeed: try container.decodeIfPresent(Bool.self, forKey: .dropsImplausibleReadingSpeed) ?? false,
+            normalizesText: try container.decodeIfPresent(Bool.self, forKey: .normalizesText) ?? false,
+            shortensStretchedSounds: try container.decodeIfPresent(Bool.self, forKey: .shortensStretchedSounds) ?? false,
+            repairsLoopingLines: try container.decodeIfPresent(Bool.self, forKey: .repairsLoopingLines) ?? false,
+            dropsFillerLines: try container.decodeIfPresent(Bool.self, forKey: .dropsFillerLines) ?? false,
+            fixesTiming: try container.decodeIfPresent(Bool.self, forKey: .fixesTiming) ?? false
         )
     }
 }

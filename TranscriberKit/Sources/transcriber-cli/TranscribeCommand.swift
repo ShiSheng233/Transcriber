@@ -69,6 +69,21 @@ struct TranscribeCommand: AsyncParsableCommand {
     @Flag(help: "Drop lines read faster than 30 or (up to 4 characters) slower than 1 character per second.")
     var dropImplausibleSpeed = false
 
+    @Flag(help: "Even out widths, ellipses and Japanese punctuation.")
+    var normalizeText = false
+
+    @Flag(help: "Shorten stretched sounds (ああああ → ああ).")
+    var shortenStretched = false
+
+    @Flag(help: "Cut lines that loop to two copies and an ellipsis.")
+    var repairLoops = false
+
+    @Flag(help: "Drop lines made only of fillers (えーと, あの).")
+    var dropFillers = false
+
+    @Flag(help: "Keep lines 5/6–7 s on screen and close small gaps.")
+    var fixTiming = false
+
     @Argument(help: "Media files.")
     var inputs: [String]
 
@@ -116,7 +131,12 @@ struct TranscribeCommand: AsyncParsableCommand {
                 dropsNonverbalLines: dropNonverbal,
                 dropsHallucinatedPhrases: dropHallucinations,
                 mergesRepeatedLines: mergeRepeats,
-                dropsImplausibleReadingSpeed: dropImplausibleSpeed
+                dropsImplausibleReadingSpeed: dropImplausibleSpeed,
+                normalizesText: normalizeText,
+                shortensStretchedSounds: shortenStretched,
+                repairsLoopingLines: repairLoops,
+                dropsFillerLines: dropFillers,
+                fixesTiming: fixTiming
             )
         )
         for input in inputs {
