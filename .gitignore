@@ -26,3 +26,6 @@ __pycache__/
 
 # Release archives and exports
 /build/
+
+# Agent worktrees
+.claude/worktrees/
