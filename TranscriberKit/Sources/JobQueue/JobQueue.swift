@@ -45,11 +45,24 @@ public actor JobQueue {
     private let llmReplyCache: LLMReplyCache?
     private var jobs: [Job] = []
     private var runningTask: Task<Void, Never>?
-    private var runningJobID: UUID?
-    /// The running job alone, so cancelling it leaves the queue running.
-    private var currentJobTask: Task<Void, Never>?
-    /// Set by `stop()`: the interrupted job goes back to the queue.
+    /// The stage each started job is in (recognition, or waiting for or in
+    /// the language model step), so one job can be cancelled alone.
+    private var jobTasks: [UUID: Task<Void, Never>] = [:]
+    /// The last language model step handed over; each step waits for the
+    /// one before, so they run one at a time and in order.
+    private var languageModelLane: Task<Void, Never>?
+    /// Steps handed to the lane that have not ended.
+    private var pendingLanguageModelStepCount = 0
+    /// When each running job started, for the "done in" figure.
+    private var jobStarts: [UUID: ContinuousClock.Instant] = [:]
+    /// The idle queue waiting for a language model step to end or a job to arrive.
+    private var driverWakeUp: CheckedContinuation<Void, Never>?
+    /// Set by `stop()`: interrupted jobs go back to the queue.
     private var isStopping = false
+    /// One recognition at a time, the queue's or a re-transcription's: each
+    /// already uses the GPU fully.
+    private var isRecognizing = false
+    private var recognitionWaiters: [CheckedContinuation<Void, Never>] = []
     private var observers: [UUID: AsyncStream<[Job]>.Continuation] = [:]
     private static let logCapacity = 5_000
     private var logEntries: [LogEntry] = []
@@ -99,6 +112,7 @@ public actor JobQueue {
         let newJobs = sourceURLs.filter { !known.contains($0) }.map { Job(sourceURL: $0, model: model) }
         jobs += newJobs
         publish()
+        wakeDriver()
         for job in newJobs {
             log(.detail, job.id, "\(job.sourceURL.lastPathComponent): queued with \(model.displayName)")
         }
@@ -139,6 +153,7 @@ public actor JobQueue {
         let newJobs = files.filter { !known.contains($0.subtitleURL) }.map { Job(subtitlesAt: $0.subtitleURL, mediaURL: $0.mediaURL, lines: lines) }
         jobs += newJobs
         publish()
+        wakeDriver()
         for job in newJobs {
             log(.detail, job.id, "\(job.sourceURL.lastPathComponent): queued for translation")
         }
@@ -148,6 +163,87 @@ public actor JobQueue {
     /// The editor's version of a finished job's subtitles; `save` writes them.
     public func replaceSegments(of jobID: UUID, with segments: [TimedText]) {
         update(jobID) { $0.segments = segments }
+    }
+
+    /// Whether `changeModel` can act on the job: a transcription that is
+    /// waiting or finished.
+    public func canChangeModel(of jobID: UUID) -> Bool {
+        guard let job = jobs.first(where: { $0.id == jobID }), job.model != nil, jobTasks[jobID] == nil else {
+            return false
+        }
+        return job.status == .queued || job.status.isFinished
+    }
+
+    /// Transcribes the file with `model` instead: a waiting job switches, a
+    /// finished one goes back to the queue (its files are written again).
+    public func changeModel(of jobID: UUID, to model: RecognitionModel) {
+        guard canChangeModel(of: jobID), let index = jobs.firstIndex(where: { $0.id == jobID }) else {
+            return
+        }
+        let job = jobs[index]
+        jobs[index] = Job(id: job.id, sourceURL: job.sourceURL, model: model)
+        publish()
+        log(.detail, jobID, "\(job.sourceURL.lastPathComponent): queued with \(model.displayName)")
+        wakeDriver()
+    }
+
+    public struct Retranscription: Sendable {
+        /// The lines given, with the chosen ones replaced by the new ones.
+        public let lines: [TimedText]
+        /// Where the new lines are in `lines`.
+        public let newLineIndices: [Int]
+        /// New lines the language model did not answer; nil if it did not run.
+        public let untranslatedCount: Int?
+    }
+
+    /// Recognizes the time the chosen lines cover again and puts the new
+    /// lines in their place; when the job went through the language model
+    /// and it is on, the new lines go through it too. Waits for a
+    /// recognition the queue is running.
+    /// - Parameters:
+    ///   - lines: the job's lines as the editor has them; the chosen ones
+    ///     and any between them are replaced.
+    ///   - model: used when the job has none (a subtitle file with media).
+    public func retranscribe(
+        _ lineIndices: [Int],
+        of lines: [TimedText],
+        in jobID: UUID,
+        model: RecognitionModel?,
+        configuration: Configuration
+    ) async throws -> Retranscription {
+        let chosen = lineIndices.filter(lines.indices.contains).sorted()
+        guard let job = jobs.first(where: { $0.id == jobID }), let first = chosen.first, let last = chosen.last else {
+            throw JobQueueError.nothingToRetranscribe
+        }
+        guard let mediaURL = job.mediaURL else {
+            throw JobQueueError.noMediaToTranscribe
+        }
+        guard let model = job.model ?? model else {
+            throw JobQueueError.noSpeechModel
+        }
+        let replaced = first...last
+        let start = lines[replaced].map(\.start).min() ?? lines[first].start
+        let end = lines[replaced].map(\.end).max() ?? lines[last].end
+        log(.info, jobID, "Transcribing \(ActivityFormatting.clock(start.seconds))–\(ActivityFormatting.clock(end.seconds)) again with \(model.displayName)…")
+
+        let segments = try await recognizeRange(from: start, to: end, of: mediaURL, with: model, for: jobID, configuration: configuration)
+        log(.info, jobID, "\(lines[replaced].count) line(s) replaced by \(segments.count)")
+
+        var updated = Array(lines[..<first]) + segments + Array(lines[(last + 1)...])
+        let newLineIndices = Array(first..<(first + segments.count))
+        let hadLanguageModel = !job.linesBeforeLanguageModel.isEmpty
+        // The new machine lines become the source for any later retranslation.
+        update(jobID) { job in
+            guard hadLanguageModel else { return }
+            job.linesBeforeLanguageModel = (job.linesBeforeLanguageModel.filter { $0.end <= start || $0.start >= end } + segments)
+                .sorted { $0.start < $1.start }
+        }
+        guard hadLanguageModel, let llm = configuration.llm, llm.isUsable, !segments.isEmpty else {
+            return Retranscription(lines: updated, newLineIndices: newLineIndices, untranslatedCount: nil)
+        }
+        let translated = try await retranslate(newLineIndices, of: updated, in: jobID, with: llm)
+        updated = translated.lines
+        return Retranscription(lines: updated, newLineIndices: newLineIndices, untranslatedCount: translated.unansweredCount)
     }
 
     public struct Retranslation: Sendable {
@@ -228,9 +324,7 @@ public actor JobQueue {
     }
 
     public func remove(_ jobID: UUID) {
-        if jobID == runningJobID {
-            currentJobTask?.cancel()
-        }
+        jobTasks[jobID]?.cancel()
         jobs.removeAll { $0.id == jobID }
         publish()
     }
@@ -240,30 +334,36 @@ public actor JobQueue {
         publish()
     }
 
-    /// Cancels one job; the queue moves on to the next.
+    /// Cancels one job, in whichever stage it is; the queue goes on.
     public func cancel(_ jobID: UUID) {
-        if jobID == runningJobID {
-            currentJobTask?.cancel()
+        if let task = jobTasks[jobID] {
+            task.cancel()
         } else {
             update(jobID) { $0.status = .cancelled }
         }
     }
 
-    /// Stops after interrupting the running job, which goes back to waiting;
+    /// Stops after interrupting the running jobs, which go back to waiting;
     /// queued jobs stay queued for the next `start`.
     public func stop() {
         guard let runningTask else {
             return
         }
         isStopping = true
-        currentJobTask?.cancel()
+        for task in jobTasks.values {
+            task.cancel()
+        }
         runningTask.cancel()
+        wakeDriver()
     }
 
-    /// Cancels the running job, waits for it to stop and frees the model.
+    /// Cancels the running jobs, waits for them to stop and frees the model.
     public func shutDown() async {
-        currentJobTask?.cancel()
+        for task in jobTasks.values {
+            task.cancel()
+        }
         runningTask?.cancel()
+        wakeDriver()
         await runningTask?.value
         await engine.unload()
     }
@@ -276,57 +376,130 @@ public actor JobQueue {
         runningTask = Task { await processQueuedJobs(configuration: configuration) }
     }
 
+    /// Speech recognition runs one file at a time (it already uses the GPU
+    /// fully). A file's language model step is handed to its own lane, so the
+    /// next file is recognized meanwhile; those steps run one at a time, in
+    /// order. The model stays loaded while files wait and is freed once none do.
     private func processQueuedJobs(configuration: Configuration) async {
-        while !Task.isCancelled, let job = jobs.first(where: { $0.status == .queued }) {
-            runningJobID = job.id
-            let jobTask = Task { await process(job, configuration: configuration) }
-            currentJobTask = jobTask
-            await jobTask.value
-            currentJobTask = nil
-            runningJobID = nil
+        while !Task.isCancelled {
+            if let job = jobs.first(where: { $0.status == .queued && jobTasks[$0.id] == nil }) {
+                switch job.kind {
+                case .transcription(let model):
+                    let task = Task { await recognize(job, with: model, configuration: configuration) }
+                    jobTasks[job.id] = task
+                    await task.value
+                    if jobTasks[job.id] == task {
+                        jobTasks[job.id] = nil  // done, not handed to the language model lane
+                    }
+                case .subtitleTranslation:
+                    handToLanguageModel(job, step: .translateSubtitles, configuration: configuration)
+                case .subtitleEditing:
+                    update(job.id) { $0.status = .completed }  // ready since it was opened; never queued
+                }
+                continue
+            }
+            // Gigabytes of weights and buffers: free them while no file waits.
+            // The next file loads the model again (memory-mapped, about half a second).
+            await unloadModel()
+            guard !jobTasks.isEmpty else {
+                break
+            }
+            await waitForWork()
         }
-        // Gigabytes of weights and buffers: free them while idle. The next
-        // start loads the model again (memory-mapped, about half a second).
-        if await engine.isLoaded {
-            await engine.unload()
-            log(.detail, nil, "Model unloaded")
+        // Stopped: every job records how it ended before the queue is idle.
+        while let task = jobTasks.values.first {
+            await task.value
+            jobTasks = jobTasks.filter { $0.value != task }
         }
+        await unloadModel()
         runningTask = nil
         isStopping = false
     }
 
-    private func process(_ job: Job, configuration: Configuration) async {
-        let fileName = job.sourceURL.lastPathComponent
-        let jobStart = ContinuousClock.now
-        log(.info, job.id, "\(fileName): started")
-        do {
-            let segments: [TimedText]
-            var nameSuffix = ""
-            switch job.kind {
-            case .transcription(let model):
-                segments = try await transcribe(job, with: model, configuration: configuration)
-            case .subtitleEditing:
-                return  // ready since it was opened; never queued
-            case .subtitleTranslation:
-                guard let llm = configuration.llm, llm.isUsable else {
-                    throw JobQueueError.languageModelRequired
-                }
-                segments = try await translateSubtitles(of: job, with: llm)
-                // Never overwrite the file being translated: "movie.简体中文.srt".
-                nameSuffix = "." + SubtitleFileWriter.safeNamePart(llm.settings.targetLanguage)
-            }
+    private func unloadModel() async {
+        if !isRecognizing, await engine.isLoaded {
+            await engine.unload()
+            log(.detail, nil, "Model unloaded")
+        }
+    }
 
+    private func waitForWork() async {
+        await withCheckedContinuation { driverWakeUp = $0 }
+    }
+
+    private func wakeDriver() {
+        driverWakeUp?.resume()
+        driverWakeUp = nil
+    }
+
+    /// Waits until no other recognition runs; the caller then owns it.
+    private func beginRecognition() async {
+        guard isRecognizing else {
+            isRecognizing = true
+            return
+        }
+        await withCheckedContinuation { recognitionWaiters.append($0) }
+    }
+
+    /// `retranscribe`'s recognition, in turn with the queue's.
+    private func recognizeRange(
+        from start: AudioTime,
+        to end: AudioTime,
+        of mediaURL: URL,
+        with model: RecognitionModel,
+        for jobID: UUID,
+        configuration: Configuration
+    ) async throws -> [TimedText] {
+        await beginRecognition()
+        defer {
+            endRecognition()
+            if runningTask == nil {
+                // The queue is idle, so nothing else needs the weights.
+                Task { await unloadModel() }
+            }
+        }
+        let pipeline = try await loadPipeline(model, for: jobID, settings: configuration.engine)
+        return try await pipeline.transcribe(fileAt: mediaURL, from: start, to: end, options: .init(filter: configuration.filter))
+    }
+
+    /// Hands recognition to the next waiter, or frees it.
+    private func endRecognition() {
+        if recognitionWaiters.isEmpty {
+            isRecognizing = false
+        } else {
+            recognitionWaiters.removeFirst().resume()
+        }
+    }
+
+    /// Subtitles ready to be written, and what goes before the extension.
+    private struct FinishedSubtitles {
+        let segments: [TimedText]
+        var nameSuffix = ""
+    }
+
+    /// Runs one stage of a job and records how it ended: written and
+    /// completed when `body` returns subtitles, untouched when it returns
+    /// nil (a later stage takes over), cancelled, put back, or failed.
+    private func runStage(of job: Job, configuration: Configuration, _ body: () async throws -> FinishedSubtitles?) async {
+        let fileName = job.sourceURL.lastPathComponent
+        do {
+            guard let finished = try await body() else {
+                return
+            }
             update(job.id) { $0.status = .exporting }
-            let outputURLs = try SubtitleFileWriter.write(segments, for: job.sourceURL, settings: configuration.output, nameSuffix: nameSuffix)
+            let outputURLs = try SubtitleFileWriter.write(
+                finished.segments, for: job.sourceURL, settings: configuration.output, nameSuffix: finished.nameSuffix
+            )
             update(job.id) {
-                $0.segments = segments
+                $0.segments = finished.segments
                 $0.outputURLs = outputURLs
                 $0.status = .completed
             }
             if let folder = outputURLs.first?.deletingLastPathComponent().path {
                 log(.detail, job.id, "Wrote \(outputURLs.map(\.lastPathComponent).joined(separator: ", ")) to \(folder)")
             }
-            log(.info, job.id, "\(fileName): done in \(ActivityFormatting.seconds(ContinuousClock.now - jobStart)), \(segments.count) subtitles")
+            let elapsed = jobStarts[job.id].map { " in \(ActivityFormatting.seconds(ContinuousClock.now - $0))" } ?? ""
+            log(.info, job.id, "\(fileName): done\(elapsed), \(finished.segments.count) subtitles")
         } catch is CancellationError {
             let requeues = isStopping
             update(job.id) {
@@ -341,30 +514,103 @@ public actor JobQueue {
             }
             log(.error, job.id, "\(fileName): \(error.localizedDescription)")
         }
+        jobStarts[job.id] = nil
     }
 
-    /// Speech recognition, then (optionally) the language model.
-    private func transcribe(_ job: Job, with model: RecognitionModel, configuration: Configuration) async throws -> [TimedText] {
-        var segments = try await recognizeSpeech(in: job, with: model, settings: configuration.engine, filter: configuration.filter)
+    private func markStarted(_ job: Job) {
+        jobStarts[job.id] = ContinuousClock.now
+        log(.info, job.id, "\(job.sourceURL.lastPathComponent): started")
+    }
 
-        if let llm = configuration.llm, llm.isUsable, !segments.isEmpty {
-            // The language model can take minutes; don't hold gigabytes of
-            // weights meanwhile. The next file reloads them in about half a second.
-            await engine.unload()
-            log(.detail, job.id, "Model unloaded")
-            let refinerJob: SubtitleRefiner.Job = model.llmMode == .polish
-                ? .polishChinese
-                : .translate(targetLanguage: llm.settings.targetLanguage)
-            do {
-                segments = try await refine(segments, jobID: job.id, as: refinerJob, with: llm)
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                // The machine subtitles are still worth keeping.
-                update(job.id) { $0.warning = "LLM step skipped: \(error.localizedDescription)" }
+    /// Speech recognition; with the language model on, its step is handed
+    /// to the lane and this returns without writing.
+    private func recognize(_ job: Job, with model: RecognitionModel, configuration: Configuration) async {
+        markStarted(job)
+        await runStage(of: job, configuration: configuration) {
+            await beginRecognition()
+            defer { endRecognition() }
+            let segments = try await recognizeSpeech(in: job, with: model, settings: configuration.engine, filter: configuration.filter)
+            guard let llm = configuration.llm, llm.isUsable, !segments.isEmpty else {
+                return FinishedSubtitles(segments: segments)
+            }
+            update(job.id) {
+                $0.segments = segments
+                $0.status = .refining(completedBatches: 0, totalBatches: 1)
+            }
+            handToLanguageModel(job, step: .refineRecognized(segments, model: model), configuration: configuration)
+            return nil
+        }
+    }
+
+    private enum LanguageModelStep: Sendable {
+        /// A transcription's subtitles; a failure keeps them as they are.
+        case refineRecognized([TimedText], model: RecognitionModel)
+        /// A subtitle file; the translation is the whole job.
+        case translateSubtitles
+    }
+
+    /// Queues the step behind the language model steps already handed over.
+    private func handToLanguageModel(_ job: Job, step: LanguageModelStep, configuration: Configuration) {
+        if pendingLanguageModelStepCount > 0 {
+            log(.detail, job.id, "Waiting for the language model to finish the previous file")
+        }
+        pendingLanguageModelStepCount += 1
+        let previous = languageModelLane
+        let task = Task {
+            await previous?.value
+            await runLanguageModelStep(step, of: job, configuration: configuration)
+        }
+        languageModelLane = task
+        jobTasks[job.id] = task
+    }
+
+    private func runLanguageModelStep(_ step: LanguageModelStep, of job: Job, configuration: Configuration) async {
+        if case .translateSubtitles = step {
+            markStarted(job)
+        }
+        await runStage(of: job, configuration: configuration) {
+            try Task.checkCancellation()
+            switch step {
+            case .refineRecognized(let segments, let model):
+                return FinishedSubtitles(segments: try await refineRecognized(segments, of: job, model: model, with: configuration.llm))
+            case .translateSubtitles:
+                guard let llm = configuration.llm, llm.isUsable else {
+                    throw JobQueueError.languageModelRequired
+                }
+                // Never overwrite the file being translated: "movie.简体中文.srt".
+                return FinishedSubtitles(
+                    segments: try await translateSubtitles(of: job, with: llm),
+                    nameSuffix: "." + SubtitleFileWriter.safeNamePart(llm.settings.targetLanguage)
+                )
             }
         }
-        return segments
+        jobTasks[job.id] = nil
+        pendingLanguageModelStepCount -= 1
+        wakeDriver()
+    }
+
+    /// A transcription through the language model; if that fails, the
+    /// machine subtitles are still worth keeping.
+    private func refineRecognized(
+        _ segments: [TimedText],
+        of job: Job,
+        model: RecognitionModel,
+        with llm: LLMConfiguration?
+    ) async throws -> [TimedText] {
+        guard let llm else {
+            return segments
+        }
+        let refinerJob: SubtitleRefiner.Job = model.llmMode == .polish
+            ? .polishChinese
+            : .translate(targetLanguage: llm.settings.targetLanguage)
+        do {
+            return try await refine(segments, jobID: job.id, as: refinerJob, with: llm)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            update(job.id) { $0.warning = "LLM step skipped: \(error.localizedDescription)" }
+            return segments
+        }
     }
 
     /// Speech recognition alone. The pipeline lives only in this scope, so
@@ -580,11 +826,17 @@ public actor JobQueue {
 public enum JobQueueError: LocalizedError, Equatable {
     case languageModelRequired
     case nothingToSave
+    case nothingToRetranscribe
+    case noMediaToTranscribe
+    case noSpeechModel
 
     public var errorDescription: String? {
         switch self {
         case .nothingToSave: "Only finished files with written subtitles can be saved."
         case .languageModelRequired: "Translating subtitles needs the language model: turn it on and choose a model in Settings › LLM."
+        case .nothingToRetranscribe: "Select the lines to transcribe again."
+        case .noMediaToTranscribe: "There is no media file to transcribe for these subtitles."
+        case .noSpeechModel: "Choose a speech model in the toolbar first."
         }
     }
 }

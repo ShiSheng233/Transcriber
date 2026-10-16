@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 import SubtitleExport
 import LLMTranslation
@@ -19,9 +20,15 @@ struct StubChat: StructuredChatCompleting {
     }
 }
 
+/// Every suite that loads a real model, one at a time: several pipelines at
+/// once (each with its chunks in parallel) can starve the GPU until Core ML's
+/// VAD stops making progress. The app runs one recognition at a time.
+@Suite(.serialized) enum RealModelSuites {}
+
 /// Runs a real job through the queue (engine, pipeline, file writer).
 /// Needs the repository's Models/ and ParityMedia/tts-long.wav, so it is
 /// skipped where they are missing.
+extension RealModelSuites {
 struct JobQueueTests {
     private static let repository = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -159,8 +166,10 @@ struct JobQueueTests {
         #expect(!job.segments.contains { $0.text.hasPrefix("EN: ") })
     }
 }
+}
 
 /// Stop and Cancel, with a real model (skipped where Models/ is missing).
+extension RealModelSuites {
 struct JobQueueStopTests {
     private static let repository = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -218,6 +227,7 @@ struct JobQueueStopTests {
         #expect(finished.map(\.status) == [.cancelled, .completed])
     }
 }
+}
 
 /// The process's memory footprint, as Activity Monitor's "Memory" column.
 private func physicalFootprint() -> UInt64 {
@@ -231,6 +241,7 @@ private func physicalFootprint() -> UInt64 {
     return result == KERN_SUCCESS ? info.phys_footprint : 0
 }
 
+extension RealModelSuites {
 struct JobQueueMemoryTests {
     private static let repository = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -261,6 +272,7 @@ struct JobQueueMemoryTests {
         // The 1.5B model alone is about 3 GB; most of the peak must be gone.
         #expect(peak > idle + 2_000_000_000, "peak \(peak / 1_000_000) MB, idle \(idle / 1_000_000) MB")
     }
+}
 }
 
 struct SubtitleTranslationJobTests {
@@ -463,4 +475,177 @@ struct SubtitleEditingJobTests {
             break
         }
     }
+}
+
+/// A language model that holds every reply until `release()`.
+final class HeldChat: StructuredChatCompleting {
+    private let isReleased = Mutex(false)
+
+    func release() {
+        isReleased.withLock { $0 = true }
+    }
+
+    func completeJSON(model: String, messages: [ChatMessage], schemaName: String, schema: [String: any Sendable], temperature: Double) async throws -> Data {
+        while !isReleased.withLock({ $0 }) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        return try await StubChat(fails: false).completeJSON(
+            model: model, messages: messages, schemaName: schemaName, schema: schema, temperature: temperature
+        )
+    }
+}
+
+/// Recognition and the language model step at the same time (real model;
+/// skipped where Models/ is missing).
+extension RealModelSuites {
+struct JobQueueOverlapTests {
+    private static let repository = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    private static let models = repository.appendingPathComponent("Models")
+    private static let sample = repository.appendingPathComponent("ParityMedia/tts-long.wav")
+    private static let whisperJa = ModelCatalog.scan(models).model(withID: "whisper-ja-1.5b")
+    private static let isAvailable = whisperJa != nil && FileManager.default.fileExists(atPath: sample.path)
+
+    private static func isRecognizing(_ status: JobStatus) -> Bool {
+        switch status {
+        case .loadingModel, .decodingAudio, .detectingSpeech, .transcribing: true
+        default: false
+        }
+    }
+
+    /// Two files queued with the held language model; returns once both
+    /// have been handed to it or the second is being recognized while the
+    /// first waits. (Snapshots keep only the newest state, so under load the
+    /// second file's recognition can go by unseen; the log tells instead.)
+    private func startOverlapping(_ chat: HeldChat, engine: TranscriptionEngine) async throws -> (JobQueue, [URL]) {
+        var settings = LLMSettings.defaults
+        settings.isEnabled = true
+        settings.model = "test/model"
+        let queue = JobQueue(engine: engine, makeChatClient: { _, _ in chat })
+        let copy = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).wav")
+        try FileManager.default.copyItem(at: Self.sample, to: copy)
+        await queue.add([Self.sample, copy], model: try #require(Self.whisperJa))
+        await queue.start(configuration: JobQueue.Configuration(
+            engine: EngineSettings(modelsDirectory: Self.models, backend: .whisperCpp, concurrentChunkCount: 4),
+            output: OutputSettings(formats: [], directory: FileManager.default.temporaryDirectory),
+            llm: .init(settings: settings, apiKey: "sk-test")
+        ))
+        for await jobs in await queue.snapshots() {
+            guard case .refining = jobs[0].status else {
+                continue
+            }
+            if Self.isRecognizing(jobs[1].status) {
+                break
+            }
+            if case .refining = jobs[1].status {
+                break
+            }
+        }
+        return (queue, [copy])
+    }
+
+    /// Log lines so far that contain `text`.
+    private func logCount(_ queue: JobQueue, containing text: String) async -> Int {
+        let entries = Task {
+            var count = 0
+            for await entry in await queue.logs() where entry.message.contains(text) {
+                count += 1
+            }
+            return count
+        }
+        try? await Task.sleep(for: .milliseconds(200))  // the history replays at once
+        entries.cancel()
+        return await entries.value
+    }
+
+    private func waitUntilIdle(_ queue: JobQueue) async -> [Job] {
+        while await queue.isRunning {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        for await jobs in await queue.snapshots() {
+            return jobs
+        }
+        return []
+    }
+
+    @Test(.enabled(if: isAvailable), .timeLimit(.minutes(5)))
+    func recognizesTheNextFileDuringTheLanguageModelStep() async throws {
+        let chat = HeldChat()
+        let engine = TranscriptionEngine()
+        let (queue, copies) = try await startOverlapping(chat, engine: engine)
+        defer { copies.forEach { try? FileManager.default.removeItem(at: $0) } }
+        // The second file finished recognition while the first one's step was held.
+        while await logCount(queue, containing: "Waiting for the language model") == 0 {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        chat.release()
+        let jobs = await waitUntilIdle(queue)
+
+        #expect(jobs.map(\.status) == [.completed, .completed])
+        #expect(jobs.allSatisfy { $0.segments.allSatisfy { $0.text.hasPrefix("EN: ") } })
+        #expect(await logCount(queue, containing: " loaded in ") == 1)  // kept for the second file
+        #expect(await engine.isLoaded == false)  // freed once nothing waits
+        await queue.shutDown()
+    }
+
+    @Test(.enabled(if: isAvailable), .timeLimit(.minutes(5)))
+    func stopPutsBackJobsInBothStages() async throws {
+        let chat = HeldChat()
+        let (queue, copies) = try await startOverlapping(chat, engine: TranscriptionEngine())
+        defer { copies.forEach { try? FileManager.default.removeItem(at: $0) } }
+        await queue.stop()
+        let jobs = await waitUntilIdle(queue)
+        await queue.shutDown()
+        #expect(jobs.map(\.status) == [.queued, .queued])
+    }
+}
+}
+
+/// Transcribing part of a finished job again (real model; skipped where
+/// Models/ is missing).
+extension RealModelSuites {
+struct RetranscriptionTests {
+    private static let repository = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    private static let models = repository.appendingPathComponent("Models")
+    private static let sample = repository.appendingPathComponent("ParityMedia/tts-long.wav")
+    private static let whisperJa = ModelCatalog.scan(models).model(withID: "whisper-ja-1.5b")
+    private static let isAvailable = whisperJa != nil && FileManager.default.fileExists(atPath: sample.path)
+
+    @Test(.enabled(if: isAvailable), .timeLimit(.minutes(5)))
+    func replacesOnlyTheChosenStretch() async throws {
+        let engine = TranscriptionEngine()
+        let queue = JobQueue(engine: engine)
+        let configuration = JobQueue.Configuration(
+            engine: EngineSettings(modelsDirectory: Self.models, backend: .whisperCpp, concurrentChunkCount: 4),
+            output: OutputSettings(formats: [], directory: FileManager.default.temporaryDirectory)
+        )
+        await queue.add([Self.sample], model: try #require(Self.whisperJa))
+        await queue.start(configuration: configuration)
+        var finished: Job?
+        for await jobs in await queue.snapshots() where jobs.first?.status.isFinished == true {
+            finished = jobs.first
+            break
+        }
+        let job = try #require(finished)
+        try #require(job.segments.count >= 4)
+
+        let result = try await queue.retranscribe([1, 2], of: job.segments, in: job.id, model: nil, configuration: configuration)
+
+        let start = job.segments[1].start
+        let end = job.segments[2].end
+        let newLines = result.newLineIndices.map { result.lines[$0] }
+        #expect(!newLines.isEmpty)
+        #expect(newLines.allSatisfy { $0.start >= start && $0.end <= end })
+        #expect(result.lines.first == job.segments.first)
+        #expect(Array(result.lines.suffix(job.segments.count - 3)) == Array(job.segments.dropFirst(3)))
+        #expect(result.untranslatedCount == nil)
+        // The same model on the same audio hears the same words.
+        #expect(newLines.map(\.text).joined() == job.segments[1...2].map(\.text).joined())
+        while await engine.isLoaded {
+            try await Task.sleep(for: .milliseconds(50))  // freed once the idle queue is done with it
+        }
+        await queue.shutDown()
+    }
+}
 }
