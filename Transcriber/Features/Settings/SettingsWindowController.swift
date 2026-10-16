@@ -13,6 +13,10 @@ final class SettingsWindowController: NSWindowController {
             (LLMSettingsViewController(viewModel: viewModel, title: String(localized: "LLM")), "sparkles"),
         ]
         for (pane, symbol) in panes {
+            // Build the form now so its size is known before the first visit;
+            // otherwise that size arrives while the pane loads, and the window
+            // snaps to it instead of animating.
+            pane.loadViewIfNeeded()
             let item = NSTabViewItem(viewController: pane)
             item.label = pane.title ?? ""
             item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: pane.title)
