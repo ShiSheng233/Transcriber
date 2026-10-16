@@ -110,7 +110,8 @@ final class JobQueueViewController: NSViewController {
 
 | 模块 | 入口 | 职责 | 对应原项目 |
 | --- | --- | --- | --- |
-| `MediaDecoding` | `MediaDecoder` | FFmpeg 解码并用 libswresample 转 16 kHz mono s16 → float（见 §5.5） | `decode_audio` |
+| `MediaDecoding` | `MediaDecoder` | FFmpeg 解码并用 libswresample 转 16 kHz mono s16 → float（见 §5.5）；也可按块交出采样，给只做汇总的调用方 | `decode_audio` |
+| `AudioOverview` | `WaveformLoader`（actor） | 编辑器的波形：边解码边汇总成每 10 ms 一个峰值与 RMS（每小时约 1 MB，不保留 PCM），缓存最近 8 个文件；从响度找出比安静底噪高 12 dB 的声音段，供调时间吸附（是响度，不是语音模型） | 新增 |
 | `AudioFeatures` | `LogMelSpectrogram` | vDSP 实现 Whisper 前端：VAD 用的 HF `WhisperFeatureExtractor` 版本，以及识别用的 faster-whisper `FeatureExtractor` 版本（填充与归一化范围不同） | `WhisperFeatureExtractor`, `feature_extractor.py` |
 | `SpeechDetection` | `VoiceActivityDetector` | Core ML 跑 ASMR VAD；`SpeechSegmenter` 是纯函数，实现带滞回的阈值分段 | `vad_manager.py` |
 | `WhisperDecoding` | `WhisperBackend`（协议）、`WindowTranscriber` | 与后端无关的解码：prompt、no_speech、逐步 logits 处理、采样、温度回退、时间戳分段、seek 循环、分词器（见 §5.1–5.3） | CTranslate2 `whisper.cc` / `decoding.cc` + faster-whisper `transcribe.py` |
@@ -273,6 +274,14 @@ queued → loadingModel → decodingAudio → detectingSpeech → transcribing(p
 
 **编辑器命令**：Retranscribe Selected Lines（⌥⌘R）重新识别选中行覆盖的时间段（前后各多解码 1 s 作上下文，保留中点落在该段内的新字幕并裁到段内），替换这些行；这个文件走过 LLM 且 LLM 开着时，新行再送去翻译。Retranslate Selected Lines（⇧⌘R）见 §10 Phase 3。队列里右键 › Recognition Model 给等待中的文件换模型；已结束的文件变为 Transcribe Again With，换模型重新识别（有未保存的编辑时不可用）。
 
+**编辑器（参照 Aegisub）**：编辑面板自上而下是操作栏、波形（仅调时间模式）、编辑框、网格。操作栏的按钮与菜单项发同一个 action，由 `MainWindowController.isCommandEnabled` 统一判断可用；分组：行（插入、删除、拆分▾、合并▾、交换）、时间（设起点/终点到播放头、平移到播放头、连续▾、Shift Times…、Adjust Timing…）、播放（Play Line、播放▾）、选择（Select Lines…、查找替换），右侧两个开关：调时间模式、原文列。
+- **调时间模式**（View › Timing Mode ⌥⌘A，默认关，全局记住）：关着时不显示波形也不解码。开着时在编辑框上方显示波形：拖活动行两端调时间（⇧ 带动相接的邻行，⌥ 关吸附；吸附到 6 pt 内的邻行边、播放头、声音边界），拖行中间平移所选行，松手才写入、一步撤销；拖动时网格与时间字段实时跟随。单击定位，点行号条选行；⌥/⌘ 滚动或捏合缩放（10–2000 pt/s），播放时整页翻。焦点在波形上时 Space 播放/暂停，Q/E/D/W 播放起点前/后、终点前/后 500 ms，S 播放选区，↑↓ 换行，←→ 移播放头 0.1 s（⇧ 1 s）。播放头用 display link 每帧刷新。
+- **Adjust Timing**（⇧⌘I，`TimingPostProcessing`）：lead-in 200 / lead-out 300 ms（只延伸到邻行，不制造重叠）→ 吸附到声音边界（起点 100、终点 150 ms 内，需波形已载入）→ 间隔 < 300 ms 的相邻行延长前一行接上。
+- **Shift Times**（⌘I）：按时间或帧（fps 可选），提前/推后，选中行 / 全部 / 活动行之后，两端 / 只起点 / 只终点。
+- **Select Lines**（⌘L）：CPS 超限、过短、过长、重叠、文本匹配（可正则）、空文本，可要求全部或任一条件，结果替换 / 加入 / 交集 / 减去当前选择；不进撤销栈。
+- **原文列**（⌥⌘O）：文件走过 LLM 时，按时间找回 LLM 之前的原文（时间相同的行，否则中点落在行内的原文行），网格多一列 Source，编辑框多一行只读原文。
+- 其他：在播放头处拆分（⇧⌘D，文本在光标处或按时间比例切开）、合并保留首行文本（⇧⌘J）、交换两行文本、按开始时间排序；播放菜单 ⇧⌘↩ 播放选区、⌥⌘↩ 播放下一行、⌥⌘1/⌃⌘1 播放起点前/后、⌥⌘2/⌃⌘2 播放终点前/后。
+
 **退出**：退出前取消当前任务并释放模型——ggml 的 Metal 设备在进程退出时断言所有缓冲已释放，否则直接 abort。
 
 ## 8. App target 结构
@@ -284,6 +293,8 @@ Transcriber/
 ├─ Features/
 │   ├─ JobQueue/       JobQueueViewController, JobQueueViewModel, JobRowView
 │   ├─ JobDetail/      JobDetailViewController, JobDetailViewModel（播放器 + 字幕列表同步高亮）
+│   ├─ SubtitleEditor/ 编辑面板：操作栏、编辑框、网格、菜单定义、Shift Times / Adjust Timing / Select Lines / 查找替换
+│   ├─ Waveform/       WaveformView, WaveformViewModel（调时间模式的波形）
 │   ├─ Settings/       SettingsWindowController, SettingsViewModel（模式、语言、导出格式、VAD/解码高级参数）
 │   ├─ ModelLibrary/   ModelLibraryViewController, ModelLibraryViewModel（模型目录、下载进度、磁盘占用）
 │   └─ LLMSettings/    LLMSettingsViewController, LLMSettingsViewModel（OpenRouter Key 存 Keychain、模型选择、术语表）
