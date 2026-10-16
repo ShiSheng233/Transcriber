@@ -100,6 +100,10 @@ final class SettingsViewModel {
         store.update { $0.concurrentChunkCount = count }
     }
 
+    func setFilter(_ option: WritableKeyPath<SubtitleFilterSettings, Bool>, isEnabled: Bool) {
+        store.update { $0.filter[keyPath: option] = isEnabled }
+    }
+
     func setFormat(_ format: SubtitleFormat, isEnabled: Bool) {
         store.update { settings in
             var enabled = Set(settings.formats)

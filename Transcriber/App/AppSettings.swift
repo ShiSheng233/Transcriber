@@ -11,6 +11,8 @@ struct AppSettings: Codable, Equatable {
     var modelID: String
     var backend: EngineSettings.Backend
     var concurrentChunkCount: Int
+    /// Optional removal of likely-wrong subtitles; all off by default.
+    var filter: SubtitleFilterSettings
     var formats: [SubtitleFormat]
     /// `nil`: next to each source file, like the original.
     var outputDirectory: URL?
@@ -21,6 +23,7 @@ struct AppSettings: Codable, Equatable {
         modelID: "chickenrice-v0.2",
         backend: .whisperCpp,
         concurrentChunkCount: 4,
+        filter: .none,
         formats: [.srt, .vtt, .lrc],
         outputDirectory: nil,
         llm: .defaults
@@ -31,6 +34,7 @@ struct AppSettings: Codable, Equatable {
         let apiKey = apiKeys.read(for: llm.baseURL)
         return JobQueue.Configuration(
             engine: EngineSettings(modelsDirectory: modelsDirectory, backend: backend, concurrentChunkCount: concurrentChunkCount),
+            filter: filter,
             output: OutputSettings(formats: formats, directory: outputDirectory),
             llm: JobQueue.LLMConfiguration(settings: llm, apiKey: apiKey)
         )
@@ -46,6 +50,7 @@ extension AppSettings {
         modelID = try container.decodeIfPresent(String.self, forKey: .modelID) ?? defaults.modelID
         backend = try container.decodeIfPresent(EngineSettings.Backend.self, forKey: .backend) ?? defaults.backend
         concurrentChunkCount = try container.decodeIfPresent(Int.self, forKey: .concurrentChunkCount) ?? defaults.concurrentChunkCount
+        filter = try container.decodeIfPresent(SubtitleFilterSettings.self, forKey: .filter) ?? defaults.filter
         formats = try container.decodeIfPresent([SubtitleFormat].self, forKey: .formats) ?? defaults.formats
         outputDirectory = try container.decodeIfPresent(URL.self, forKey: .outputDirectory)
         llm = try container.decodeIfPresent(LLMSettings.self, forKey: .llm) ?? defaults.llm

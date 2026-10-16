@@ -1,5 +1,6 @@
 import AppKit
 import SubtitleExport
+import TranscriberCore
 
 final class OutputSettingsViewController: SettingsPaneViewController {
     private var formatCheckboxes: [SubtitleFormat: NSButton] = [:]
@@ -9,6 +10,20 @@ final class OutputSettingsViewController: SettingsPaneViewController {
     )
     private let folderPath = SettingsForm.pathView()
     private var folderRow: NSView?
+    private var filterSwitches: [(option: WritableKeyPath<SubtitleFilterSettings, Bool>, control: NSSwitch)] = []
+
+    private func filterRow(
+        _ title: String,
+        description: String,
+        option: WritableKeyPath<SubtitleFilterSettings, Bool>
+    ) -> NSView {
+        let control = NSSwitch()
+        control.target = self
+        control.action = #selector(filterToggled(_:))
+        control.tag = filterSwitches.count
+        filterSwitches.append((option, control))
+        return SettingsForm.row(title, description: description, control: control)
+    }
 
     override func makeForm() -> NSView {
         let formatsStack = NSStackView()
@@ -33,6 +48,20 @@ final class OutputSettingsViewController: SettingsPaneViewController {
                 SettingsForm.row(String(localized: "Save subtitles"), control: locationPopUp),
                 folderRow,
             ], footer: String(localized: "Files with the same name are replaced.")),
+            SettingsForm.section(String(localized: "Cleanup"), rows: [
+                filterRow(String(localized: "Drop repetition loops"),
+                          description: String(localized: "Text that repeats itself after every retry"),
+                          option: \.dropsRepetitionLoops),
+                filterRow(String(localized: "Drop vocal sounds"),
+                          description: String(localized: "Lines like “…”, “はぁ…” or “♪”"),
+                          option: \.dropsNonverbalLines),
+                filterRow(String(localized: "Merge repeated lines"),
+                          description: String(localized: "Three or more identical lines in a row"),
+                          option: \.mergesRepeatedLines),
+                filterRow(String(localized: "Drop lines with odd timing"),
+                          description: String(localized: "Too fast to read, or a word held for seconds"),
+                          option: \.dropsImplausibleReadingSpeed),
+            ], footer: String(localized: "Rules from WhisperJAV. All off gives the original tool's subtitles; short replies like “うん” can also be removed.")),
         ])
     }
 
@@ -44,6 +73,13 @@ final class OutputSettingsViewController: SettingsPaneViewController {
         locationPopUp.selectItem(at: settings.outputDirectory == nil ? 0 : 1)
         folderPath.url = settings.outputDirectory
         folderRow?.isHidden = settings.outputDirectory == nil
+        for (option, control) in filterSwitches {
+            control.state = settings.filter[keyPath: option] ? .on : .off
+        }
+    }
+
+    @objc private func filterToggled(_ sender: NSSwitch) {
+        viewModel.setFilter(filterSwitches[sender.tag].option, isEnabled: sender.state == .on)
     }
 
     @objc private func formatToggled(_ sender: NSButton) {
