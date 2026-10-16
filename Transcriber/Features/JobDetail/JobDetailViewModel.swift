@@ -114,6 +114,7 @@ final class JobDetailViewModel {
             subtitleMode = nil
             mediaURL = nil
             editor.load([], isEditable: false)
+            waveform.setSpeechSpans([])
             updateWaveform()
             subtitlesPlaceholder = nil
             return
@@ -128,6 +129,7 @@ final class JobDetailViewModel {
         } else {
             editor.follow(job.segments, originalLines: job.linesBeforeLanguageModel, isEditable: isEditable)
         }
+        waveform.setSpeechSpans(job.speechSpans)
         let isEmpty = editor.lines.isEmpty
         subtitlesPlaceholder = switch job.status {
         case .completed: isEmpty ? String(localized: "No speech was found in this file.") : nil

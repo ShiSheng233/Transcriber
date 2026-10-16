@@ -2,22 +2,23 @@ import AppKit
 import TranscriberCore
 
 /// Adjust Timing, Aegisub's timing post-processor: lead-in and lead-out,
-/// snapping to where the sound starts and ends, then closing small gaps.
-/// Snapping needs the waveform, so it is only offered in timing mode.
+/// snapping to where speech starts and ends, then closing small gaps.
+/// Snapping uses the speech found when the file was transcribed; a subtitle
+/// file needs timing mode, which analyzes the audio's loudness instead.
 final class TimingAdjustmentSheet: EditorSheet {
     private enum Key {
         static let prefix = "AdjustTiming"
     }
 
     private let editor: SubtitleEditorViewModel
-    /// Where the sound starts and ends; `nil` until the waveform is loaded.
+    /// Where speech starts and ends; `nil` when it is not known.
     private let soundSpans: () -> [SpeechSpan]?
 
     private lazy var leadInBox = checkbox(String(localized: "Lead-in"))
     private lazy var leadInField = numberField()
     private lazy var leadOutBox = checkbox(String(localized: "Lead-out"))
     private lazy var leadOutField = numberField()
-    private lazy var snapBox = checkbox(String(localized: "Snap to sound"))
+    private lazy var snapBox = checkbox(String(localized: "Snap to speech"))
     private lazy var snapStartField = numberField()
     private lazy var snapEndField = numberField()
     private let snapNote = NSTextField(labelWithString: String(localized: "Turn on Timing Mode to analyze the audio first."))

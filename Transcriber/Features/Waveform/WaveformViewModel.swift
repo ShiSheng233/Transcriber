@@ -14,8 +14,10 @@ final class WaveformViewModel {
     static let zoomStep = 1.5
 
     private(set) var waveform: Waveform?
-    /// Where the audio is louder than its quiet floor, for snapping.
+    /// Where the audio is louder than its quiet floor.
     private(set) var soundSpans: [SpeechSpan] = []
+    /// Where the VAD heard speech when the file was transcribed.
+    private(set) var speechSpans: [SpeechSpan] = []
     private(set) var isLoading = false
     private(set) var loadFailed = false
     private(set) var pointsPerSecond = defaultPointsPerSecond
@@ -32,6 +34,22 @@ final class WaveformViewModel {
 
     var duration: AudioTime {
         waveform?.duration ?? .zero
+    }
+
+    /// What times snap to: the speech the VAD found, or else the loud parts
+    /// of the waveform (a subtitle file was never transcribed); `nil` when
+    /// neither is known yet.
+    var snapSpans: [SpeechSpan]? {
+        if !speechSpans.isEmpty {
+            return speechSpans
+        }
+        return waveform == nil ? nil : soundSpans
+    }
+
+    func setSpeechSpans(_ spans: [SpeechSpan]) {
+        if spans != speechSpans {
+            speechSpans = spans
+        }
     }
 
     /// Loads `url`'s waveform unless it is already shown; `nil` unloads.

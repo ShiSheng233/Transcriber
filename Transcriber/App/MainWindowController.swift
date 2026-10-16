@@ -15,7 +15,7 @@ final class MainWindowController: NSWindowController {
     private lazy var findReplaceSheet = FindReplaceSheet(editor: detailViewModel.editor)
     private lazy var shiftTimesSheet = ShiftTimesSheet(editor: detailViewModel.editor)
     private lazy var timingAdjustmentSheet = TimingAdjustmentSheet(editor: detailViewModel.editor) { [detailViewModel] in
-        detailViewModel.waveform.waveform == nil ? nil : detailViewModel.waveform.soundSpans
+        detailViewModel.waveform.snapSpans
     }
     private lazy var selectLinesSheet = SelectLinesSheet(editor: detailViewModel.editor)
     private let openSettings: () -> Void

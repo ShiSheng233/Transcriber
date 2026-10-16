@@ -89,7 +89,7 @@ final class WaveformView: NSView {
     /// Reads what the drawing uses, so any change redraws.
     private func render() {
         _ = (editor.displayedLines, editor.selection, editor.isEditable, editor.playbackTime)
-        _ = (waveform.waveform, waveform.soundSpans, waveform.isLoading, waveform.loadFailed, waveform.pointsPerSecond, waveform.visibleStart)
+        _ = (waveform.waveform, waveform.snapSpans, waveform.isLoading, waveform.loadFailed, waveform.pointsPerSecond, waveform.visibleStart)
         if editor.activeIndex != displayedActiveIndex {
             displayedActiveIndex = editor.activeIndex
             if let line = editor.activeLine {
@@ -244,7 +244,7 @@ final class WaveformView: NSView {
     private func drawSoundBar(in body: NSRect) {
         NSColor.systemGreen.withAlphaComponent(0.5).setFill()
         let visibleEnd = waveform.time(atX: width)
-        for span in waveform.soundSpans where span.end >= waveform.visibleStart && span.start <= visibleEnd {
+        for span in waveform.snapSpans ?? [] where span.end >= waveform.visibleStart && span.start <= visibleEnd {
             let minX = CGFloat(waveform.x(of: span.start))
             let maxX = CGFloat(waveform.x(of: span.end))
             NSRect(x: minX, y: body.maxY - Metrics.soundBarHeight, width: maxX - minX, height: Metrics.soundBarHeight).fill()
@@ -427,7 +427,7 @@ final class WaveformView: NSView {
         }
     }
 
-    /// The nearest line edge, playhead or sound boundary within 6 points.
+    /// The nearest line edge, playhead or speech boundary within 6 points.
     private func snapTarget(near time: AudioTime, excluding index: Int) -> AudioTime? {
         let threshold = AudioTime(seconds: Double(Metrics.snapDistance) / waveform.pointsPerSecond)
         let visibleEnd = waveform.time(atX: width)
@@ -435,7 +435,7 @@ final class WaveformView: NSView {
         for (other, line) in editor.lines.enumerated() where other != index && line.end >= waveform.visibleStart && line.start <= visibleEnd {
             candidates += [line.start, line.end]
         }
-        for span in waveform.soundSpans where span.end >= waveform.visibleStart && span.start <= visibleEnd {
+        for span in waveform.snapSpans ?? [] where span.end >= waveform.visibleStart && span.start <= visibleEnd {
             candidates += [span.start, span.end]
         }
         let nearest = candidates.min { abs(($0 - time).samples) < abs(($1 - time).samples) }
