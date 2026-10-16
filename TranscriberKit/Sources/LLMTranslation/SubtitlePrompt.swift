@@ -4,8 +4,6 @@ import TranscriberCore
 /// The instructions and JSON payload for one batch of subtitle lines.
 enum SubtitlePrompt {
     enum Job {
-        /// Fix what the speech model misheard, in the subtitles' own language.
-        case proofread
         case polishChinese
         case translate(targetLanguage: String)
         case translateSubtitles(targetLanguage: String)
@@ -14,59 +12,49 @@ enum SubtitlePrompt {
     static let schemaName = "subtitle_lines"
 
     /// `{ "lines": [ { "id": Int, "text": String } ], "batch_summary": String,
-    /// "scene_summary": String }`, nothing else; with `marksHallucinations`,
-    /// each line also has "drop": Bool. Strict schemas need every property
-    /// required.
-    static func schema(marksHallucinations: Bool) -> [String: any Sendable] {
-        guard marksHallucinations else {
-            return schema
+    /// "scene_summary": String }`, nothing else; with `correctsSources`, each
+    /// line also has "source": String (its corrected original), and with
+    /// `marksHallucinations`, "drop": Bool. Strict schemas need every
+    /// property required.
+    static func schema(correctsSources: Bool = false, marksHallucinations: Bool = false) -> [String: any Sendable] {
+        var properties: [String: any Sendable] = ["id": ["type": "integer"], "text": ["type": "string"]]
+        var required = ["id", "text"]
+        if correctsSources {
+            properties["source"] = ["type": "string"]
+            required.append("source")
+        }
+        if marksHallucinations {
+            properties["drop"] = ["type": "boolean"]
+            required.append("drop")
         }
         let line: [String: any Sendable] = [
             "type": "object",
-            "properties": ["id": ["type": "integer"], "text": ["type": "string"], "drop": ["type": "boolean"]] as [String: any Sendable],
-            "required": ["id", "text", "drop"],
+            "properties": properties,
+            "required": required,
             "additionalProperties": false,
         ]
-        var withDrop = schema
-        withDrop["properties"] = [
-            "batch_summary": ["type": "string"] as [String: any Sendable],
-            "scene_summary": ["type": "string"] as [String: any Sendable],
-            "lines": ["type": "array", "items": line] as [String: any Sendable],
-        ] as [String: any Sendable]
-        return withDrop
+        return [
+            "type": "object",
+            "properties": [
+                "batch_summary": ["type": "string"] as [String: any Sendable],
+                "scene_summary": ["type": "string"] as [String: any Sendable],
+                "lines": ["type": "array", "items": line] as [String: any Sendable],
+            ] as [String: any Sendable],
+            "required": ["lines", "batch_summary", "scene_summary"],
+            "additionalProperties": false,
+        ]
     }
 
-    static let schema: [String: any Sendable] = [
-        "type": "object",
-        "properties": [
-            "batch_summary": ["type": "string"] as [String: any Sendable],
-            "scene_summary": ["type": "string"] as [String: any Sendable],
-            "lines": [
-                "type": "array",
-                "items": [
-                    "type": "object",
-                    "properties": ["id": ["type": "integer"], "text": ["type": "string"]],
-                    "required": ["id", "text"],
-                    "additionalProperties": false,
-                ] as [String: any Sendable],
-            ] as [String: any Sendable],
-        ] as [String: any Sendable],
-        "required": ["lines", "batch_summary", "scene_summary"],
-        "additionalProperties": false,
-    ]
-
-    static func systemMessage(for job: Job, glossary: [(source: String, target: String)], marksHallucinations: Bool = false) -> String {
+    /// - Parameter correctsSources: for `.translate`, also return each
+    ///   Japanese line with what the speech model misheard fixed.
+    static func systemMessage(
+        for job: Job,
+        glossary: [(source: String, target: String)],
+        correctsSources: Bool = false,
+        marksHallucinations: Bool = false
+    ) -> String {
         var instructions: String
         switch job {
-        case .proofread:
-            instructions = """
-                You proofread subtitles that a speech model transcribed from Japanese audio (anime, drama, \
-                ASMR and similar). Fix words the model misheard: wrong kanji for a homophone, broken or \
-                garbled words, names and terms written inconsistently, using the surrounding lines as \
-                context. Keep the speaker's own wording, tone, fillers and sounds; do not rewrite for \
-                style and do not translate. Keep each line in its language. Leave lines that are already \
-                right unchanged.
-                """
         case .polishChinese:
             instructions = """
                 You edit Chinese subtitles that a speech model translated directly from Japanese audio \
@@ -82,6 +70,16 @@ enum SubtitlePrompt {
                 and keep the speaker's tone. Transcription can contain mistakes; translate what was most \
                 likely said.
                 """
+            if correctsSources {
+                instructions += """
+
+                    Also return "source" for every line: the Japanese line with the words the speech model \
+                    misheard fixed (wrong kanji for a homophone, broken or garbled words, names and terms \
+                    written inconsistently), and translate that corrected line. In "source", keep the \
+                    speaker's own wording, tone, fillers and sounds, do not rewrite for style, and leave a \
+                    line that is already right unchanged.
+                    """
+            }
         case .translateSubtitles(let targetLanguage):
             instructions = """
                 You translate existing subtitles into \(targetLanguage). Detect the source language \
@@ -119,15 +117,8 @@ enum SubtitlePrompt {
                 """
         }
         if !glossary.isEmpty {
-            if case .proofread = job {
-                // The glossary maps Japanese to the translation; proofreading stays
-                // in Japanese, so only its source terms help (as spellings to expect).
-                instructions += "\nThese names and terms occur; write them this way:\n"
-                instructions += glossary.map { "- \($0.source)" }.joined(separator: "\n")
-            } else {
-                instructions += "\nAlways use these renderings:\n"
-                instructions += glossary.map { "- \($0.source) → \($0.target)" }.joined(separator: "\n")
-            }
+            instructions += "\nAlways use these renderings:\n"
+            instructions += glossary.map { "- \($0.source) → \($0.target)" }.joined(separator: "\n")
         }
         return instructions
     }
@@ -238,6 +229,8 @@ enum SubtitlePrompt {
         struct Line: Decodable, Sendable {
             let id: Int
             let text: String
+            /// The corrected original; only asked for when a translation also proofreads.
+            var source: String? = nil
             /// Only asked for when the run may remove invented lines.
             var drop: Bool? = nil
         }
@@ -256,6 +249,11 @@ enum SubtitlePrompt {
         /// The text per id; a repeated id keeps its first text.
         var textByID: [Int: String] {
             Dictionary(lines.map { ($0.id, $0.text) }, uniquingKeysWith: { first, _ in first })
+        }
+
+        /// The corrected original per id, when asked for; a repeated id keeps its first.
+        var sourceByID: [Int: String] {
+            Dictionary(lines.compactMap { line in line.source.map { (line.id, $0) } }, uniquingKeysWith: { first, _ in first })
         }
 
         /// Ids the model marked as not speech.

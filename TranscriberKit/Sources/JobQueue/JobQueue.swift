@@ -288,10 +288,25 @@ public actor JobQueue {
         )
         let keepsOriginal = llm.settings.keepsOriginalLine && !(job.model?.llmMode == .polish)
         var updated = lines
+        var correctedByTimes: [TimeRange: String] = [:]
         for (index, text) in result.answeredLines where chosen.contains(index) {
             // Bilingual only when the source is known; otherwise it may be a translation already.
             let hasSource = originalByTimes[TimeRange(lines[index])] != nil
-            updated[index].text = keepsOriginal && hasSource ? "\(text)\n\(sources[index].text)" : text
+            let source = hasSource ? result.correctedSources[index] ?? sources[index].text : sources[index].text
+            if hasSource, source != sources[index].text {
+                correctedByTimes[TimeRange(lines[index])] = source
+            }
+            updated[index].text = keepsOriginal && hasSource ? "\(text)\n\(source)" : text
+        }
+        if !correctedByTimes.isEmpty {
+            update(jobID) { job in
+                for index in job.linesBeforeLanguageModel.indices {
+                    if let corrected = correctedByTimes[TimeRange(job.linesBeforeLanguageModel[index])] {
+                        job.linesBeforeLanguageModel[index].text = corrected
+                    }
+                }
+            }
+            log(.info, jobID, "\(correctedByTimes.count) recognized line(s) corrected")
         }
         let unanswered = chosen.count - result.answeredLines.count
         log(unanswered > 0 ? .warning : .info, jobID, unanswered > 0
@@ -311,9 +326,12 @@ public actor JobQueue {
         }
     }
 
+    /// Translations of Japanese transcripts also proofread them when the
+    /// settings ask; the refiner ignores that for other jobs.
     private func makeRefiner(for llm: LLMConfiguration, marksHallucinations: Bool = false) -> SubtitleRefiner {
         var configuration = SubtitleRefiner.Configuration(model: llm.settings.model)
         configuration.marksHallucinations = marksHallucinations
+        configuration.correctsSources = llm.settings.proofreadsTranscript
         return SubtitleRefiner(client: makeChatClient(llm.settings.baseURL, llm.apiKey), configuration: configuration, cache: llmReplyCache)
     }
 
@@ -608,15 +626,7 @@ public actor JobQueue {
             ? .polishChinese
             : .translate(targetLanguage: llm.settings.targetLanguage)
         do {
-            var lines = segments
-            var removesHallucinations = llm.settings.removesHallucinations
-            // Japanese is proofread in Japanese first, so the translation starts
-            // from what was said; polishing already corrects Chinese output.
-            if llm.settings.proofreadsTranscript, model.llmMode == .translate {
-                lines = try await refine(lines, jobID: job.id, as: .proofread, removesHallucinations: removesHallucinations, with: llm)
-                removesHallucinations = false
-            }
-            return try await refine(lines, jobID: job.id, as: refinerJob, removesHallucinations: removesHallucinations, with: llm)
+            return try await refine(segments, jobID: job.id, as: refinerJob, removesHallucinations: llm.settings.removesHallucinations, with: llm)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -737,7 +747,6 @@ public actor JobQueue {
             $0.linesBeforeLanguageModel = segments
         }
         let action = switch refinerJob {
-        case .proofread: "Proofreading"
         case .polishChinese: "Polishing"
         case .translate, .translateSubtitles: "Translating"
         }
@@ -763,15 +772,22 @@ public actor JobQueue {
             update(jobID) { $0.warning = warning }
             log(.warning, jobID, warning)
         }
-        if case .proofread = refinerJob {
-            let changed = result.answeredLines.filter { segments[$0.key].text != $0.value }.count
-            log(.info, jobID, "\(changed) line(s) corrected")
+        // Proofread originals replace what the speech model heard, for the
+        // editor, bilingual files and any later retranslation.
+        var originals = segments
+        for (index, source) in result.correctedSources where originals.indices.contains(index) {
+            originals[index].text = source
+        }
+        if !result.correctedSources.isEmpty {
+            let changed = result.correctedSources.filter { segments[$0.key].text != $0.value }.count
+            log(.info, jobID, "\(changed) recognized line(s) corrected")
+            update(jobID) { $0.linesBeforeLanguageModel = originals }
         }
         var refined = result.segments
         if case .translate = refinerJob, llm.settings.keepsOriginalLine {
-            refined = refined.withOriginalLines(from: segments)
+            refined = refined.withOriginalLines(from: originals)
         } else if case .translateSubtitles = refinerJob, llm.settings.keepsOriginalLine {
-            refined = refined.withOriginalLines(from: segments)
+            refined = refined.withOriginalLines(from: originals)
         }
         guard !result.droppedLines.isEmpty else {
             return refined

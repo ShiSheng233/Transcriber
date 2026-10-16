@@ -67,7 +67,7 @@ struct ChatCompletionsClientTests {
             model: "test/model",
             messages: [ChatMessage(role: .user, content: "hi")],
             schemaName: SubtitlePrompt.schemaName,
-            schema: SubtitlePrompt.schema,
+            schema: SubtitlePrompt.schema(),
             temperature: 0.3
         )
     }

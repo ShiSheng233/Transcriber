@@ -51,7 +51,7 @@ struct TranscribeCommand: AsyncParsableCommand {
     @Option(help: "Target language when the LLM translates.")
     var llmTargetLanguage: String = "简体中文"
 
-    @Flag(help: "Before translating Japanese, proofread it with the LLM.")
+    @Flag(help: "While translating Japanese, also fix what the speech model misheard.")
     var llmProofread = false
 
     @Flag(help: "Let the first LLM pass remove lines that cannot be speech.")
@@ -184,19 +184,14 @@ struct TranscribeCommand: AsyncParsableCommand {
     }
 
     private func refineWithLLM(_ segments: [TimedText], recognitionModel: RecognitionModel, model: String) async throws -> [TimedText] {
-        var lines = segments
-        var removesHallucinations = llmRemoveHallucinations
-        if llmProofread, recognitionModel.llmMode == .translate {
-            lines = try await refineWithLLM(lines, job: .proofread, model: model, removesHallucinations: removesHallucinations)
-            removesHallucinations = false
-        }
         let job: SubtitleRefiner.Job = recognitionModel.llmMode == .polish ? .polishChinese : .translate(targetLanguage: llmTargetLanguage)
-        return try await refineWithLLM(lines, job: job, model: model, removesHallucinations: removesHallucinations)
+        return try await refineWithLLM(segments, job: job, model: model, removesHallucinations: llmRemoveHallucinations)
     }
 
     private func refineWithLLM(_ segments: [TimedText], job: SubtitleRefiner.Job, model: String, removesHallucinations: Bool) async throws -> [TimedText] {
         var configuration = SubtitleRefiner.Configuration(model: model)
         configuration.marksHallucinations = removesHallucinations
+        configuration.correctsSources = llmProofread
         let refiner = SubtitleRefiner(client: try llmEndpoint.makeClient(), configuration: configuration)
         let start = ContinuousClock.now
         let result = try await refiner.refine(segments, job: job) { batch in
@@ -204,6 +199,10 @@ struct TranscribeCommand: AsyncParsableCommand {
         }
         if result.failedBatchCount > 0 {
             print("  warning: \(result.failedBatchCount) of \(result.batchCount) batches failed: \(result.firstFailure ?? "")")
+        }
+        let corrected = result.correctedSources.filter { segments[$0.key].text != $0.value }
+        for (index, source) in corrected.sorted(by: { $0.key < $1.key }) {
+            print("  corrected: \(segments[index].text) → \(source)")
         }
         for index in result.droppedLines.sorted() {
             print("  removed as not speech: \(segments[index].text)")

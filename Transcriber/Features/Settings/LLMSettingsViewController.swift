@@ -84,9 +84,9 @@ final class LLMSettingsViewController: SettingsPaneViewController {
                 SettingsForm.row(String(localized: "Improve subtitles"), description: String(localized: "Polish Chinese or translate Japanese"), control: enabledSwitch),
             ], footer: String(localized: "Runs after transcription. Timing never changes.")),
             SettingsForm.section(String(localized: "Correction"), rows: [
-                SettingsForm.row(String(localized: "Fix recognition mistakes first"), description: String(localized: "Proofread Japanese before translating"), control: proofreadSwitch),
+                SettingsForm.row(String(localized: "Fix recognition mistakes"), description: String(localized: "Correct the Japanese while translating it"), control: proofreadSwitch),
                 SettingsForm.row(String(localized: "Remove invented lines"), description: String(localized: "Outros, credits and loops that were never said"), control: removesHallucinationsSwitch),
-            ], footer: String(localized: "Proofreading is one more pass over the file. Lines the speech model was unsure of are checked with extra care; removed lines are listed in the Activity window.")),
+            ], footer: String(localized: "Corrections come in the same request as the translation and replace the recognized Japanese. Lines the speech model was unsure of are checked with extra care; removed lines are listed in the Activity window.")),
             SettingsForm.section(String(localized: "Service"), rows: [
                 SettingsForm.row(String(localized: "Provider"), control: providerPopUp),
                 SettingsForm.row(String(localized: "Base URL"), control: SettingsForm.field(baseURLField)),

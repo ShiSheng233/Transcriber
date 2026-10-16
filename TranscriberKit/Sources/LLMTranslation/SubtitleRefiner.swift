@@ -21,10 +21,11 @@ import TranscriberCore
 /// Lines the speech model was unsure of are marked doubtful in the request.
 /// With `marksHallucinations`, the model may also mark lines that cannot be
 /// speech; they are reported in `droppedLines` for the caller to remove.
+/// With `correctsSources`, a translation also returns each original line
+/// with what the speech model misheard fixed, in `correctedSources`, so
+/// proofreading costs no second pass.
 public struct SubtitleRefiner: Sendable {
     public enum Job: Sendable {
-        /// Fix what the speech model misheard, in the subtitles' own language.
-        case proofread
         case polishChinese
         case translate(targetLanguage: String)
         /// Existing subtitles in any language, e.g. imported from a file.
@@ -48,6 +49,8 @@ public struct SubtitleRefiner: Sendable {
         public var earlierBatchSummaryCount = 5
         /// Lets the model mark lines that cannot be speech, to be removed.
         public var marksHallucinations = false
+        /// For `.translate`: also return each original with its mishearings fixed.
+        public var correctsSources = false
 
         public init(model: String) {
             self.model = model
@@ -68,6 +71,9 @@ public struct SubtitleRefiner: Sendable {
         public let segments: [TimedText]
         /// The new text of every line the model answered, by index.
         public let answeredLines: [Int: String]
+        /// With `correctsSources`, each answered line's original as the model
+        /// corrected it, by index (unchanged lines included).
+        public let correctedSources: [Int: String]
         /// Lines the model marked as not speech (with `marksHallucinations`);
         /// they keep their text in `segments`.
         public let droppedLines: Set<Int>
@@ -114,24 +120,24 @@ public struct SubtitleRefiner: Sendable {
         )
         guard plan.batchCount > 0 else {
             return Result(
-                segments: segments, answeredLines: [:], droppedLines: [], failedBatchCount: 0, batchCount: 0, reusedBatchCount: 0, firstFailure: nil
+                segments: segments, answeredLines: [:], correctedSources: [:], droppedLines: [], failedBatchCount: 0, batchCount: 0, reusedBatchCount: 0, firstFailure: nil
             )
         }
         let promptJob: SubtitlePrompt.Job = switch job {
-        case .proofread: .proofread
         case .polishChinese: .polishChinese
         case .translate(let language): .translate(targetLanguage: language)
         case .translateSubtitles(let language): .translateSubtitles(targetLanguage: language)
         }
         let system = ChatMessage(role: .system, content: SubtitlePrompt.systemMessage(
-            for: promptJob, glossary: glossary, marksHallucinations: configuration.marksHallucinations
+            for: promptJob, glossary: glossary, correctsSources: correctsSources(for: job), marksHallucinations: configuration.marksHallucinations
         ))
         let context = SceneContext(
-            segments: segments, system: system, total: plan.batchCount,
+            segments: segments, system: system, correctsSources: correctsSources(for: job), total: plan.batchCount,
             reusesCachedReplies: reusesCachedReplies, progress: progress
         )
 
         var answeredLines: [Int: String] = [:]
+        var correctedSources: [Int: String] = [:]
         var droppedLines = Set<Int>()
         var failures: [any Error] = []
         var reusedCount = 0
@@ -150,6 +156,7 @@ public struct SubtitleRefiner: Sendable {
                     switch outcome.result {
                     case .success(let answer):
                         answeredLines.merge(answer.lines) { _, new in new }
+                        correctedSources.merge(answer.sources) { _, new in new }
                         droppedLines.formUnion(answer.dropped)
                         reusedCount += outcome.wasCached ? 1 : 0
                     case .failure(let error):
@@ -173,6 +180,7 @@ public struct SubtitleRefiner: Sendable {
         return Result(
             segments: refined,
             answeredLines: answeredLines,
+            correctedSources: correctedSources,
             droppedLines: droppedLines,
             failedBatchCount: failures.count,
             batchCount: plan.batchCount,
@@ -181,10 +189,19 @@ public struct SubtitleRefiner: Sendable {
         )
     }
 
+    /// Only translations of transcripts proofread their originals.
+    private func correctsSources(for job: Job) -> Bool {
+        guard configuration.correctsSources, case .translate = job else {
+            return false
+        }
+        return true
+    }
+
     /// What every scene of one run shares, including the count of finished batches.
     private final class SceneContext: Sendable {
         let segments: [TimedText]
         let system: ChatMessage
+        let correctsSources: Bool
         let total: Int
         let reusesCachedReplies: Bool
         let progress: @Sendable (BatchProgress) -> Void
@@ -193,12 +210,14 @@ public struct SubtitleRefiner: Sendable {
         init(
             segments: [TimedText],
             system: ChatMessage,
+            correctsSources: Bool,
             total: Int,
             reusesCachedReplies: Bool,
             progress: @escaping @Sendable (BatchProgress) -> Void
         ) {
             self.segments = segments
             self.system = system
+            self.correctsSources = correctsSources
             self.total = total
             self.reusesCachedReplies = reusesCachedReplies
             self.progress = progress
@@ -216,6 +235,8 @@ public struct SubtitleRefiner: Sendable {
     private struct BatchAnswer: Sendable {
         /// New text by line index.
         let lines: [Int: String]
+        /// Corrected originals by line index, when asked for.
+        let sources: [Int: String]
         /// Lines marked as not speech.
         let dropped: Set<Int>
     }
@@ -254,13 +275,24 @@ public struct SubtitleRefiner: Sendable {
                 earlierBatches: Array(batchSummaries.suffix(configuration.earlierBatchSummaryCount))
             )
             do {
-                let (reply, wasCached) = try await requestLines(request, system: context.system, reusesCachedReplies: context.reusesCachedReplies)
+                let (reply, wasCached) = try await requestLines(
+                    request, system: context.system, correctsSources: context.correctsSources, reusesCachedReplies: context.reusesCachedReplies
+                )
                 let dropped = configuration.marksHallucinations ? reply.droppedIDs : []
                 var lines: [Int: String] = [:]
                 for (index, text) in reply.textByID where !dropped.contains(index) {
                     let cleaned = SubtitlePrompt.removingAddedTime(from: text, original: segments[index].text)
                     if !cleaned.pythonStripped.isEmpty {
                         lines[index] = cleaned
+                    }
+                }
+                var sources: [Int: String] = [:]
+                if context.correctsSources {
+                    for (index, source) in reply.sourceByID where lines[index] != nil {
+                        let cleaned = SubtitlePrompt.removingAddedTime(from: source, original: segments[index].text)
+                        if !cleaned.pythonStripped.isEmpty {
+                            sources[index] = cleaned
+                        }
                     }
                 }
                 written.merge(lines) { _, new in new }
@@ -270,7 +302,7 @@ public struct SubtitleRefiner: Sendable {
                 if let summary = reply.sceneSummary?.pythonStripped, !summary.isEmpty {
                     sceneSummary = summary
                 }
-                outcomes.append(BatchOutcome(result: .success(BatchAnswer(lines: lines, dropped: dropped)), wasCached: wasCached))
+                outcomes.append(BatchOutcome(result: .success(BatchAnswer(lines: lines, sources: sources, dropped: dropped)), wasCached: wasCached))
                 context.reportBatch(lines: lines, dropped: dropped)
             } catch let error where Self.endsTheRun(error) {
                 throw error
@@ -303,6 +335,7 @@ public struct SubtitleRefiner: Sendable {
     private func requestLines(
         _ request: BatchRequest,
         system: ChatMessage,
+        correctsSources: Bool,
         reusesCachedReplies: Bool
     ) async throws -> (SubtitlePrompt.Reply, wasCached: Bool) {
         let expectedIDs = Set(request.lines.map(\.id))
@@ -339,7 +372,7 @@ public struct SubtitleRefiner: Sendable {
                 model: configuration.model,
                 messages: [system, user],
                 schemaName: SubtitlePrompt.schemaName,
-                schema: SubtitlePrompt.schema(marksHallucinations: configuration.marksHallucinations),
+                schema: SubtitlePrompt.schema(correctsSources: correctsSources, marksHallucinations: configuration.marksHallucinations),
                 temperature: configuration.temperature
             )
             guard let reply = Self.decode(data)?.limited(to: expectedIDs) else {

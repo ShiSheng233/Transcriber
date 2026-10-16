@@ -43,7 +43,7 @@ struct LLMContextAndTimesTests {
 
     @Test func sendsTimesAndTheSceneAnswersAsContext() async throws {
         let model = TimeEchoingModel(prefixesTime: false)
-        _ = try await Self.refiner(model, batchSize: 2).refine(Self.segments(4), job: .proofread)
+        _ = try await Self.refiner(model, batchSize: 2).refine(Self.segments(4), job: .polishChinese)
         let bodies = model.bodies
         let first = try #require(bodies.first { (($0["lines"] as? [[String: Any]])?.first?["id"] as? Int) == 0 })
         #expect((first["lines"] as? [[String: Any]])?[1]["start"] as? String == "0:02.0")
@@ -78,15 +78,15 @@ struct LLMContextAndTimesTests {
         let segments = Self.segments(4)
 
         let firstModel = TimeEchoingModel(prefixesTime: false)
-        _ = try await SubtitleRefiner(client: firstModel, configuration: configuration, cache: cache).refine(segments, job: .proofread)
+        _ = try await SubtitleRefiner(client: firstModel, configuration: configuration, cache: cache).refine(segments, job: .polishChinese)
         let againModel = TimeEchoingModel(prefixesTime: false)
-        let again = try await SubtitleRefiner(client: againModel, configuration: configuration, cache: cache).refine(segments, job: .proofread)
+        let again = try await SubtitleRefiner(client: againModel, configuration: configuration, cache: cache).refine(segments, job: .polishChinese)
         #expect(againModel.bodies.isEmpty && again.reusedBatchCount == 2)
 
         var moved = segments
         moved[3].end = AudioTime(seconds: 9)
         let movedModel = TimeEchoingModel(prefixesTime: false)
-        _ = try await SubtitleRefiner(client: movedModel, configuration: configuration, cache: cache).refine(moved, job: .proofread)
+        _ = try await SubtitleRefiner(client: movedModel, configuration: configuration, cache: cache).refine(moved, job: .polishChinese)
         // Asked again: the batch with the moved line, and the one that has it as context.
         #expect(movedModel.bodies.count == 2)
     }

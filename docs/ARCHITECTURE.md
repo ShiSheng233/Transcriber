@@ -400,8 +400,8 @@ JobQueue、JobDetail 预览、Settings（含后端选择、Core ML 编码器开�
 - **场景与滚动摘要**（参照 WhisperJAV / PySubtrans）：相邻两行间隔 > 120 s 切成新场景；场景内的批次依次发送，每批要求模型额外返回 `batch_summary` 与 `scene_summary`，后续批次带上 `scene_so_far` 和最近 5 条批次摘要，名字、关系、语气更一致。场景之间并行（4 个）；超过 5 批的场景再切开，保证没有长停顿的片子也能并行。
 - **续跑**：完整回复按“模型 + 指令 + 本批行与上下文”（不含摘要）的 SHA-256 存进 `~/Library/Caches/dev.shisheng.Transcriber/LLMReplies`，保留 14 天；任务停止、部分失败或重跑时已完成的批次直接复用，活动日志会写复用了几批。
 - **校对与去幻觉**（设置 › LLM › Correction，默认关，CLI `--llm-proofread` `--llm-remove-hallucinations`）：
-  - Fix recognition mistakes first：translate 模式的模型（日文输出）在翻译前先用日文校对一遍，只改听错的词（同音错字、破碎的词、前后不一致的名字），保留原话的措辞、语气和语气词；翻译从校对后的文本出发，原文列显示的也是它。polish 模式本来就在修正中文，不另加这一遍。
-  - Remove invented lines：第一遍 LLM（校对，或者直接翻译/润色）的回复里每行多一个 `drop`，标为 true 的行（视频结尾、频道推广、字幕署名、循环、与上下文无关的文本）从结果里删掉，活动日志逐条列出；拿不准时保留。不另花一遍。
+  - Fix recognition mistakes：translate 模式的模型（日文输出）在**同一个翻译请求**里顺带校对：回复的每行除 `text`（译文）外多一个 `source`，即改掉听错的词（同音错字、破碎的词、前后不一致的名字）后的日文，保留原话的措辞、语气和语气词，译文按改正后的日文翻。改正后的日文替换任务的原文（`linesBeforeLanguageModel`），编辑器原文、双语字幕和之后的单句重翻都用它。原来单独一遍校对会让请求数和费用翻倍，翻译提示词本来就要求“按最可能说的内容翻译”，所以合并。polish 模式不校对。
+  - Remove invented lines：LLM（翻译或润色）的回复里每行多一个 `drop`，标为 true 的行（视频结尾、频道推广、字幕署名、循环、与上下文无关的文本）从结果里删掉，活动日志逐条列出；拿不准时保留。不另花一遍。
   - 识别时没通过 Whisper 自身检查的行在请求里带 `"doubtful": true`，提示模型重点检查。只在为 true 时发送，其他请求与缓存键不变。
 - **单句重翻**：字幕编辑器选中若干行 › Retranslate Selected Lines（⇧⌘R）。每行按时间找回 LLM 之前的原文（新加或改过时间的行用当前文本），前后行作为上下文，不复用缓存；结果作为一个可撤销步骤写回，没回答的行保持不变并提示。
 

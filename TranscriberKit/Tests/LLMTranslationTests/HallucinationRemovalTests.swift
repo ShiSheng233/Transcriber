@@ -4,9 +4,15 @@ import Testing
 import TranscriberCore
 @testable import LLMTranslation
 
-/// Marks lines containing "ご視聴" as not speech, and records what it was sent.
+/// Marks lines containing "ご視聴" as not speech, optionally returns a
+/// corrected original, and records what it was sent.
 private final class DroppingModel: StructuredChatCompleting {
+    private let returnsSources: Bool
     private let requests = Mutex<[(messages: [ChatMessage], schema: [String: any Sendable])]>([])
+
+    init(returnsSources: Bool = false) {
+        self.returnsSources = returnsSources
+    }
 
     var recorded: [(messages: [ChatMessage], schema: [String: any Sendable])] {
         requests.withLock { $0 }
@@ -18,7 +24,11 @@ private final class DroppingModel: StructuredChatCompleting {
         let lines = payload?["lines"] as? [[String: Any]] ?? []
         let reply = lines.map { line -> [String: Any] in
             let text = line["text"] as? String ?? ""
-            return ["id": line["id"] ?? 0, "text": "fixed " + text, "drop": text.contains("ご視聴")]
+            var reply: [String: Any] = ["id": line["id"] ?? 0, "text": "fixed " + text, "drop": text.contains("ご視聴")]
+            if returnsSources {
+                reply["source"] = "source " + text
+            }
+            return reply
         }
         return try JSONSerialization.data(withJSONObject: ["lines": reply])
     }
@@ -36,7 +46,7 @@ struct HallucinationRemovalTests {
         let model = DroppingModel()
         var configuration = SubtitleRefiner.Configuration(model: "test/model")
         configuration.marksHallucinations = true
-        let result = try await SubtitleRefiner(client: model, configuration: configuration).refine(Self.lines, job: .proofread)
+        let result = try await SubtitleRefiner(client: model, configuration: configuration).refine(Self.lines, job: .polishChinese)
 
         #expect(result.droppedLines == [1])
         #expect(result.segments.map(\.text) == ["fixed おはよう", "ご視聴ありがとうございました"])  // a dropped line keeps its text
@@ -50,18 +60,33 @@ struct HallucinationRemovalTests {
     @Test func ignoresDropMarksUnlessAskedFor() async throws {
         let model = DroppingModel()
         let result = try await SubtitleRefiner(client: model, configuration: SubtitleRefiner.Configuration(model: "test/model"))
-            .refine(Self.lines, job: .proofread)
+            .refine(Self.lines, job: .polishChinese)
         #expect(result.droppedLines.isEmpty)
         #expect(result.segments[1].text == "fixed ご視聴ありがとうございました")
         #expect(result.segments[1].confidence == Self.doubtful)  // the refiner keeps what it does not change
         #expect(!(model.recorded.first?.messages[0].content.contains("\"drop\"") ?? true))
     }
 
-    @Test func proofreadingUsesOnlyTheGlossarysSourceTerms() {
-        let glossary = [(source: "お兄ちゃん", target: "哥哥")]
-        let proofread = SubtitlePrompt.systemMessage(for: .proofread, glossary: glossary)
-        #expect(proofread.contains("- お兄ちゃん") && !proofread.contains("哥哥"))
-        let translate = SubtitlePrompt.systemMessage(for: .translate(targetLanguage: "简体中文"), glossary: glossary)
-        #expect(translate.contains("お兄ちゃん → 哥哥"))
+    @Test func translationReturnsCorrectedOriginalsWhenAsked() async throws {
+        let model = DroppingModel(returnsSources: true)
+        var configuration = SubtitleRefiner.Configuration(model: "test/model")
+        configuration.correctsSources = true
+        let result = try await SubtitleRefiner(client: model, configuration: configuration)
+            .refine(Self.lines, job: .translate(targetLanguage: "简体中文"))
+
+        #expect(result.correctedSources == [0: "source おはよう", 1: "source ご視聴ありがとうございました"])
+        let request = try #require(model.recorded.first)
+        #expect(request.messages[0].content.contains("\"source\""))
+        let items = ((request.schema["properties"] as? [String: any Sendable])?["lines"] as? [String: any Sendable])?["items"] as? [String: any Sendable]
+        #expect((items?["required"] as? [String]) == ["id", "text", "source"])
+    }
+
+    @Test func onlyTranslationsCorrectOriginals() async throws {
+        let model = DroppingModel(returnsSources: true)
+        var configuration = SubtitleRefiner.Configuration(model: "test/model")
+        configuration.correctsSources = true
+        let result = try await SubtitleRefiner(client: model, configuration: configuration).refine(Self.lines, job: .polishChinese)
+        #expect(result.correctedSources.isEmpty)
+        #expect(!(model.recorded.first?.messages[0].content.contains("\"source\"") ?? true))
     }
 }

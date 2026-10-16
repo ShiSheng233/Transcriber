@@ -16,10 +16,10 @@ public struct LLMSettings: Hashable, Sendable, Codable {
     public var glossary: String
     /// Translation only: keep the original line under the translation.
     public var keepsOriginalLine: Bool
-    /// Before translating Japanese, a pass that fixes what the speech model
-    /// misheard, in Japanese.
+    /// While translating Japanese, also fix what the speech model misheard;
+    /// the corrected Japanese replaces the recognized lines (same request).
     public var proofreadsTranscript: Bool
-    /// The first LLM pass may remove lines that cannot be speech (video
+    /// The LLM may remove lines that cannot be speech (video
     /// outros, subtitle credits, loops, text unrelated to the scene).
     public var removesHallucinations: Bool
 
