@@ -55,13 +55,16 @@ final class OutputSettingsViewController: SettingsPaneViewController {
                 filterRow(String(localized: "Drop vocal sounds"),
                           description: String(localized: "Lines like “…”, “はぁ…” or “♪”"),
                           option: \.dropsNonverbalLines),
+                filterRow(String(localized: "Drop invented outros"),
+                          description: String(localized: "Lines like “ご視聴ありがとうございました” or subtitle credits"),
+                          option: \.dropsHallucinatedPhrases),
                 filterRow(String(localized: "Merge repeated lines"),
                           description: String(localized: "Three or more identical lines in a row"),
                           option: \.mergesRepeatedLines),
                 filterRow(String(localized: "Drop lines with odd timing"),
                           description: String(localized: "Too fast to read, or a word held for seconds"),
                           option: \.dropsImplausibleReadingSpeed),
-            ], footer: String(localized: "Rules from WhisperJAV. All off gives the original tool's subtitles; short replies like “うん” can also be removed.")),
+            ], footer: String(localized: "All off gives the original tool's subtitles; short replies like “うん” can also be removed.")),
         ])
     }
 
