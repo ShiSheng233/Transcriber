@@ -367,8 +367,8 @@ chunk 之间相互独立，并行处理不影响结果；温度回退的随机�
 5. ✅ 基准 A 工具链（`make baseline-a` / `ours` / `parity-report`）；**等待真实测试媒体**放入 `ParityMedia/`。
 6. 基准 B：mlx-whisper Python 原型（模型已就绪并冒烟通过）。
 7. ✅ `WhisperDecoding`：分词器、CTranslate2 逐步 logits 处理、采样、回退、分段、seek、VAD 时间映射；whisper.cpp 后端；`TranscriptionPipeline` 端到端可用（`transcriber-cli transcribe`）。
-8. ✅ `WhisperMLX` 后端：mlx-audio-swift 的层都是 internal，无法接入我们的解码循环，因此自己移植 mlx-whisper 的 `whisper.py`（权重命名一致）。待做：跨 chunk batch 解码（动态合批：多个会话的单步解码合成一次前向）。
-9. ✅ 性能：whisper.cpp 4 路并行 chunk 为默认（§9.2）；MLX batch 完成后复测。
+8. ✅ `WhisperMLX` 后端：mlx-audio-swift 的层都是 internal，无法接入我们的解码循环，因此自己移植 mlx-whisper 的 `whisper.py`（权重命名一致）。跨 chunk batch 解码已完成（`DecoderSlotBatch` + `BatchingCoordinator`：并发会话的单步解码在 2 ms 内凑齐后合成一次前向，固定 4 行以保证结果不随并发变化）。设置 › General › Engine 选 MLX 即启用。
+9. ✅ 性能：whisper.cpp 4 路并行 chunk 为默认（§9.2）。MLX batch 已完成，§9.2 的 MLX 数字是合批之前测的，待用 release 编译复测后再定默认后端。
 
 ### Phase 1：完整链路（CLI 可用）
 
