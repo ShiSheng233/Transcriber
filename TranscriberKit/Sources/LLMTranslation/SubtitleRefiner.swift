@@ -4,8 +4,11 @@ import TranscriberCore
 
 /// Polishes or translates subtitle text with a language model.
 ///
-/// Times never change: only each line's text is replaced. Lines are sent in
-/// batches with a few original lines of context on both sides. Within a
+/// Times never change: the model sees each line's start and end to judge
+/// pauses and pace, but its reply has no place for times, and only each
+/// line's text is replaced (a time it writes into the text is removed).
+/// Lines are sent in batches with a few lines of context on both sides;
+/// context lines the scene already answered carry that answer too. Within a
 /// scene (lines without a long pause) batches go one after another, each
 /// with the summaries the model wrote for the earlier ones; scenes run at
 /// the same time. The reply must return exactly the batch's ids: one that
@@ -228,15 +231,25 @@ public struct SubtitleRefiner: Sendable {
         var sceneSummary: String?
         var batchSummaries: [String] = []
         var outcomes: [BatchOutcome] = []
+        /// What the model wrote for this scene's lines so far, for later batches' context.
+        var written: [Int: String] = [:]
         for batch in scene {
             try Task.checkCancellation()
             guard let first = batch.first, let last = batch.last else {
                 continue
             }
+            func contextLines(_ indices: Range<Int>) -> [SubtitlePrompt.ContextLine] {
+                indices.map { SubtitlePrompt.ContextLine(text: segments[$0].text, start: segments[$0].start, end: segments[$0].end, output: written[$0]) }
+            }
             let request = BatchRequest(
-                lines: batch.map { SubtitlePrompt.Line(id: $0, text: segments[$0].text, isDoubtful: segments[$0].confidence?.isDoubtful ?? false) },
-                contextBefore: segments[max(0, first - configuration.contextLineCount)..<first].map(\.text),
-                contextAfter: segments[(last + 1)..<min(last + 1 + configuration.contextLineCount, segments.count)].map(\.text),
+                lines: batch.map {
+                    SubtitlePrompt.Line(
+                        id: $0, text: segments[$0].text, start: segments[$0].start, end: segments[$0].end,
+                        isDoubtful: segments[$0].confidence?.isDoubtful ?? false
+                    )
+                },
+                contextBefore: contextLines(max(0, first - configuration.contextLineCount)..<first),
+                contextAfter: contextLines((last + 1)..<min(last + 1 + configuration.contextLineCount, segments.count)),
                 sceneSoFar: sceneSummary,
                 earlierBatches: Array(batchSummaries.suffix(configuration.earlierBatchSummaryCount))
             )
@@ -244,9 +257,13 @@ public struct SubtitleRefiner: Sendable {
                 let (reply, wasCached) = try await requestLines(request, system: context.system, reusesCachedReplies: context.reusesCachedReplies)
                 let dropped = configuration.marksHallucinations ? reply.droppedIDs : []
                 var lines: [Int: String] = [:]
-                for (index, text) in reply.textByID where !text.pythonStripped.isEmpty && !dropped.contains(index) {
-                    lines[index] = text
+                for (index, text) in reply.textByID where !dropped.contains(index) {
+                    let cleaned = SubtitlePrompt.removingAddedTime(from: text, original: segments[index].text)
+                    if !cleaned.pythonStripped.isEmpty {
+                        lines[index] = cleaned
+                    }
                 }
+                written.merge(lines) { _, new in new }
                 if let summary = reply.batchSummary?.pythonStripped, !summary.isEmpty {
                     batchSummaries.append(summary)
                 }
@@ -275,8 +292,8 @@ public struct SubtitleRefiner: Sendable {
 
     private struct BatchRequest {
         let lines: [SubtitlePrompt.Line]
-        let contextBefore: [String]
-        let contextAfter: [String]
+        let contextBefore: [SubtitlePrompt.ContextLine]
+        let contextAfter: [SubtitlePrompt.ContextLine]
         let sceneSoFar: String?
         let earlierBatches: [String]
     }
@@ -289,12 +306,19 @@ public struct SubtitleRefiner: Sendable {
         reusesCachedReplies: Bool
     ) async throws -> (SubtitlePrompt.Reply, wasCached: Bool) {
         let expectedIDs = Set(request.lines.map(\.id))
-        // Without the summaries: they depend on earlier replies (see LLMReplyCache).
+        // Without the summaries and the context's earlier answers: they depend
+        // on earlier replies (see LLMReplyCache).
+        func withoutOutputs(_ context: [SubtitlePrompt.ContextLine]) -> [SubtitlePrompt.ContextLine] {
+            context.map { SubtitlePrompt.ContextLine(text: $0.text, start: $0.start, end: $0.end) }
+        }
         let cacheKey = LLMReplyCache.Key(
             model: configuration.model,
             instructions: system.content,
             request: try SubtitlePrompt.userMessage(
-                lines: request.lines, contextBefore: request.contextBefore, contextAfter: request.contextAfter, sortsKeys: true
+                lines: request.lines,
+                contextBefore: withoutOutputs(request.contextBefore),
+                contextAfter: withoutOutputs(request.contextAfter),
+                sortsKeys: true
             )
         )
         if reusesCachedReplies, let data = cache?.reply(for: cacheKey), let reply = Self.decode(data),

@@ -4,9 +4,11 @@ import Foundation
 /// Complete language-model replies on disk, so a run that was stopped, failed
 /// part way or is started again does not pay for batches it already has.
 ///
-/// A reply is found by what was asked (model, instructions, lines and their
-/// context), not by the running summaries: those depend on earlier replies,
-/// and a resumed run should reuse a batch even if an earlier one changed.
+/// A reply is found by what was asked: model, instructions, and the lines
+/// with their context, as text and times (a line moved in time may now read
+/// differently). Not by what depends on earlier replies (the running
+/// summaries, the context lines' answers), so a resumed run reuses a batch
+/// even if an earlier one came back different.
 public struct LLMReplyCache: Sendable {
     /// Replies older than this are deleted when the cache is opened.
     public static let defaultLifetime: Duration = .seconds(14 * 24 * 60 * 60)

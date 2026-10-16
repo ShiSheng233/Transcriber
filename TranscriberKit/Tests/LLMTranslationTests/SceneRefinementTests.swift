@@ -77,8 +77,8 @@ struct SceneRefinementTests {
         #expect(result.segments.map(\.text) == ["line 0", "line 1", "T2", "line 3"])
         #expect(result.batchCount == 1)
         let payload = try #require(model.payloads.only)
-        #expect(payload["context_before"] as? [String] == ["line 1"])
-        #expect(payload["context_after"] as? [String] == ["line 3"])
+        #expect((payload["context_before"] as? [[String: Any]])?.map { $0["text"] as? String } == ["line 1"])
+        #expect((payload["context_after"] as? [[String: Any]])?.map { $0["text"] as? String } == ["line 3"])
     }
 
     @Test func aSecondRunReusesCachedReplies() async throws {

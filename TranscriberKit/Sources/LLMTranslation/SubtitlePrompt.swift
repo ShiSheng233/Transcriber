@@ -1,4 +1,5 @@
 import Foundation
+import TranscriberCore
 
 /// The instructions and JSON payload for one batch of subtitle lines.
 enum SubtitlePrompt {
@@ -94,7 +95,11 @@ enum SubtitlePrompt {
             Rules:
             - Return exactly one output line for every input line in "lines", with the same "id".
             - Never merge, split, reorder, drop or add lines; never explain or annotate.
-            - "context_before" and "context_after" are only for understanding; do not return them.
+            - "context_before" and "context_after" are only for understanding; do not return them. \
+            A context line's "output", when present, is what you already wrote for it: stay consistent with it.
+            - "start" and "end" (minutes:seconds) show when each line is spoken, so you can tell pauses, \
+            pace and where it falls. They are fixed: never change or return them, and never write times \
+            into the text.
             - Keep each line about as long as the original so it still fits its time on screen.
             - "scene_so_far" and "earlier_batches", when present, summarize what came before; \
             use them to keep names, relationships and tone consistent.
@@ -136,13 +141,24 @@ enum SubtitlePrompt {
     struct Line: Sendable {
         let id: Int
         let text: String
+        let start: AudioTime
+        let end: AudioTime
         var isDoubtful = false
+    }
+
+    /// A neighbouring line sent for understanding; `output` is what the model
+    /// already wrote for it in this run, if anything.
+    struct ContextLine: Sendable {
+        let text: String
+        let start: AudioTime
+        let end: AudioTime
+        var output: String?
     }
 
     static func userMessage(
         lines: [Line],
-        contextBefore: [String],
-        contextAfter: [String],
+        contextBefore: [ContextLine],
+        contextAfter: [ContextLine],
         sceneSoFar: String? = nil,
         earlierBatches: [String] = [],
         sortsKeys: Bool = false
@@ -150,9 +166,9 @@ enum SubtitlePrompt {
         let payload = Payload(
             sceneSoFar: sceneSoFar,
             earlierBatches: earlierBatches.isEmpty ? nil : earlierBatches,
-            contextBefore: contextBefore,
-            lines: lines.map { Payload.Line(id: $0.id, text: $0.text, doubtful: $0.isDoubtful ? true : nil) },
-            contextAfter: contextAfter
+            contextBefore: contextBefore.map(Payload.ContextLine.init),
+            lines: lines.map { Payload.Line(id: $0.id, text: $0.text, start: clock($0.start), end: clock($0.end), doubtful: $0.isDoubtful ? true : nil) },
+            contextAfter: contextAfter.map(Payload.ContextLine.init)
         )
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
@@ -164,15 +180,57 @@ enum SubtitlePrompt {
         struct Line: Encodable {
             let id: Int
             let text: String
-            /// Only sent when true, so other requests (and their cache keys) stay as they were.
+            let start: String
+            let end: String
+            /// Only sent when true.
             let doubtful: Bool?
+        }
+
+        struct ContextLine: Encodable {
+            let text: String
+            let start: String
+            let end: String
+            let output: String?
+
+            init(_ line: SubtitlePrompt.ContextLine) {
+                text = line.text
+                start = SubtitlePrompt.clock(line.start)
+                end = SubtitlePrompt.clock(line.end)
+                output = line.output
+            }
         }
 
         let sceneSoFar: String?
         let earlierBatches: [String]?
-        let contextBefore: [String]
+        let contextBefore: [ContextLine]
         let lines: [Line]
-        let contextAfter: [String]
+        let contextAfter: [ContextLine]
+    }
+
+    /// "1:23.4", or "1:02:03.4" past an hour: short, and enough to tell pauses.
+    static func clock(_ time: AudioTime) -> String {
+        let tenths = (time.milliseconds + 50) / 100
+        let hours = tenths / 36_000
+        let minutes = tenths / 600 % 60
+        let seconds = tenths / 10 % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d.%d", hours, minutes, seconds, tenths % 10)
+            : String(format: "%d:%02d.%d", minutes, seconds, tenths % 10)
+    }
+
+    /// A time the model wrote at the start of a line ("[1:23.4] ", "01:23 "),
+    /// which the original did not have.
+    private static let leadingTime = try! NSRegularExpression(pattern: #"^\s*[\[(]?\d{1,2}:\d{2}(:\d{2})?([.,]\d+)?([\s]*[-–~][\s]*\d{1,2}:\d{2}(:\d{2})?([.,]\d+)?)?[\])]?\s*"#)
+
+    /// The reply's text without a time the model added; times live only in
+    /// the line's start and end, never in its text.
+    static func removingAddedTime(from text: String, original: String) -> String {
+        let originalRange = NSRange(original.startIndex..., in: original)
+        guard leadingTime.firstMatch(in: original, range: originalRange) == nil else {
+            return text
+        }
+        let range = NSRange(text.startIndex..., in: text)
+        return leadingTime.stringByReplacingMatches(in: text, range: range, withTemplate: "")
     }
 
     /// What the model returns.

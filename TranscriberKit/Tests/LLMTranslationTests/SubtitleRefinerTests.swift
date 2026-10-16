@@ -64,8 +64,8 @@ struct SubtitleRefinerTests {
         // Batches run in parallel, so they arrive in any order.
         let bodies = try model.recordedRequests.map { try JSONSerialization.jsonObject(with: Data($0[1].content.utf8)) as? [String: Any] }
         let secondBatch = bodies.first { (($0?["lines"] as? [[String: Any]])?.first?["id"] as? Int) == 2 } ?? nil
-        #expect(secondBatch?["context_before"] as? [String] == ["line 0", "line 1"])
-        #expect(secondBatch?["context_after"] as? [String] == ["line 4", "line 5"])
+        #expect((secondBatch?["context_before"] as? [[String: Any]])?.map { $0["text"] as? String } == ["line 0", "line 1"])
+        #expect((secondBatch?["context_after"] as? [[String: Any]])?.map { $0["text"] as? String } == ["line 4", "line 5"])
         #expect(model.recordedRequests[0][0].content.contains("into English"))
     }
 

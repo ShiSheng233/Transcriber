@@ -389,7 +389,10 @@ JobQueue、JobDetail 预览、Settings（含后端选择、Core ML 编码器开�
 - **模式由模型配置的 `llm_mode` 决定**：polish（海南鸡中文）→ 润色；translate（whisper-ja / anime-whisper 日文）→ 翻译到目标语言（默认简体中文），可选双语（译文在上、原文在下）。
 - **任意 OpenAI 兼容 API**（OpenRouter、OpenAI、DeepSeek、Ollama、LM Studio 或自定义 Base URL；本地服务不需要 key，key 按服务分别存 Keychain）。结构化输出逐级降级：`json_schema` → `json_object` + 提示词里的 schema → 只有提示词，成功的模式会被记住。评估过 MacPaw/OpenAI：它丢失 HTTP 状态码（无法按 429/5xx 重试、按 401/402 提示），`.relaxed` 解析可能把错误响应当成空的成功响应，也不能附带 OpenRouter 的 `provider` 参数，所以继续用自己的 URLSession 客户端（只用到 `/chat/completions` 和 `/models`）。
 - **OpenRouter 专属**：`response_format` 严格 JSON Schema（`{lines: [{id, text}]}`）+ `provider.require_parameters`；模型列表实时拉取（只列支持 structured output 的模型，排除 `:batch`），不在代码里写死模型名；429/5xx 退避重试，401/402 给出明确提示。API key 存 Keychain。
-- **逐行对齐**：每批 40 行，前后各带 8 行原文上下文；回复的 id 必须与本批完全一致，不一致重试一次，仍缺的行保留原文；时间轴从不改动。
+- **逐行对齐**：每批 40 行，前后各带 8 行上下文；回复的 id 必须与本批完全一致，不一致重试一次，仍缺的行保留原文。
+- **上下文带已写好的结果**：同一场景里批次按顺序发，上下文行除了原文还带 `output`（这一遍里模型已经为它写的校对、润色或译文），后面的批次与前面保持一致。不同场景并行，彼此看不到对方的结果。
+- **时间只读**：每行和每条上下文带 `start`/`end`（`分:秒.十分之一`），让模型看得出停顿、语速和位置（判断空白处编出来的话尤其需要）。回复格式里没有时间字段（严格模式下多写字段会被拒，宽松模式下被忽略），代码只替换每行的文本；模型若把时间写进文本开头而原文没有，会被去掉。所以 LLM 永远不会改动时间轴。
+- **缓存键**：模型 + 系统提示 + 本批的行与上下文（文本和时间）。不含滚动摘要和上下文的 `output`——它们取决于前面批次的回复，放进键里重跑就永远命中不了。时间在键里：改过时间的行（以及把它当上下文的批次）会重新请求。
 - **术语表**：每行 `源 = 译`，写进系统提示。
 - **失败不丢结果**：LLM 步骤出错时仍写出机器字幕，任务标记完成并附警告。
 - CLI：`transcriber-cli llm-models`、`transcribe --llm-model <id>`（key 读 `OPENROUTER_API_KEY`）。
