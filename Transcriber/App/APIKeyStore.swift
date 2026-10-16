@@ -3,7 +3,7 @@ import Security
 
 /// Keeps LLM API keys in the login Keychain rather than in settings, one per
 /// service (base URL host and port), so switching services keeps each key.
-final class APIKeyStore {
+final class APIKeyStore: APIKeyStoring {
     private let service = "dev.shisheng.Transcriber"
 
     func read(for baseURL: URL) -> String {

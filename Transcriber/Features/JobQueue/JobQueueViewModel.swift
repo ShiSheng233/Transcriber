@@ -46,11 +46,11 @@ final class JobQueueViewModel {
 
     private let queue: JobQueue
     private let settingsStore: SettingsStore
-    private let apiKeyStore: APIKeyStore
+    private let apiKeyStore: any APIKeyStoring
     private let library: ModelLibrary
     private var snapshotTask: Task<Void, Never>?
 
-    init(queue: JobQueue, settingsStore: SettingsStore, apiKeyStore: APIKeyStore, library: ModelLibrary) {
+    init(queue: JobQueue, settingsStore: SettingsStore, apiKeyStore: any APIKeyStoring, library: ModelLibrary) {
         self.queue = queue
         self.settingsStore = settingsStore
         self.apiKeyStore = apiKeyStore

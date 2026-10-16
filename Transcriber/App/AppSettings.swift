@@ -30,7 +30,7 @@ struct AppSettings: Codable, Equatable {
     )
 
     /// Uses the key stored for the chosen LLM service.
-    func queueConfiguration(apiKeys: APIKeyStore) -> JobQueue.Configuration {
+    func queueConfiguration(apiKeys: any APIKeyStoring) -> JobQueue.Configuration {
         let apiKey = apiKeys.read(for: llm.baseURL)
         return JobQueue.Configuration(
             engine: EngineSettings(modelsDirectory: modelsDirectory, backend: backend, concurrentChunkCount: concurrentChunkCount),

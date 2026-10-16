@@ -16,7 +16,7 @@ final class SettingsViewModel {
     }
 
     private let store: SettingsStore
-    private let apiKeyStore: APIKeyStore
+    private let apiKeyStore: any APIKeyStoring
     private let library: ModelLibrary
     /// Reloads the model list once the key stops changing.
     @ObservationIgnored private var pendingModelReload: Task<Void, Never>?
@@ -27,7 +27,7 @@ final class SettingsViewModel {
     private(set) var availableModels: [LLMModel] = []
     private(set) var modelListState = ModelListState.notLoaded
 
-    init(store: SettingsStore, apiKeyStore: APIKeyStore, library: ModelLibrary) {
+    init(store: SettingsStore, apiKeyStore: any APIKeyStoring, library: ModelLibrary) {
         self.store = store
         self.apiKeyStore = apiKeyStore
         self.library = library

@@ -47,7 +47,7 @@ WHISPER_CMAKE_FLAGS := \
 	-DGGML_NATIVE=OFF \
 	-DGGML_OPENMP=OFF
 
-.PHONY: FORCE help whisper-xcframework ffmpeg-xcframeworks whisper-models whisper-models-q8_0 mlx-models vad-model parity-fixtures baseline-a ours parity-report build test clean-tools release release-archive release-export release-notarize release-cask release-publish
+.PHONY: FORCE help whisper-xcframework ffmpeg-xcframeworks whisper-models whisper-models-q8_0 mlx-models vad-model parity-fixtures baseline-a ours parity-report build test test-app clean-tools release release-archive release-export release-notarize release-cask release-publish
 
 help:
 	@echo "make whisper-xcframework  Build whisper.cpp $(WHISPER_VERSION) into $(WHISPER_XCFRAMEWORK)"
@@ -62,6 +62,7 @@ help:
 	@echo "make parity-report        Compare $(OURS_DIR) with $(BASELINE_A_DIR) (CER, BLEU, timing)"
 	@echo "make build                Build TranscriberKit and transcriber-cli"
 	@echo "make test                 Run TranscriberKit tests"
+	@echo "make test-app             Run the app ViewModel tests (unhosted)"
 	@echo "make clean-tools          Delete $(TOOLS_DIR) (downloads and intermediates)"
 	@echo "make release              Archive, sign with Developer ID, notarize, zip and write the cask (docs/RELEASING.md)"
 	@echo "make release-publish      Push, create the GitHub release and update the Homebrew tap"
@@ -448,6 +449,11 @@ build: $(WHISPER_XCFRAMEWORK)
 
 test: $(WHISPER_XCFRAMEWORK)
 	swift test --package-path TranscriberKit
+
+# The app's ViewModels, built from its sources that do not import AppKit into
+# an unhosted test bundle: the app itself never launches.
+test-app: $(WHISPER_XCFRAMEWORK)
+	xcodebuild test -project Transcriber.xcodeproj -scheme TranscriberTests -destination 'platform=macOS' -quiet
 
 clean-tools:
 	rm -rf $(TOOLS_DIR)

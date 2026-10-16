@@ -13,16 +13,53 @@
 		D0E21948307F219000FC9FC3 /* SubtitleExport in Frameworks */ = {isa = PBXBuildFile; productRef = D0E21947307F219000FC9FC3 /* SubtitleExport */; };
 		D0E2194A307F219000FC9FC3 /* LLMTranslation in Frameworks */ = {isa = PBXBuildFile; productRef = D0E21949307F219000FC9FC3 /* LLMTranslation */; };
 		D0E2194C307F219000FC9FC3 /* AudioOverview in Frameworks */ = {isa = PBXBuildFile; productRef = D0E2194B307F219000FC9FC3 /* AudioOverview */; };
+		D0E2195F307F219000FC9FC3 /* TranscriberCore in Frameworks */ = {isa = PBXBuildFile; productRef = D0E2195A307F219000FC9FC3 /* TranscriberCore */; };
+		D0E21960307F219000FC9FC3 /* JobQueue in Frameworks */ = {isa = PBXBuildFile; productRef = D0E2195B307F219000FC9FC3 /* JobQueue */; };
+		D0E21961307F219000FC9FC3 /* LLMTranslation in Frameworks */ = {isa = PBXBuildFile; productRef = D0E2195C307F219000FC9FC3 /* LLMTranslation */; };
+		D0E21962307F219000FC9FC3 /* AudioOverview in Frameworks */ = {isa = PBXBuildFile; productRef = D0E2195D307F219000FC9FC3 /* AudioOverview */; };
+		D0E21963307F219000FC9FC3 /* SubtitleExport in Frameworks */ = {isa = PBXBuildFile; productRef = D0E2195E307F219000FC9FC3 /* SubtitleExport */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		D0E2192B307F218E00FC9FC3 /* Transcriber.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Transcriber.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D0E21951307F219000FC9FC3 /* TranscriberTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TranscriberTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		D0E21953307F219000FC9FC3 /* Exceptions for "Transcriber" folder in "TranscriberTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"App/APIKeyStoring.swift",
+				"App/AppSettings.swift",
+				"App/ModelLibrary.swift",
+				"App/SettingsStore.swift",
+				"Features/Activity/ActivityViewModel.swift",
+				"Features/JobDetail/JobDetailViewModel.swift",
+				"Features/JobQueue/JobQueueViewModel.swift",
+				"Features/Settings/SettingsViewModel.swift",
+				"Features/SubtitleEditor/SubtitleEditorViewModel+Lines.swift",
+				"Features/SubtitleEditor/SubtitleEditorViewModel+Timing.swift",
+				"Features/SubtitleEditor/SubtitleEditorViewModel.swift",
+				"Features/SubtitleEditor/SubtitleTimeFormat.swift",
+				"Features/Waveform/WaveformViewModel.swift",
+				"Shared/ObservationBinder.swift",
+			);
+			target = D0E21950307F219000FC9FC3 /* TranscriberTests */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		D0E2192D307F218E00FC9FC3 /* Transcriber */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				D0E21953307F219000FC9FC3 /* Exceptions for "Transcriber" folder in "TranscriberTests" target */,
+			);
 			path = Transcriber;
+			sourceTree = "<group>";
+		};
+		D0E21952307F219000FC9FC3 /* TranscriberTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = TranscriberTests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -39,6 +76,16 @@
 				D0E2194C307F219000FC9FC3 /* AudioOverview in Frameworks */,
 			);
 		};
+		D0E21955307F219000FC9FC3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+				D0E2195F307F219000FC9FC3 /* TranscriberCore in Frameworks */,
+				D0E21960307F219000FC9FC3 /* JobQueue in Frameworks */,
+				D0E21961307F219000FC9FC3 /* LLMTranslation in Frameworks */,
+				D0E21962307F219000FC9FC3 /* AudioOverview in Frameworks */,
+				D0E21963307F219000FC9FC3 /* SubtitleExport in Frameworks */,
+			);
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -46,6 +93,7 @@
 			isa = PBXGroup;
 			children = (
 				D0E2192D307F218E00FC9FC3 /* Transcriber */,
+				D0E21952307F219000FC9FC3 /* TranscriberTests */,
 				D0E2192C307F218E00FC9FC3 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -54,6 +102,7 @@
 			isa = PBXGroup;
 			children = (
 				D0E2192B307F218E00FC9FC3 /* Transcriber.app */,
+				D0E21951307F219000FC9FC3 /* TranscriberTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -86,6 +135,31 @@
 			productReference = D0E2192B307F218E00FC9FC3 /* Transcriber.app */;
 			productType = "com.apple.product-type.application";
 		};
+		D0E21950307F219000FC9FC3 /* TranscriberTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D0E21957307F219000FC9FC3 /* Build configuration list for PBXNativeTarget "TranscriberTests" */;
+			buildPhases = (
+				D0E21954307F219000FC9FC3 /* Sources */,
+				D0E21955307F219000FC9FC3 /* Frameworks */,
+				D0E21956307F219000FC9FC3 /* Resources */,
+			);
+			buildRules = (
+			);
+			fileSystemSynchronizedGroups = (
+				D0E21952307F219000FC9FC3 /* TranscriberTests */,
+			);
+			name = TranscriberTests;
+			packageProductDependencies = (
+				D0E2195A307F219000FC9FC3 /* TranscriberCore */,
+				D0E2195B307F219000FC9FC3 /* JobQueue */,
+				D0E2195C307F219000FC9FC3 /* LLMTranslation */,
+				D0E2195D307F219000FC9FC3 /* AudioOverview */,
+				D0E2195E307F219000FC9FC3 /* SubtitleExport */,
+			);
+			productName = TranscriberTests;
+			productReference = D0E21951307F219000FC9FC3 /* TranscriberTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -97,6 +171,9 @@
 				LastUpgradeCheck = 2710;
 				TargetAttributes = {
 					D0E2192A307F218E00FC9FC3 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					D0E21950307F219000FC9FC3 = {
 						CreatedOnToolsVersion = 27.0;
 					};
 				};
@@ -119,6 +196,7 @@
 			projectRoot = "";
 			targets = (
 				D0E2192A307F218E00FC9FC3 /* Transcriber */,
+				D0E21950307F219000FC9FC3 /* TranscriberTests */,
 			);
 		};
 /* End PBXProject section */
@@ -129,10 +207,20 @@
 			files = (
 			);
 		};
+		D0E21956307F219000FC9FC3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		D0E21927307F218E00FC9FC3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		D0E21954307F219000FC9FC3 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			files = (
 			);
@@ -330,6 +418,44 @@
 			};
 			name = Release;
 		};
+		D0E21958307F219000FC9FC3 /* Debug configuration for PBXNativeTarget "TranscriberTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = K43V8XURBW;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.shisheng.TranscriberTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		D0E21959307F219000FC9FC3 /* Release configuration for PBXNativeTarget "TranscriberTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = K43V8XURBW;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.shisheng.TranscriberTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -346,6 +472,14 @@
 			buildConfigurations = (
 				D0E21937307F218F00FC9FC3 /* Debug configuration for PBXNativeTarget "Transcriber" */,
 				D0E21938307F218F00FC9FC3 /* Release configuration for PBXNativeTarget "Transcriber" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		D0E21957307F219000FC9FC3 /* Build configuration list for PBXNativeTarget "TranscriberTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D0E21958307F219000FC9FC3 /* Debug configuration for PBXNativeTarget "TranscriberTests" */,
+				D0E21959307F219000FC9FC3 /* Release configuration for PBXNativeTarget "TranscriberTests" */,
 			);
 			defaultConfigurationName = Release;
 		};
@@ -382,6 +516,26 @@
 		D0E2194B307F219000FC9FC3 /* AudioOverview */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AudioOverview;
+		};
+		D0E2195A307F219000FC9FC3 /* TranscriberCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TranscriberCore;
+		};
+		D0E2195B307F219000FC9FC3 /* JobQueue */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = JobQueue;
+		};
+		D0E2195C307F219000FC9FC3 /* LLMTranslation */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LLMTranslation;
+		};
+		D0E2195D307F219000FC9FC3 /* AudioOverview */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AudioOverview;
+		};
+		D0E2195E307F219000FC9FC3 /* SubtitleExport */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SubtitleExport;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

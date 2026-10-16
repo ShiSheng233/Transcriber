@@ -20,6 +20,7 @@ make whisper-models mlx-models vad-model
 make build                    # swift build --package-path TranscriberKit
 make test                     # swift test  --package-path TranscriberKit
 swift test --package-path TranscriberKit --filter SpeechSegmenterTests   # single suite or test
+make test-app                 # app ViewModel tests (TranscriberTests, unhosted: the app never launches)
 
 # App
 xcodebuild -project Transcriber.xcodeproj -scheme Transcriber -configuration Debug build
@@ -33,7 +34,7 @@ make parity-fixtures          # regenerate unit-test fixtures from the pinned or
 make baseline-a && make ours && make parity-report   # media in ParityMedia/, outputs in Parity/
 ```
 
-Tests use Swift Testing (`import Testing`). Tests that need converted models are gated with `.enabled(if:)` on files in `Models/`, so they skip silently when `Models/` is empty. Never write tests or debug checks that drive the real app, its UserDefaults or the Keychain: one such check once overwrote the user's stored API key.
+Tests use Swift Testing (`import Testing`). Tests that need converted models are gated with `.enabled(if:)` on files in `Models/`, so they skip silently when `Models/` is empty. Never write tests or debug checks that drive the real app, its UserDefaults or the Keychain: one such check once overwrote the user's stored API key. `TranscriberTests` compiles only the app files that do not import AppKit (listed in the project's membership exception for that target; add new ViewModel files there) and never `APIKeyStore.swift`: inject `UserDefaults(suiteName:)` and an in-memory `APIKeyStoring`.
 
 ## Architecture
 
