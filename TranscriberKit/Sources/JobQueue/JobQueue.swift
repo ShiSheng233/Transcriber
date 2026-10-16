@@ -747,8 +747,10 @@ public actor JobQueue {
             }
             update(jobID) { $0.status = .detectingSpeech }
             log(.info, jobID, "Detecting speech…")
-        case .detectedSpeech(let spanCount, let speechDuration):
-            log(.detail, jobID, "Speech: \(spanCount) span(s), \(ActivityFormatting.clock(speechDuration.seconds)) in total")
+        case .detectedSpeech(let spans, let padding):
+            let speechSamples = spans.reduce(0) { $0 + max($1.duration.samples, 0) }
+            log(.detail, jobID, "Speech: \(spans.count) span(s), \(ActivityFormatting.clock(AudioTime(samples: speechSamples).seconds)) in total")
+            update(jobID) { $0.speechSpans = spans.compactMap { $0.trimmed(by: padding) } }
         case .plannedChunks(let count):
             update(jobID) { $0.status = .transcribing(completedChunks: 0, totalChunks: count) }
             log(.info, jobID, "Transcribing \(count) chunk(s)…")

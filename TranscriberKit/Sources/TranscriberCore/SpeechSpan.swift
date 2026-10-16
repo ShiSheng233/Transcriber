@@ -11,4 +11,11 @@ public struct SpeechSpan: Hashable, Sendable, Codable {
     public var duration: AudioTime {
         end - start
     }
+
+    /// Without the VAD's padding on each side: about where speech itself
+    /// starts and ends. `nil` when nothing is left.
+    public func trimmed(by padding: AudioTime) -> SpeechSpan? {
+        let trimmed = SpeechSpan(start: start + padding, end: end - padding)
+        return trimmed.end > trimmed.start ? trimmed : nil
+    }
 }

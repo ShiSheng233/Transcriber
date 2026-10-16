@@ -25,6 +25,9 @@ public struct Job: Identifiable, Hashable, Sendable {
     /// The lines as they were before the language model changed them, so
     /// chosen lines can be sent again; empty if it never ran.
     public var linesBeforeLanguageModel: [TimedText]
+    /// Where the VAD heard speech, without its padding, for snapping times
+    /// in the editor; empty for subtitle files and jobs not yet transcribed.
+    public var speechSpans: [SpeechSpan]
     /// Subtitle files written for this job.
     public var outputURLs: [URL]
     /// Set when the job finished but an optional step (the LLM) did not.
@@ -56,6 +59,7 @@ public struct Job: Identifiable, Hashable, Sendable {
         self.status = .queued
         self.segments = []
         self.linesBeforeLanguageModel = []
+        self.speechSpans = []
         self.outputURLs = []
         self.warning = nil
     }

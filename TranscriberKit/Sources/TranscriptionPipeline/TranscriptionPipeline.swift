@@ -78,8 +78,8 @@ public struct TranscriptionPipeline: Sendable {
     public enum Progress: Sendable {
         /// `timestampJumps`: holes and overlaps in the file's audio timeline.
         case decodedAudio(duration: AudioTime, timestampJumps: [AudioTimestampJump])
-        /// The outer VAD pass: speech spans and their total length.
-        case detectedSpeech(spanCount: Int, speechDuration: AudioTime)
+        /// The outer VAD pass: its speech spans, each padded by `padding`.
+        case detectedSpeech(spans: [SpeechSpan], padding: AudioTime)
         case plannedChunks(count: Int)
         /// `completed` chunks of `count` are done; `chunk` is the one that just
         /// finished, with its subtitles before merging and cleanup (a preview).
@@ -159,8 +159,7 @@ public struct TranscriptionPipeline: Sendable {
         progress: @escaping @Sendable (Progress) -> Void = { _ in }
     ) async throws -> [TimedText] {
         let speech = try voiceActivityDetector.speechSpans(in: samples)
-        let speechSamples = speech.reduce(0) { $0 + max(($1.end - $1.start).samples, 0) }
-        progress(.detectedSpeech(spanCount: speech.count, speechDuration: AudioTime(samples: speechSamples)))
+        progress(.detectedSpeech(spans: speech, padding: settings.vad.speechPadding))
         // infer.py returns nothing when the outer VAD finds no speech at all.
         guard speech.contains(where: { $0.end > $0.start }) else {
             return []

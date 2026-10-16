@@ -36,3 +36,12 @@ struct RecognitionConfidenceTests {
         #expect(SubtitleEditing.setText(1, to: "c", in: lines).lines[1].confidence == nil)
     }
 }
+
+struct SpeechSpanTests {
+    @Test func trimsTheVADPadding() {
+        let span = SpeechSpan(start: AudioTime(milliseconds: 1_000), end: AudioTime(milliseconds: 2_000))
+        let padding = AudioTime(milliseconds: 200)
+        #expect(span.trimmed(by: padding) == SpeechSpan(start: AudioTime(milliseconds: 1_200), end: AudioTime(milliseconds: 1_800)))
+        #expect(SpeechSpan(start: .zero, end: AudioTime(milliseconds: 300)).trimmed(by: padding) == nil)
+    }
+}
