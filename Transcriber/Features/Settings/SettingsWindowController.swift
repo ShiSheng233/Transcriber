@@ -4,13 +4,14 @@ import AppKit
 /// toolbar of panes, the pane's name as the window title, minimize and zoom
 /// dimmed, and the last viewed pane restored.
 final class SettingsWindowController: NSWindowController {
-    init(viewModel: SettingsViewModel) {
+    init(viewModel: SettingsViewModel, shortcutsViewModel: ShortcutsViewModel) {
         let tabs = SettingsTabViewController()
-        let panes: [(SettingsPaneViewController, String)] = [
+        let panes: [(NSViewController, String)] = [
             (GeneralSettingsViewController(viewModel: viewModel, title: String(localized: "General")), "gearshape"),
             (OutputSettingsViewController(viewModel: viewModel, title: String(localized: "Output")), "doc.text"),
             (ModelsSettingsViewController(viewModel: viewModel, title: String(localized: "Models")), "shippingbox"),
             (LLMSettingsViewController(viewModel: viewModel, title: String(localized: "LLM")), "sparkles"),
+            (ShortcutsSettingsViewController(viewModel: shortcutsViewModel, title: String(localized: "Shortcuts")), "keyboard"),
         ]
         for (pane, symbol) in panes {
             // Build the form now so its size is known before the first visit;

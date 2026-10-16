@@ -290,6 +290,8 @@ queued → loadingModel → decodingAudio → detectingSpeech → transcribing(p
 - **原文**（View › Show Original Text ⌥⌘O）：文件走过 LLM 时，按时间找回 LLM 之前的原文（时间相同的行，否则中点落在行内的原文行），网格的 Text 单元格里原文以灰色小字显示在现文上方（行高 40），编辑框的文本框上方也多一行只读原文。
 - 其他：在播放头处拆分（⇧⌘D，文本在光标处或按时间比例切开）、合并保留首行文本（⇧⌘J）、交换两行文本、按开始时间排序；播放菜单 ⇧⌘↩ 播放选区、⌥⌘↩ 播放下一行、⌥⌘1/⌃⌘1 播放起点前/后、⌥⌘2/⌃⌘2 播放终点前/后。
 
+**快捷键一览**（Settings › Shortcuts）：只读，不提供自定义。菜单部分每次打开该页时遍历 `NSApp.mainMenu` 现读（`MenuShortcutCollector`，每个菜单和子菜单一节，跳过分隔线、隐藏项和重复项），不另维护一张会漂移的表；不在菜单里的波形按键（Space、Q/E/D/W、S、↑↓、←→、拖动与滚动的修饰键）由 `WaveformView.keyboardShortcuts` 列出，紧挨处理这些键的代码。`KeyCapFormatter` 把 keyEquivalent + 修饰键（原始位值，不依赖 AppKit）按 ⌃⌥⇧⌘ 顺序转成键帽符号，菜单按钮的 tooltip 也用它；`KeyCapView` 自绘键帽。顶部搜索框按命令名过滤（`ShortcutsViewModel`）。
+
 **退出**：退出前取消当前任务并释放模型——ggml 的 Metal 设备在进程退出时断言所有缓冲已释放，否则直接 abort。
 
 ## 8. App target 结构
@@ -303,7 +305,7 @@ Transcriber/
 │   ├─ JobDetail/      JobDetailViewController, JobDetailViewModel（播放器 + 字幕列表同步高亮）
 │   ├─ SubtitleEditor/ 编辑面板：操作栏、编辑框、网格、菜单定义、Shift Times / Adjust Timing / Select Lines / 查找替换
 │   ├─ Waveform/       WaveformView, WaveformViewModel（调时间模式的波形）
-│   ├─ Settings/       SettingsWindowController, SettingsViewModel（模式、语言、导出格式、VAD/解码高级参数）
+│   ├─ Settings/       SettingsWindowController, SettingsViewModel（模式、语言、导出格式、VAD/解码高级参数）, ShortcutsViewModel（快捷键一览）
 │   ├─ ModelLibrary/   ModelLibraryViewController, ModelLibraryViewModel（模型目录、下载进度、磁盘占用）
 │   └─ LLMSettings/    LLMSettingsViewController, LLMSettingsViewModel（OpenRouter Key 存 Keychain、模型选择、术语表）
 └─ Resources/

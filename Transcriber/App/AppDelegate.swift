@@ -126,7 +126,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsWindowController = SettingsWindowController(
                 viewModel: SettingsViewModel(
                     store: environment.settingsStore, apiKeyStore: environment.apiKeyStore, library: environment.modelLibrary
-                )
+                ),
+                shortcutsViewModel: ShortcutsViewModel()
             )
         }
         environment.modelLibrary.reload()  // pick up models installed since the last look

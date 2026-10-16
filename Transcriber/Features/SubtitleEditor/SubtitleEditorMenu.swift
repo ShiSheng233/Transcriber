@@ -141,17 +141,7 @@ enum SubtitleEditorMenu {
     }
 
     private static func shortcutText(_ item: Item) -> String {
-        var text = ""
-        if item.modifiers.contains(.control) { text += "⌃" }
-        if item.modifiers.contains(.option) { text += "⌥" }
-        if item.modifiers.contains(.shift) { text += "⇧" }
-        if item.modifiers.contains(.command) { text += "⌘" }
-        let key = switch item.key {
-        case "\r": "↩"
-        case "\u{8}": "⌫"
-        default: item.key.uppercased()
-        }
-        return text + key
+        KeyCapFormatter.text(keyEquivalent: item.key, modifiers: KeyCapFormatter.Modifiers(rawValue: item.modifiers.rawValue))
     }
 
     static func add(_ items: Group, to menu: NSMenu) {

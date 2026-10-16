@@ -37,11 +37,14 @@
 				"Features/JobDetail/JobDetailViewModel.swift",
 				"Features/JobQueue/JobQueueViewModel.swift",
 				"Features/Settings/SettingsViewModel.swift",
+				"Features/Settings/ShortcutsViewModel.swift",
 				"Features/SubtitleEditor/SubtitleEditorViewModel+Lines.swift",
 				"Features/SubtitleEditor/SubtitleEditorViewModel+Timing.swift",
 				"Features/SubtitleEditor/SubtitleEditorViewModel.swift",
 				"Features/SubtitleEditor/SubtitleTimeFormat.swift",
 				"Features/Waveform/WaveformViewModel.swift",
+				"Shared/KeyCapFormatter.swift",
+				"Shared/KeyboardShortcut.swift",
 				"Shared/ObservationBinder.swift",
 			);
 			target = D0E21950307F219000FC9FC3 /* TranscriberTests */;

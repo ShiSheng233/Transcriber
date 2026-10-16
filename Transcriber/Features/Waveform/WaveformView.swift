@@ -444,6 +444,31 @@ final class WaveformView: NSView {
 
     // MARK: Keyboard (Aegisub's audio display keys)
 
+    /// The keys below and the modifiers of the drags and scrolls above, for
+    /// the Shortcuts settings page; keep it in step with them.
+    static var keyboardShortcuts: [KeyboardShortcut] {
+        let drag = String(localized: "Drag")
+        let scroll = String(localized: "Scroll")
+        return [
+            KeyboardShortcut(name: String(localized: "Play or Pause"), keyEquivalent: " "),
+            KeyboardShortcut(name: String(localized: "Play 500 ms Before Start"), keyEquivalent: "q"),
+            KeyboardShortcut(name: String(localized: "Play 500 ms After Start"), keyEquivalent: "e"),
+            KeyboardShortcut(name: String(localized: "Play 500 ms Before End"), keyEquivalent: "d"),
+            KeyboardShortcut(name: String(localized: "Play 500 ms After End"), keyEquivalent: "w"),
+            KeyboardShortcut(name: String(localized: "Play Selection"), keyEquivalent: "s"),
+            KeyboardShortcut(name: String(localized: "Select Previous Line"), keyEquivalent: String(NSEvent.SpecialKey.upArrow.unicodeScalar)),
+            KeyboardShortcut(name: String(localized: "Select Next Line"), keyEquivalent: String(NSEvent.SpecialKey.downArrow.unicodeScalar)),
+            KeyboardShortcut(name: String(localized: "Move Playhead Back 0.1 s"), keyEquivalent: String(NSEvent.SpecialKey.leftArrow.unicodeScalar)),
+            KeyboardShortcut(name: String(localized: "Move Playhead Forward 0.1 s"), keyEquivalent: String(NSEvent.SpecialKey.rightArrow.unicodeScalar)),
+            KeyboardShortcut(name: String(localized: "Move Playhead Back 1 s"), keyEquivalent: String(NSEvent.SpecialKey.leftArrow.unicodeScalar), modifiers: .shift),
+            KeyboardShortcut(name: String(localized: "Move Playhead Forward 1 s"), keyEquivalent: String(NSEvent.SpecialKey.rightArrow.unicodeScalar), modifiers: .shift),
+            KeyboardShortcut(name: String(localized: "Move an Edge with the Touching Line"), keyEquivalent: "", modifiers: .shift, gesture: drag),
+            KeyboardShortcut(name: String(localized: "Move an Edge Without Snapping"), keyEquivalent: "", modifiers: .option, gesture: drag),
+            KeyboardShortcut(name: String(localized: "Zoom"), keyEquivalent: "", modifiers: .option, gesture: scroll),
+            KeyboardShortcut(name: String(localized: "Zoom"), keyEquivalent: "", modifiers: .command, gesture: scroll),
+        ]
+    }
+
     override func keyDown(with event: NSEvent) {
         guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {
             super.keyDown(with: event)

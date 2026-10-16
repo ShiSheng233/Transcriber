@@ -9,12 +9,14 @@ enum SettingsForm {
     /// Text fields, combo boxes and field+button groups all get this width,
     /// so their left and right edges line up down a page.
     static let fieldWidth: CGFloat = 300
-    private static let pageInset: CGFloat = 20
+    /// The margin around a page's sections, and the gap between sections.
+    static let pageInset: CGFloat = 20
+    static let sectionSpacing: CGFloat = 22
     private static let rowInsets = NSEdgeInsets(top: 11, left: 14, bottom: 11, right: 14)
     private static let minimumRowHeight: CGFloat = 44
 
     static func page(_ sections: [NSView]) -> NSView {
-        let stack = verticalStack(sections, spacing: 22)
+        let stack = verticalStack(sections, spacing: sectionSpacing)
         stack.edgeInsets = NSEdgeInsets(top: pageInset, left: pageInset, bottom: pageInset + 4, right: pageInset)
         stack.widthAnchor.constraint(equalToConstant: pageWidth).isActive = true
         for section in sections {
