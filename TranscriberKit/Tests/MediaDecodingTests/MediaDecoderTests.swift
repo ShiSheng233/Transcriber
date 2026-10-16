@@ -47,6 +47,16 @@ struct MediaDecoderTests {
         #expect(afterHole.contains { abs($0) > 0.1 })
     }
 
+    @Test func deliversTheSameSamplesInPieces() throws {
+        let url = try Self.fixtureURL("timestamp-gap.m4a")
+        let whole = try MediaDecoder().decodeAudio(at: url)
+        var pieces: [[Float]] = []
+        let jumps = try MediaDecoder().decodeAudio(at: url, chunkSize: 4_000) { pieces.append($0) }
+        #expect(pieces.count > 1)
+        #expect(pieces.flatMap { $0 } == whole.samples)
+        #expect(jumps == whole.timestampJumps)  // positions count the samples already handed over
+    }
+
     @Test func joiningFramesReportsTheHoleButKeepsTheOriginalBehavior() throws {
         let audio = try MediaDecoder(timestampHandling: .joinFrames).decodeAudio(at: try Self.fixtureURL("timestamp-gap.m4a"))
 

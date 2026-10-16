@@ -31,6 +31,26 @@ public struct MediaDecoder: Sendable {
     }()
 
     public func decodeAudio(at url: URL) throws -> DecodedAudio {
+        var output = try decode(at: url, deliveringEvery: nil) { _ in }
+        return DecodedAudio(samples: output.takeSamples(), timestampJumps: output.timestampJumps)
+    }
+
+    /// The same samples as `decodeAudio(at:)`, handed over in pieces of
+    /// about `chunkSize` as they are decoded, so a long film never has to fit
+    /// in memory at once. Returns the timestamp jumps.
+    @discardableResult
+    public func decodeAudio(
+        at url: URL,
+        chunkSize: Int = Self.defaultChunkSize,
+        consume: ([Float]) throws -> Void
+    ) throws -> [AudioTimestampJump] {
+        try decode(at: url, deliveringEvery: max(chunkSize, 1), consume: consume).timestampJumps
+    }
+
+    /// One minute of audio.
+    public static let defaultChunkSize = 60 * AudioTime.sampleRate
+
+    private func decode(at url: URL, deliveringEvery chunkSize: Int?, consume: ([Float]) throws -> Void) throws -> Output {
         let input = try MediaInput(url: url)
         var output = Output(resampler: AudioResampler(followsTimestamps: timestampHandling == .followTimestamps), timeBase: input.timeBase)
 
@@ -51,12 +71,18 @@ public struct MediaDecoder: Sendable {
                 continue
             }
             try decode(packet, with: input.codecContext, frame: frame, into: &output)
+            if let chunkSize, output.samples.count >= chunkSize {
+                try consume(output.takeSamples())
+            }
         }
 
         // A nil packet drains the decoder's delayed frames.
         try decode(nil, with: input.codecContext, frame: frame, into: &output)
         try output.resampler.flush(into: &output.samples)
-        return DecodedAudio(samples: output.samples, timestampJumps: output.timestampJumps)
+        if chunkSize != nil, !output.samples.isEmpty {
+            try consume(output.takeSamples())
+        }
+        return output
     }
 
     /// What decoding has produced so far.
@@ -64,8 +90,16 @@ public struct MediaDecoder: Sendable {
         let resampler: AudioResampler
         let timeBase: AVRational
         var samples: [Float] = []
+        /// Samples already handed over and removed from `samples`.
+        var deliveredSampleCount = 0
         var timestampJumps: [AudioTimestampJump] = []
         var timestampTracker = AudioTimestampTracker()
+
+        mutating func takeSamples() -> [Float] {
+            deliveredSampleCount += samples.count
+            defer { samples = [] }
+            return samples
+        }
 
         mutating func append(_ frame: UnsafeMutablePointer<AVFrame>) throws(MediaDecodingError) {
             let timestamp = frame.pointee.best_effort_timestamp
@@ -74,7 +108,7 @@ public struct MediaDecoder: Sendable {
                 let durationSeconds = Double(frame.pointee.nb_samples) / Double(frame.pointee.sample_rate)
                 if let jump = timestampTracker.jump(atFrameStartingAt: startSeconds, durationSeconds: durationSeconds) {
                     timestampJumps.append(AudioTimestampJump(
-                        position: AudioTime(samples: samples.count),
+                        position: AudioTime(samples: deliveredSampleCount + samples.count),
                         offset: AudioTime(seconds: jump)
                     ))
                 }
