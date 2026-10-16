@@ -121,6 +121,38 @@ public struct TranscriptionPipeline: Sendable {
         return try await transcribe(samples: audio.samples, filter: options.filter, progress: progress)
     }
 
+    /// Audio decoded on each side of a range, so the VAD and the model hear
+    /// the speech around its edges.
+    private static let rangeContext = AudioTime(seconds: 1)
+
+    /// Transcribes only `start..<end` of the file, to redo part of a job.
+    /// The audio around it is decoded too; subtitles whose middle falls
+    /// inside the range are kept, cut to it, in the file's time.
+    public func transcribe(
+        fileAt url: URL,
+        from start: AudioTime,
+        to end: AudioTime,
+        options: Options = Options()
+    ) async throws -> [TimedText] {
+        let audio = try MediaDecoder(timestampHandling: options.timestampHandling).decodeAudio(at: url)
+        let offset = max(start - Self.rangeContext, .zero)
+        let sliceEnd = min(end + Self.rangeContext, audio.duration)
+        guard sliceEnd > offset else {
+            return []
+        }
+        let slice = Array(audio.samples[offset.samples..<sliceEnd.samples])
+        let segments = try await transcribe(samples: slice, filter: options.filter)
+        return segments.compactMap { segment in
+            let segmentStart = segment.start + offset
+            let segmentEnd = segment.end + offset
+            let middle = AudioTime(samples: (segmentStart.samples + segmentEnd.samples) / 2)
+            guard middle >= start, middle < end else {
+                return nil
+            }
+            return TimedText(start: max(segmentStart, start), end: min(segmentEnd, end), text: segment.text)
+        }
+    }
+
     public func transcribe(
         samples: [Float],
         filter: SubtitleFilterSettings = .none,
