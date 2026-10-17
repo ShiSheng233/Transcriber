@@ -54,9 +54,14 @@ final class SettingsViewModel {
             let weights = settings.backend == .whisperCpp ? model.files.whisperCpp : model.files.mlx
             let isReady = weights.map { fileManager.fileExists(atPath: $0.path) } == true
                 && fileManager.fileExists(atPath: model.files.tokenizer.path)
-            let detail = isReady
+            var detail = isReady
                 ? model.summary
                 : String(localized: "No \(settings.backend.displayName) weights in \(model.directory.lastPathComponent)/")
+            if isReady, settings.backend == .whisperCpp, model.whisperCppEncoder == .coreML, let weights {
+                detail += TranscriptionEngine.hasCoreMLEncoder(weights)
+                    ? String(localized: " · Core ML encoder")
+                    : String(localized: " · Core ML encoder not converted")
+            }
             return ModelStatus(title: model.displayName, detail: detail, isReady: isReady)
         }
         for vadModel in Set(catalog.models.map(\.vadModelName)).sorted() {
@@ -92,8 +97,34 @@ final class SettingsViewModel {
 
 
 
-    func setBackend(_ backend: EngineSettings.Backend) {
-        store.update { $0.backend = backend }
+    /// What the Engine pop-up offers: whisper.cpp with or without the
+    /// Neural Engine encoder, or MLX.
+    enum EngineChoice: CaseIterable {
+        case whisperCppMetal
+        case whisperCppNeuralEngine
+        case mlx
+    }
+
+    var engineChoice: EngineChoice {
+        switch settings.backend {
+        case .mlx: .mlx
+        case .whisperCpp: settings.usesNeuralEngineEncoder ? .whisperCppNeuralEngine : .whisperCppMetal
+        }
+    }
+
+    func setEngine(_ choice: EngineChoice) {
+        store.update { settings in
+            switch choice {
+            case .whisperCppMetal:
+                settings.backend = .whisperCpp
+                settings.usesNeuralEngineEncoder = false
+            case .whisperCppNeuralEngine:
+                settings.backend = .whisperCpp
+                settings.usesNeuralEngineEncoder = true
+            case .mlx:
+                settings.backend = .mlx
+            }
+        }
     }
 
     func setConcurrentChunkCount(_ count: Int) {

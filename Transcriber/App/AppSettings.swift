@@ -11,6 +11,8 @@ struct AppSettings: Codable, Equatable {
     var modelID: String
     var backend: EngineSettings.Backend
     var concurrentChunkCount: Int
+    /// whisper.cpp only: the Neural Engine encoder for models converted for it.
+    var usesNeuralEngineEncoder: Bool
     /// Optional removal of likely-wrong subtitles; all off by default.
     var filter: SubtitleFilterSettings
     var formats: [SubtitleFormat]
@@ -23,6 +25,7 @@ struct AppSettings: Codable, Equatable {
         modelID: "chickenrice-v0.2",
         backend: .whisperCpp,
         concurrentChunkCount: 4,
+        usesNeuralEngineEncoder: true,
         filter: .none,
         formats: [.srt, .vtt, .lrc],
         outputDirectory: nil,
@@ -33,7 +36,12 @@ struct AppSettings: Codable, Equatable {
     func queueConfiguration(apiKeys: any APIKeyStoring) -> JobQueue.Configuration {
         let apiKey = apiKeys.read(for: llm.baseURL)
         return JobQueue.Configuration(
-            engine: EngineSettings(modelsDirectory: modelsDirectory, backend: backend, concurrentChunkCount: concurrentChunkCount),
+            engine: EngineSettings(
+                modelsDirectory: modelsDirectory,
+                backend: backend,
+                concurrentChunkCount: concurrentChunkCount,
+                usesNeuralEngineEncoder: usesNeuralEngineEncoder
+            ),
             filter: filter,
             output: OutputSettings(formats: formats, directory: outputDirectory),
             llm: JobQueue.LLMConfiguration(settings: llm, apiKey: apiKey)
@@ -50,6 +58,7 @@ extension AppSettings {
         modelID = try container.decodeIfPresent(String.self, forKey: .modelID) ?? defaults.modelID
         backend = try container.decodeIfPresent(EngineSettings.Backend.self, forKey: .backend) ?? defaults.backend
         concurrentChunkCount = try container.decodeIfPresent(Int.self, forKey: .concurrentChunkCount) ?? defaults.concurrentChunkCount
+        usesNeuralEngineEncoder = try container.decodeIfPresent(Bool.self, forKey: .usesNeuralEngineEncoder) ?? defaults.usesNeuralEngineEncoder
         filter = try container.decodeIfPresent(SubtitleFilterSettings.self, forKey: .filter) ?? defaults.filter
         formats = try container.decodeIfPresent([SubtitleFormat].self, forKey: .formats) ?? defaults.formats
         outputDirectory = try container.decodeIfPresent(URL.self, forKey: .outputDirectory)

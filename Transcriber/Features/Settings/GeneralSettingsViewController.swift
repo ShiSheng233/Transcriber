@@ -8,8 +8,9 @@ final class GeneralSettingsViewController: SettingsPaneViewController {
     /// Wide enough for "32" so the slider doesn't shift as the value changes.
     private static let concurrencyLabelWidth: CGFloat = 24
 
+    /// In `SettingsViewModel.EngineChoice.allCases` order.
     private lazy var backendPopUp = SettingsForm.popUp(
-        ["whisper.cpp (Metal)", "MLX"],
+        ["whisper.cpp (Metal)", "whisper.cpp (Core ML)", "MLX"],
         target: self, action: #selector(backendChanged(_:))
     )
     private lazy var concurrencySlider: NSSlider = {
@@ -43,13 +44,13 @@ final class GeneralSettingsViewController: SettingsPaneViewController {
             SettingsForm.section(String(localized: "Performance"), rows: [
                 SettingsForm.row(String(localized: "Engine"), control: backendPopUp),
                 SettingsForm.row(String(localized: "Chunks at once"), description: String(localized: "4 is fastest on most Macs"), control: concurrencyControl),
-            ], footer: String(localized: "whisper.cpp translates faster; MLX transcribes faster and uses less memory.")),
+            ], footer: String(localized: "whisper.cpp translates faster; MLX transcribes faster and uses less memory. Core ML runs the encoder on the Neural Engine for models converted for it, leaving the GPU to decoding; other models use Metal.")),
         ])
     }
 
     override func render() {
         let settings = viewModel.settings
-        backendPopUp.selectItem(at: settings.backend == .whisperCpp ? 0 : 1)
+        backendPopUp.selectItem(at: SettingsViewModel.EngineChoice.allCases.firstIndex(of: viewModel.engineChoice) ?? 0)
         // A stored count between stops shows at the nearest stop below it.
         let index = Self.concurrencyChoices.lastIndex { $0 <= settings.concurrentChunkCount } ?? 0
         concurrencySlider.integerValue = index
@@ -57,7 +58,11 @@ final class GeneralSettingsViewController: SettingsPaneViewController {
     }
 
     @objc private func backendChanged(_ sender: NSPopUpButton) {
-        viewModel.setBackend(sender.indexOfSelectedItem == 0 ? .whisperCpp : .mlx)
+        let choices = SettingsViewModel.EngineChoice.allCases
+        guard choices.indices.contains(sender.indexOfSelectedItem) else {
+            return
+        }
+        viewModel.setEngine(choices[sender.indexOfSelectedItem])
     }
 
     @objc private func concurrencyChanged(_ sender: NSSlider) {
