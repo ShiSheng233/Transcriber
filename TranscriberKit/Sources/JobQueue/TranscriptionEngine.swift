@@ -74,7 +74,9 @@ public actor TranscriptionEngine {
             guard let weights = model.files.whisperCpp else {
                 throw TranscriptionEngineError.unsupportedBackend(model: model.displayName, backend: settings.backend)
             }
-            backend = WhisperCppBackend(model: try WhisperModel(contentsOf: try existing(weights)))
+            backend = WhisperCppBackend(model: try WhisperModel(
+                contentsOf: try existing(weights), encoderBackend: whisperCppEncoder(for: model, settings: settings) ?? .metal
+            ))
         case .mlx:
             guard let weights = model.files.mlx else {
                 throw TranscriptionEngineError.unsupportedBackend(model: model.displayName, backend: settings.backend)
@@ -92,6 +94,23 @@ public actor TranscriptionEngine {
             segmentGenerator: SegmentGenerator(backend: backend, decoder: decoder),
             settings: pipelineSettings
         )
+    }
+
+    /// Where whisper.cpp runs `model`'s encoder: Core ML when the settings
+    /// want the Neural Engine, the model's model.json allows it and the
+    /// compiled encoder is next to the weights; Metal otherwise. `nil` when
+    /// the model has no whisper.cpp weights.
+    public static func whisperCppEncoder(for model: RecognitionModel, settings: EngineSettings) -> WhisperEncoderBackend? {
+        guard let weights = model.files.whisperCpp else {
+            return nil
+        }
+        return settings.usesNeuralEngineEncoder && model.whisperCppEncoder == .coreML && hasCoreMLEncoder(weights)
+            ? .coreML : .metal
+    }
+
+    /// Whether `make coreml-encoders` put a compiled encoder next to `weights`.
+    public static func hasCoreMLEncoder(_ weights: URL) -> Bool {
+        FileManager.default.fileExists(atPath: WhisperModel.coreMLEncoderURL(forModelAt: weights).path)
     }
 
     private static func existing(_ url: URL) throws -> URL {

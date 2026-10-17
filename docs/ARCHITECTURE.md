@@ -158,7 +158,7 @@ WhisperDecoding/
 | 模型格式 | ggml f16 | MLX safetensors f16（mlx-whisper `convert.py` 的 `hf_to_pt` 路径） |
 | 并行方式 | 多个 `whisper_state` 共享权重，各自解码一个 chunk | batch 维度：N 个 chunk（以及 best_of 的 5 条假设）一次前向，权重读一次服务 N 条序列 |
 | 解码阶段瓶颈 | 内存带宽，并发 state 只能部分缓解 | 内存带宽，batch 直接摊薄，理论上更适合高端 Mac |
-| Core ML 编码器 | 可选（用户开关，§5.4） | 无 |
+| Core ML 编码器 | 设置里的 Engine 选项 + 模型允许（model.json，§5.4；目前 whisper-ja） | 无 |
 | 成熟度 | 高 | Swift 侧需自己移植模型，或评估 mlx-audio-swift 的 `MLXAudioSTT` Whisper（需读源码确认能否加载本地微调模型、返回段级时间戳、支持 batch） |
 
 ### 5.2 以 CTranslate2 为准，以 mlx-whisper 为结构参考
@@ -185,7 +185,18 @@ mlx-whisper 是 OpenAI `whisper/decoding.py`、`transcribe.py` 的近乎逐行�
 
 ### 5.4 Core ML 编码器（仅 whisper.cpp，可选）
 
-whisper.cpp 以 `WHISPER_COREML=ON` + `WHISPER_COREML_ALLOW_FALLBACK=ON` 自行构建（`make whisper-xcframework`）。**默认关闭**：模型通过读取回调加载，whisper.cpp 拿不到模型路径，就找不到 `-encoder.mlmodelc`，编码器跑在 Metal 上。用户开启后按路径加载，编码器走 Core ML（ANE）；缺少编码器文件时直接报错，而不是悄悄回退。
+whisper.cpp 以 `WHISPER_COREML=ON` + `WHISPER_COREML_ALLOW_FALLBACK=ON` 自行构建（`make whisper-xcframework`）。**设置 › General › Engine 选 “whisper.cpp (Core ML)”（新装默认）且按模型允许**：`model.json` 写 `"whisper_cpp": { "encoder": "coreml" }`（实测对拍通过才写）且权重旁有 `ggml-encoder.mlmodelc` 时，按路径加载，编码器走 Core ML（ANE）；否则模型通过读取回调加载，whisper.cpp 拿不到模型路径，找不到编码器，跑在 Metal 上。选 “whisper.cpp (Metal)” 则一律 Metal。设置 › Models 在可用的模型后标 “Core ML encoder” 或 “Core ML encoder not converted”。配置要求 Core ML 而文件缺失时退回 Metal 并写进活动日志（编码器是可选产物，不该让转写失败）。CLI `transcribe --encoder model|metal|coreml`；显式 `coreml` 而缺文件时报错。
+
+**转换**（`make coreml-encoders`，`Tools/model-conversion/convert_whisper_encoder_to_coreml.py`）：从 HF safetensors 直接读权重映射到 openai-whisper 的 `AudioEncoder`（不经 transformers），关掉 SDPA 后 trace，转 fp16 ML Program（ANE 只算 fp16），I/O 与 whisper.cpp 自带脚本相同（`logmel_data [1, n_mels, 3000]` → `output [1, 1500, n_state]`）；与 PyTorch fp32 比余弦相似度，低于 0.999 即失败。编译成 `.mlmodelc` 后只留编译产物（1.2 GB）。
+
+**目前只给 whisper-ja-1.5B 开启**（M5 Max，whisper.cpp，4 路并行）：
+
+| | 64 s TTS（对原版 A） | 10 分钟 | 
+| --- | --- | --- |
+| Metal 编码器 | CER 0%、BLEU 100、Δ 0 ms；44.1× | 52.0× / 53.2× |
+| Core ML 编码器 | CER 0%、BLEU 100、Δ 0 ms（字幕与 Metal 逐字节相同）；42.0× | 60.7× / 61.6×（字幕与 Metal 逐字节相同） |
+
+转换报告：余弦相似度 0.99996。转换或更新后第一次加载多约 2 s（Core ML 为本机编译），之后不再有。长音频快约 16%：编码器在 ANE 上，GPU 专心解码。并发 2 / 8 不比 4 好（Core ML 54.5× / 61.2×）。ChickenRice 不开：它在 f16 下 CER 退化（§9.1），要先单独测编码器 f16 的影响；anime-whisper 未测。
 
 ### 5.5 媒体解码
 

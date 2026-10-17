@@ -9,6 +9,10 @@ struct ModelConfiguration: Decodable {
         var mlx: String?
     }
 
+    struct WhisperCpp: Decodable {
+        var encoder: RecognitionModel.WhisperCppEncoder?
+    }
+
     struct Decoding: Decodable {
         var temperatures: [Float]?
         var compressionRatioThreshold: Double?
@@ -69,6 +73,7 @@ struct ModelConfiguration: Decodable {
     var task: TranscriptionTask
     var llmMode: RecognitionModel.LLMMode
     var files: Files?
+    var whisperCpp: WhisperCpp?
     var decoding: Decoding?
     var vad: VAD?
     var chunking: Chunking?
@@ -99,6 +104,7 @@ struct ModelConfiguration: Decodable {
                 whisperCpp: (files.whisperCpp ?? "ggml.bin").isEmpty ? nil : directory.appendingPathComponent(files.whisperCpp ?? "ggml.bin"),
                 mlx: (files.mlx ?? "mlx").isEmpty ? nil : directory.appendingPathComponent(files.mlx ?? "mlx", isDirectory: true)
             ),
+            whisperCppEncoder: whisperCpp?.encoder ?? .metal,
             decoding: DecodingSettings(
                 task: task,
                 languageCode: language,

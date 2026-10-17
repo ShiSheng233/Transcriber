@@ -34,6 +34,9 @@ struct TranscribeCommand: AsyncParsableCommand {
     @Flag(help: "Enable whisper.cpp flash attention (faster, less faithful timestamps).")
     var flashAttention = false
 
+    @Option(help: "whisper.cpp encoder: model (as its model.json says), metal or coreml.")
+    var encoder: String = "model"
+
     @Flag(help: "Run whisper.cpp on the CPU instead of Metal.")
     var cpu = false
 
@@ -116,7 +119,20 @@ struct TranscribeCommand: AsyncParsableCommand {
             guard let weights else {
                 throw ValidationError("\(model) has no whisper.cpp weights")
             }
-            whisperBackend = WhisperCppBackend(model: try WhisperModel(contentsOf: weights, usesGPU: !cpu, usesFlashAttention: flashAttention))
+            let encoderBackend: WhisperEncoderBackend
+            switch encoder {
+            case "model":
+                // As the app does: Core ML when asked for and converted, else Metal.
+                let hasCoreMLEncoder = FileManager.default.fileExists(atPath: WhisperModel.coreMLEncoderURL(forModelAt: weights).path)
+                encoderBackend = recognitionModel.whisperCppEncoder == .coreML && hasCoreMLEncoder ? .coreML : .metal
+            case "metal": encoderBackend = .metal
+            case "coreml": encoderBackend = .coreML
+            default: throw ValidationError("encoder must be model, metal or coreml")
+            }
+            print("whisper.cpp encoder: \(encoderBackend == .coreML ? "Core ML" : "Metal")")
+            whisperBackend = WhisperCppBackend(model: try WhisperModel(
+                contentsOf: weights, encoderBackend: encoderBackend, usesGPU: !cpu, usesFlashAttention: flashAttention
+            ))
         case "mlx":
             guard let weights = recognitionModel.files.mlx else {
                 throw ValidationError("\(model) has no MLX weights")

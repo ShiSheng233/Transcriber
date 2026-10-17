@@ -5,6 +5,7 @@ import MediaDecoding
 import SubtitleExport
 import TranscriberCore
 import TranscriptionPipeline
+import WhisperCpp
 
 /// Runs jobs one at a time (each one already uses the GPU fully) and
 /// publishes a snapshot of all jobs after every change.
@@ -771,6 +772,11 @@ public actor JobQueue {
         let size = weights.flatMap(ActivityFormatting.fileSize(of:)).map { ", \($0)" } ?? ""
         log(.info, jobID, "Loading \(model.displayName) with \(engineName)…")
         log(.detail, jobID, "Weights: \(weights?.path ?? "none")\(size)")
+        if settings.backend == .whisperCpp, settings.usesNeuralEngineEncoder, model.whisperCppEncoder == .coreML {
+            log(.detail, jobID, TranscriptionEngine.whisperCppEncoder(for: model, settings: settings) == .coreML
+                ? "Encoder: Core ML (Neural Engine); the first load after converting or updating takes a few seconds longer"
+                : "Encoder: Metal (no ggml-encoder.mlmodelc next to the weights; make coreml-encoders)")
+        }
         log(.detail, jobID, "Decoding: task \(model.decoding.task.rawValue), language \(model.decoding.languageCode), "
             + "temperatures \(model.decoding.temperatures.map { String(format: "%.1f", $0) }.joined(separator: "/")), "
             + "\(settings.concurrentChunkCount) chunk(s) at once")

@@ -24,6 +24,7 @@ below. Anything left out takes the original ChickenRice pipeline's value
 
 ```json
 "files":    { "whisper_cpp": "ggml.bin", "mlx": "mlx", "tokenizer": "tokenizer.json" },
+"whisper_cpp": { "encoder": "coreml" },
 "decoding": { "temperatures": [0.0, 0.2], "compression_ratio_threshold": 2.4,
               "log_prob_threshold": -1.0, "no_speech_threshold": 0.6, "best_of": 5,
               "repetition_penalty": 1.0, "suppress_blank": true,
@@ -45,6 +46,12 @@ silence, and becomes one subtitle timed by the VAD. `no_repeat_ngram_size`
 blocks repeated n-grams (0 = off). `"no_speech_threshold": 1.0` never treats a
 piece as silence. See `anime-whisper.json`, which follows WhisperJAV's
 ChronosJAV pipeline ("balanced" settings).
+
+`whisper_cpp.encoder` is `metal` (default) or `coreml`: whisper.cpp then runs
+the encoder through Core ML (Neural Engine) from `ggml-encoder.mlmodelc` next
+to the weights (`make coreml-encoders`), and on Metal when that file is
+missing. Set it only after measuring recognition parity: the Neural Engine
+computes in float16.
 
 The values above are examples of the format; see `ChickenRiceDefaults.swift`
 for the actual defaults.

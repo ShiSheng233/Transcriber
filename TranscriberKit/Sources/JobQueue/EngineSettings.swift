@@ -13,11 +13,16 @@ public struct EngineSettings: Hashable, Sendable, Codable {
     public var modelsDirectory: URL
     public var backend: Backend
     public var concurrentChunkCount: Int
+    /// whisper.cpp runs the encoder on the Neural Engine (Core ML) for models
+    /// whose model.json allows it and that have a converted encoder; all
+    /// other models, and MLX, are unaffected.
+    public var usesNeuralEngineEncoder: Bool
 
-    public init(modelsDirectory: URL, backend: Backend, concurrentChunkCount: Int) {
+    public init(modelsDirectory: URL, backend: Backend, concurrentChunkCount: Int, usesNeuralEngineEncoder: Bool = true) {
         self.modelsDirectory = modelsDirectory
         self.backend = backend
         self.concurrentChunkCount = concurrentChunkCount
+        self.usesNeuralEngineEncoder = usesNeuralEngineEncoder
     }
 }
 

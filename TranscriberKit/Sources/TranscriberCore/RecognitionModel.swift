@@ -13,6 +13,16 @@ public struct RecognitionModel: Hashable, Sendable, Identifiable {
         case translate
     }
 
+    /// Where whisper.cpp runs the audio encoder for this model.
+    public enum WhisperCppEncoder: String, Hashable, Sendable, Decodable {
+        /// The Metal GPU, like the decoder.
+        case metal
+        /// Core ML (the Neural Engine where it can), from
+        /// `ggml-encoder.mlmodelc` next to the weights (`make coreml-encoders`);
+        /// Metal when that file is missing.
+        case coreML = "coreml"
+    }
+
     public struct Files: Hashable, Sendable {
         public let tokenizer: URL
         /// ggml weights for whisper.cpp, if converted.
@@ -30,6 +40,7 @@ public struct RecognitionModel: Hashable, Sendable, Identifiable {
     public let llmMode: LLMMode
     public let directory: URL
     public let files: Files
+    public let whisperCppEncoder: WhisperCppEncoder
     public let decoding: DecodingSettings
     /// The VAD model's name: `vad/<name>.mlmodelc` in the models folder.
     public let vadModelName: String

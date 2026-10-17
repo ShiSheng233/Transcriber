@@ -40,6 +40,7 @@ struct ModelCatalogTests {
             {
               "id": "custom", "name": "Custom", "language": "en", "task": "transcribe", "llm_mode": "polish",
               "files": { "mlx": "" },
+              "whisper_cpp": { "encoder": "coreml" },
               "decoding": { "temperatures": [0.0], "repetition_penalty": 1.1, "max_initial_timestamp": 0.5 },
               "vad": { "threshold": 0.4, "speech_pad_ms": 100 },
               "chunking": { "enabled": false },
@@ -61,6 +62,7 @@ struct ModelCatalogTests {
         #expect(!model.chunking.isEnabled)
         #expect(model.merge.maximumGap == AudioTime(milliseconds: 300))
         #expect(model.files.mlx == nil)
+        #expect(model.whisperCppEncoder == .coreML)
         #expect(model.llmMode == .polish)
     }
 

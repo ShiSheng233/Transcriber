@@ -5,5 +5,6 @@
   "source": "https://huggingface.co/efwkjn/whisper-ja-1.5B",
   "language": "ja",
   "task": "transcribe",
-  "llm_mode": "translate"
+  "llm_mode": "translate",
+  "whisper_cpp": { "encoder": "coreml" }
 }
