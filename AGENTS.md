@@ -15,6 +15,7 @@ make ffmpeg-xcframeworks      # FFmpeg 9.0.2, LGPL, audio decoding only, dynamic
 
 # Models (gitignored, into Models/<model>/; several GB each)
 make whisper-models mlx-models vad-model
+make coreml-encoders          # whisper-ja's encoder as Core ML (Neural Engine), used when model.json asks for it
 
 # Package build and tests
 make build                    # swift build --package-path TranscriberKit

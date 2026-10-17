@@ -47,7 +47,7 @@ WHISPER_CMAKE_FLAGS := \
 	-DGGML_NATIVE=OFF \
 	-DGGML_OPENMP=OFF
 
-.PHONY: FORCE help whisper-xcframework ffmpeg-xcframeworks whisper-models whisper-models-q8_0 mlx-models vad-model parity-fixtures baseline-a ours parity-report build test test-app clean-tools release release-archive release-export release-notarize release-cask release-publish
+.PHONY: FORCE help whisper-xcframework ffmpeg-xcframeworks whisper-models whisper-models-q8_0 mlx-models coreml-encoders vad-model parity-fixtures baseline-a ours parity-report build test test-app clean-tools release release-archive release-export release-notarize release-cask release-publish
 
 help:
 	@echo "make whisper-xcframework  Build whisper.cpp $(WHISPER_VERSION) into $(WHISPER_XCFRAMEWORK)"
@@ -55,6 +55,7 @@ help:
 	@echo "make whisper-models       Download and convert the Whisper models into $(MODELS_DIR)/<model>"
 	@echo "make whisper-models-q8_0  Optional: q8_0 variants (not built by default)"
 	@echo "make mlx-models           Convert the Whisper models to MLX (original precision) into $(MODELS_DIR)/<model>/mlx"
+	@echo "make coreml-encoders      Convert $(COREML_ENCODER_MODELS)'s encoder to Core ML (Neural Engine) next to its ggml.bin"
 	@echo "make vad-model            Convert the ASMR VAD to Core ML into $(MODELS_DIR)/vad"
 	@echo "make parity-fixtures      Regenerate test fixtures from the original Python pipeline"
 	@echo "make baseline-a           Run the original Python pipeline on $(PARITY_MEDIA) into $(BASELINE_A_DIR)"
@@ -263,6 +264,30 @@ whisper-models: $(call MODEL_FILES,model.json ggml.bin tokenizer.json)
 	done
 
 whisper-models-q8_0: $(call MODEL_FILES,ggml-q8_0.bin)
+
+# Core ML encoders -------------------------------------------------------------
+#
+# The audio encoder as a float16 Core ML model, which whisper.cpp runs on the
+# Neural Engine instead of Metal when the model's model.json asks for it
+# (whisper_cpp_encoder: coreml). Only for models whose recognition was
+# measured to stay the same (docs/ARCHITECTURE.md §5.4); ChickenRice loses
+# accuracy in float16.
+
+COREML_ENCODER_MODELS    := whisper-ja-1.5b
+COREML_ENCODER_CONVERTER := Tools/model-conversion/convert_whisper_encoder_to_coreml.py
+COREML_BUILD             := $(TOOLS_DIR)/coreml
+
+# whisper.cpp looks for <ggml file stem>-encoder.mlmodelc next to the weights.
+# The package is compiled here and only the compiled model kept.
+$(MODELS_DIR)/%/ggml-encoder.mlmodelc: $(COREML_ENCODER_CONVERTER)
+	$(MAKE) $(DOWNLOADS_DIR)/$*/config.json $(DOWNLOADS_DIR)/$*/model.safetensors
+	uv run --script $(COREML_ENCODER_CONVERTER) $(DOWNLOADS_DIR)/$* $(COREML_BUILD)/$*/ggml-encoder.mlpackage \
+		| tee $(MODELS_DIR)/$*/coreml-encoder-report.json
+	rm -rf $@
+	xcrun coremlcompiler compile $(COREML_BUILD)/$*/ggml-encoder.mlpackage $(@D) >/dev/null
+	rm -rf $(COREML_BUILD)/$*
+
+coreml-encoders: $(foreach model,$(COREML_ENCODER_MODELS),$(MODELS_DIR)/$(model)/ggml-encoder.mlmodelc)
 
 # MLX models -------------------------------------------------------------------
 #
