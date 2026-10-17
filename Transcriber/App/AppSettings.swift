@@ -22,7 +22,7 @@ struct AppSettings: Codable, Equatable {
 
     static let defaults = AppSettings(
         modelsDirectory: URL.applicationSupportDirectory.appendingPathComponent("Transcriber/Models", isDirectory: true),
-        modelID: "chickenrice-v0.2",
+        modelID: "whisper-ja-1.5b",
         backend: .whisperCpp,
         concurrentChunkCount: 4,
         usesNeuralEngineEncoder: true,
