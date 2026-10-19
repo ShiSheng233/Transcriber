@@ -9,6 +9,7 @@ import TranscriberCore
 final class JobDetailViewModel {
     private static let showsPlayerKey = "ShowsPlayer"
     private static let timingModeKey = "ShowsTimingMode"
+    private static let spectrogramKey = "ShowsSpectrogram"
     private static let editingToolsKey = "ShowsEditingTools"
     private static let sourceColumnKey = "ShowsSourceColumn"
     private static let playerVolumeKey = "PlayerVolume"
@@ -49,6 +50,7 @@ final class JobDetailViewModel {
         playerVolume = userDefaults.object(forKey: Self.playerVolumeKey) == nil ? 1 : userDefaults.float(forKey: Self.playerVolumeKey)
         isPlayerMuted = userDefaults.bool(forKey: Self.playerMutedKey)
         editor.setPrefersSourceColumn(userDefaults.object(forKey: Self.sourceColumnKey) == nil || userDefaults.bool(forKey: Self.sourceColumnKey))
+        waveform.setShowsSpectrogram(userDefaults.bool(forKey: Self.spectrogramKey))
         editor.onChange = { [weak self] lines in
             if let self, let jobID = shownJobID {
                 onEdit(jobID, lines)
@@ -116,6 +118,13 @@ final class JobDetailViewModel {
         isTimingModeOn.toggle()
         userDefaults.set(isTimingModeOn, forKey: Self.timingModeKey)
         updateWaveform()
+    }
+
+    /// Timing mode's audio as a spectrogram or as peaks; off by default.
+    func toggleSpectrogram() {
+        let shows = !waveform.showsSpectrogram
+        waveform.setShowsSpectrogram(shows)
+        userDefaults.set(shows, forKey: Self.spectrogramKey)
     }
 
     func toggleSourceColumn() {

@@ -89,6 +89,44 @@ struct WaveformViewModelTests {
         #expect(!waveform.isLoading)
     }
 
+    private func waitUntilSpectrogramLoaded() async throws {
+        let deadline = ContinuousClock.now + Self.loadTimeout
+        while waveform.isLoading || waveform.isLoadingSpectrogram {
+            try #require(ContinuousClock.now < deadline, "the spectrogram never finished loading")
+            try await Task.sleep(for: Self.pollInterval)
+        }
+    }
+
+    @Test func theSpectrogramIsMadeOnlyOnceItIsShown() async throws {
+        try audio.writeTone(seconds: 1, between: 0.5)
+        waveform.show(audio.url)
+        try await waitUntilLoaded()
+        #expect(!waveform.isLoadingSpectrogram)
+        #expect(waveform.spectrogram == nil)
+        waveform.setShowsSpectrogram(true)
+        #expect(waveform.isLoadingSpectrogram)
+        try await waitUntilSpectrogramLoaded()
+        let spectrogram = try #require(waveform.spectrogram)
+        #expect(spectrogram.duration == AudioTime(seconds: 2))
+        // Kept for switching back.
+        waveform.setShowsSpectrogram(false)
+        #expect(waveform.spectrogram == spectrogram)
+    }
+
+    @Test func aFileOpenedWithTheSpectrogramShownGetsBoth() async throws {
+        try audio.writeTone(seconds: 1, between: 0.5)
+        waveform.setShowsSpectrogram(true)
+        // Nothing to analyze before a file is shown.
+        #expect(!waveform.isLoadingSpectrogram)
+        waveform.show(audio.url)
+        try await waitUntilSpectrogramLoaded()
+        #expect(waveform.waveform != nil)
+        #expect(waveform.spectrogram != nil)
+        waveform.show(nil)
+        #expect(waveform.spectrogram == nil)
+        #expect(!waveform.isLoadingSpectrogram)
+    }
+
     @Test func scrollingStopsAtBothEndsOfTheAudio() async throws {
         try audio.writeTone(seconds: 1, between: 0.5)
         waveform.show(audio.url)

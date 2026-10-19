@@ -24,10 +24,16 @@ final class WaveformViewModel {
     private(set) var pointsPerSecond = defaultPointsPerSecond
     /// The time at the left edge.
     private(set) var visibleStart = AudioTime.zero
+    /// Shows the spectrogram instead of the peaks; the peaks stay while it loads.
+    private(set) var showsSpectrogram = false
+    /// The shown file's spectrogram, made only once it is asked for.
+    private(set) var spectrogram: Spectrogram?
+    private(set) var isLoadingSpectrogram = false
 
     @ObservationIgnored private let loader: WaveformLoader
     @ObservationIgnored private var loadedURL: URL?
     @ObservationIgnored private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private var spectrogramTask: Task<Void, Never>?
 
     init(loader: WaveformLoader) {
         self.loader = loader
@@ -57,9 +63,11 @@ final class WaveformViewModel {
     func show(_ url: URL?) {
         guard url != loadedURL else { return }
         loadTask?.cancel()
+        cancelSpectrogram()
         loadedURL = url
         waveform = nil
         soundSpans = []
+        spectrogram = nil
         loadFailureMessage = nil
         visibleStart = .zero
         guard let url else {
@@ -67,9 +75,11 @@ final class WaveformViewModel {
             return
         }
         isLoading = true
+        // One decode makes both when the spectrogram is shown and neither is cached.
+        let includesSpectrogram = showsSpectrogram
         loadTask = Task { [loader] in
             let result = await Task.detached(priority: .utility) { () -> (Waveform, [SpeechSpan])? in
-                guard let waveform = try? await loader.waveform(for: url) else { return nil }
+                guard let waveform = try? await loader.waveform(for: url, includingSpectrogram: includesSpectrogram) else { return nil }
                 return (waveform, waveform.soundSpans())
             }.value
             guard !Task.isCancelled, loadedURL == url else { return }
@@ -77,10 +87,46 @@ final class WaveformViewModel {
             if let (waveform, spans) = result {
                 self.waveform = waveform
                 soundSpans = spans
+                loadSpectrogramIfShown()
             } else {
                 loadFailureMessage = Self.failureMessage(for: url)
             }
         }
+    }
+
+    /// Switches between the spectrogram and the peaks, loading the
+    /// spectrogram the first time it is shown for a file.
+    func setShowsSpectrogram(_ shows: Bool) {
+        guard shows != showsSpectrogram else { return }
+        showsSpectrogram = shows
+        if shows {
+            loadSpectrogramIfShown()
+        } else {
+            // A loaded spectrogram is kept for switching back; a half-made one is not.
+            cancelSpectrogram()
+        }
+    }
+
+    /// Once the waveform is in: the spectrogram is analyzed after it, so the
+    /// peaks show (and times snap) while it is made.
+    private func loadSpectrogramIfShown() {
+        guard showsSpectrogram, spectrogram == nil, spectrogramTask == nil, waveform != nil, let url = loadedURL else { return }
+        isLoadingSpectrogram = true
+        spectrogramTask = Task { [loader] in
+            // Not detached: cancelling this task stops the analysis.
+            let spectrogram = try? await loader.spectrogram(for: url)
+            guard !Task.isCancelled, loadedURL == url else { return }
+            spectrogramTask = nil
+            isLoadingSpectrogram = false
+            // On failure the peaks stay; the waveform's own message covers a missing file.
+            self.spectrogram = spectrogram
+        }
+    }
+
+    private func cancelSpectrogram() {
+        spectrogramTask?.cancel()
+        spectrogramTask = nil
+        isLoadingSpectrogram = false
     }
 
     /// Loads the shown file again after it failed (its drive reconnected,

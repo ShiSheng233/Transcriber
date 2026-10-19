@@ -53,6 +53,17 @@ final class JobDetailViewModelTests {
         #expect(!makeViewModel().isTimingModeOn)
     }
 
+    @Test func theSpectrogramChoiceIsRemembered() {
+        let detail = makeViewModel()
+        #expect(!detail.waveform.showsSpectrogram)
+        detail.toggleSpectrogram()
+        #expect(detail.waveform.showsSpectrogram)
+        let relaunched = makeViewModel()
+        #expect(relaunched.waveform.showsSpectrogram)
+        relaunched.toggleSpectrogram()
+        #expect(!makeViewModel().waveform.showsSpectrogram)
+    }
+
     @Test func playerVolumeAndMuteAreRemembered() {
         makeViewModel().setPlayerVolume(0.25, isMuted: true)
         let relaunched = makeViewModel()

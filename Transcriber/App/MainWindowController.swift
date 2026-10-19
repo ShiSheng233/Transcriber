@@ -394,6 +394,10 @@ extension MainWindowController: SubtitleEditorCommands {
         detailViewModel.toggleSourceColumn()
     }
 
+    @objc func toggleSpectrogram(_ sender: Any?) {
+        detailViewModel.toggleSpectrogram()
+    }
+
     @objc func zoomInWaveform(_ sender: Any?) {
         detailViewController.zoomWaveform(by: WaveformViewModel.zoomStep)
     }
@@ -523,7 +527,7 @@ extension MainWindowController: NSMenuItemValidation {
             menuItem.title = detailViewModel.showsPlayer ? String(localized: "Hide Player") : String(localized: "Show Player")
         case #selector(toggleEditingTools(_:)):
             menuItem.title = detailViewModel.showsEditingTools ? String(localized: "Hide Editing Tools") : String(localized: "Show Editing Tools")
-        case #selector(toggleWaveform(_:)), #selector(toggleSourceColumn(_:)):
+        case #selector(toggleWaveform(_:)), #selector(toggleSourceColumn(_:)), #selector(toggleSpectrogram(_:)):
             menuItem.state = isCommandOn(action) ? .on : .off
         default:
             break
@@ -536,6 +540,7 @@ extension MainWindowController: NSMenuItemValidation {
         switch action {
         case #selector(toggleWaveform(_:)): detailViewModel.isTimingModeOn
         case #selector(toggleSourceColumn(_:)): editor.showsSourceColumn
+        case #selector(toggleSpectrogram(_:)): detailViewModel.waveform.showsSpectrogram
         default: false
         }
     }
@@ -576,7 +581,7 @@ extension MainWindowController: NSMenuItemValidation {
             return detailViewModel.canUseTimingMode
         case #selector(toggleSourceColumn(_:)):
             return editor.hasSources
-        case #selector(zoomInWaveform(_:)), #selector(zoomOutWaveform(_:)):
+        case #selector(toggleSpectrogram(_:)), #selector(zoomInWaveform(_:)), #selector(zoomOutWaveform(_:)):
             return detailViewModel.showsWaveform
         case #selector(fitWaveformToLine(_:)):
             return detailViewModel.showsWaveform && editor.activeLine != nil

@@ -69,6 +69,7 @@ final class WaveformView: NSView {
     private var dragLabel: String?
     private var displayedActiveIndex: Int?
     private var binder: ObservationBinder?
+    private let spectrogramRenderer = SpectrogramRenderer()
     /// Under the failure message.
     private let retryButton = NSButton(title: String(localized: "Try Again"), target: nil, action: nil)
 
@@ -105,6 +106,7 @@ final class WaveformView: NSView {
     private func render() {
         _ = (editor.displayedLines, editor.selection, editor.isEditable, editor.playbackTime)
         _ = (waveform.waveform, waveform.snapSpans, waveform.isLoading, waveform.pointsPerSecond, waveform.visibleStart)
+        _ = (waveform.showsSpectrogram, waveform.spectrogram, waveform.isLoadingSpectrogram)
         if editor.activeIndex != displayedActiveIndex {
             displayedActiveIndex = editor.activeIndex
             if let line = editor.activeLine {
@@ -134,8 +136,15 @@ final class WaveformView: NSView {
         NSColor.controlBackgroundColor.setFill()
         bounds.fill()
         let body = NSRect(x: 0, y: Metrics.rulerHeight, width: bounds.width, height: bounds.height - Metrics.rulerHeight)
-        drawLines(in: body)
-        drawPeaks(in: body)
+        // The spectrogram fills the body, so the lines tint it from above;
+        // the thin peaks go over the lines.
+        if waveform.showsSpectrogram, let spectrogram = waveform.spectrogram {
+            drawSpectrogram(spectrogram, in: body)
+            drawLines(in: body)
+        } else {
+            drawLines(in: body)
+            drawPeaks(in: body)
+        }
         drawSoundBar(in: body)
         drawRuler()
         drawPlayhead()
@@ -261,6 +270,24 @@ final class WaveformView: NSView {
         path.stroke()
     }
 
+    private func drawSpectrogram(_ spectrogram: Spectrogram, in body: NSRect) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let viewport = SpectrogramRenderer.Viewport(
+            visibleStart: waveform.visibleStart,
+            pointsPerSecond: waveform.pointsPerSecond,
+            size: body.size,
+            scale: window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 1,
+            isDark: effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        )
+        guard let image = spectrogramRenderer.image(of: spectrogram, in: viewport) else { return }
+        // Images draw upside down in a flipped view: flip about the body's middle.
+        context.saveGState()
+        context.translateBy(x: 0, y: body.minY + body.maxY)
+        context.scaleBy(x: 1, y: -1)
+        context.draw(image, in: body)
+        context.restoreGState()
+    }
+
     private func drawSoundBar(in body: NSRect) {
         NSColor.systemGreen.withAlphaComponent(0.5).setFill()
         let visibleEnd = waveform.time(atX: width)
@@ -279,6 +306,16 @@ final class WaveformView: NSView {
     }
 
     private func drawStatus(in body: NSRect) {
+        if waveform.isLoadingSpectrogram, waveform.showsSpectrogram {
+            // In a corner: the peaks show meanwhile.
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+                .foregroundColor: NSColor.tertiaryLabelColor,
+            ]
+            let text = String(localized: "Making spectrogram…") as NSString
+            let size = text.size(withAttributes: attributes)
+            text.draw(at: NSPoint(x: body.maxX - size.width - Metrics.labelInset, y: body.maxY - size.height - Metrics.soundBarHeight - Metrics.labelInset), withAttributes: attributes)
+        }
         let message: String? = if waveform.isLoading {
             String(localized: "Loading waveform…")
         } else {

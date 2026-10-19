@@ -43,6 +43,7 @@ import AppKit
     func showConsistencyCheck(_ sender: Any?)
     func toggleWaveform(_ sender: Any?)
     func toggleSourceColumn(_ sender: Any?)
+    func toggleSpectrogram(_ sender: Any?)
     func zoomInWaveform(_ sender: Any?)
     func zoomOutWaveform(_ sender: Any?)
     func fitWaveformToLine(_ sender: Any?)
@@ -154,6 +155,7 @@ enum SubtitleEditorMenu {
         Item(title: String(localized: "Timing Mode"), action: #selector(Commands.toggleWaveform(_:)), key: "a", modifiers: [.command, .option]),
         Item(title: String(localized: "Show Original Text"), action: #selector(Commands.toggleSourceColumn(_:)), key: "o", modifiers: [.command, .option]),
         nil,
+        Item(title: String(localized: "Show Spectrogram"), action: #selector(Commands.toggleSpectrogram(_:)), key: "s", modifiers: [.command, .option]),
         Item(title: String(localized: "Zoom In Waveform"), action: #selector(Commands.zoomInWaveform(_:)), key: "="),
         Item(title: String(localized: "Zoom Out Waveform"), action: #selector(Commands.zoomOutWaveform(_:)), key: "-"),
         Item(title: String(localized: "Fit Waveform to Line"), action: #selector(Commands.fitWaveformToLine(_:)), key: "0"),
