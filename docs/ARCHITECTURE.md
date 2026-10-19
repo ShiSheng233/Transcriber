@@ -300,6 +300,7 @@ queued → loadingModel → decodingAudio → detectingSpeech → transcribing(p
 - **Shift Times**（⌘I）：按时间或帧（fps 可选），提前/推后，选中行 / 全部 / 活动行之后，两端 / 只起点 / 只终点。
 - **Select Lines**（⌘L）：CPS 超限、过短、过长、重叠、文本匹配（可正则）、空文本，可要求全部或任一条件，结果替换 / 加入 / 交集 / 减去当前选择；不进撤销栈。
 - **Check Consistency**（⇧⌘C，操作栏选择组也有按钮，`TermVariants`）：列出全文里同一个名字或术语的不同写法及各自次数，每组选要保留的写法、勾选要统一的组，Unify 一次替换所有行，作为一个可撤销步骤。不查字典，只认能确定的差别：全角半角、大小写、平假名与片假名、小写假名、长音“～/〜”与“ー”、中点。文本先按文字种类切成段（片假名、平假名、汉字、拉丁字母数字、其他），只按整段匹配，名字不会在更长的词里被误认。候选是至少 3 个字的片假名或拉丁段、且出现两种以上写法；平假名段只作为这些候选的写法计数。术语表两侧的词不限长度，出现一种不同写法就列出，默认保留术语表的写法；其余默认保留最常见的写法（同样多时优先全角片假名或普通拉丁字母）。
+- **拼写检查**（Subtitle › Check Spelling… ⌘;，`SubtitleEditorViewModel+Spelling`）：从活动行起绕全文一圈，逐个显示拼错的词（所在行、上下文、建议），Replace / Replace All（各一个可撤销步骤）、Ignore、Ignore All（到退出为止）、Add to Dictionary（写进用户的系统词典），网格与播放器跟到该行。编辑框边打边标（Check Spelling While Typing，默认开，全局记住；编辑框右键菜单里的同名项是同一个开关），标记也来自同一个检查器，与 Check Spelling 一致。检查走 `SpellChecking` 协议，ViewModel 不碰 AppKit；应用里是 `SystemSpellChecker`（`NSSpellChecker`，全应用一个 spell document，两处的忽略互通）。语言按任务推断（`SpellingLanguage`）：转写取模型语言，ChickenRice 为中文，走过 LLM 翻译的取 Settings › LLM 的目标语言（名称或代码都认），字幕文件未翻译时不知道。macOS 没有中文、日文词典，这时（以及语言未知时）按每个词自己的语言检查，只会标出中日文行里拼错的拉丁字母词；系统自带的边打边查会跳过中日文行里的拉丁词，所以编辑框的标记换成了这个检查器的结果。网格不标拼写问题：每次刷新都要对所有行查一遍，代价不值。
 - **原文**（View › Show Original Text ⌥⌘O）：文件走过 LLM 时，按时间找回 LLM 之前的原文（时间相同的行，否则中点落在行内的原文行），网格的 Text 单元格里原文以灰色小字显示在现文上方（行高 40），编辑框的文本框上方也多一行只读原文。
 - 其他：在播放头处拆分（⇧⌘D，文本在光标处或按时间比例切开）、合并保留首行文本（⇧⌘J）、交换两行文本、按开始时间排序；播放菜单 ⇧⌘↩ 播放选区、⌥⌘↩ 播放下一行、⌥⌘1/⌃⌘1 播放起点前/后、⌥⌘2/⌃⌘2 播放终点前/后。
 
@@ -316,7 +317,7 @@ Transcriber/
 ├─ Features/
 │   ├─ JobQueue/       JobQueueViewController, JobQueueViewModel, JobRowView
 │   ├─ JobDetail/      JobDetailViewController, JobDetailViewModel（播放器 + 字幕列表同步高亮）
-│   ├─ SubtitleEditor/ 编辑面板：操作栏、编辑框、网格、菜单定义、Shift Times / Adjust Timing / Select Lines / 查找替换
+│   ├─ SubtitleEditor/ 编辑面板：操作栏、编辑框、网格、菜单定义、Shift Times / Adjust Timing / Select Lines / 查找替换 / 拼写检查
 │   ├─ Waveform/       WaveformView, WaveformViewModel（调时间模式的波形）, SpectrogramRenderer, SpectrogramColormap（语谱图）
 │   ├─ Settings/       SettingsWindowController, SettingsViewModel（模式、语言、导出格式、VAD/解码高级参数）, ShortcutsViewModel（快捷键一览）
 │   ├─ ModelLibrary/   ModelLibraryViewController, ModelLibraryViewModel（模型目录、下载进度、磁盘占用）
