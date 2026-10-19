@@ -112,7 +112,7 @@ final class JobQueueViewController: NSViewController {
 | 模块 | 入口 | 职责 | 对应原项目 |
 | --- | --- | --- | --- |
 | `MediaDecoding` | `MediaDecoder` | FFmpeg 解码并用 libswresample 转 16 kHz mono s16 → float（见 §5.5）；也可按块交出采样，给只做汇总的调用方 | `decode_audio` |
-| `AudioOverview` | `WaveformLoader`（actor）、`WaveformCache` | 编辑器的波形：每 10 ms 一个峰值与 RMS（vDSP 计算，每小时约 3 MB）。转写时用流水线已经解码好的音频顺手生成并写入磁盘缓存（`~/Library/Caches/<bundle>/Waveforms`，按文件路径 + 大小 + 修改时间索引，30 天未用删除），编辑器打开时先查内存、再查磁盘，都没有才边解码边汇总（不保留 PCM）；从响度找出比安静底噪高 12 dB 的声音段，供调时间吸附（是响度，不是语音模型） | 新增 |
+| `AudioOverview` | `WaveformLoader`（actor）、`WaveformCache` | 编辑器的波形：每 10 ms 一个峰值与 RMS（vDSP 计算，每小时约 3 MB）。转写时用流水线已经解码好的音频顺手生成并写入磁盘缓存（`~/Library/Caches/<bundle>/Waveforms`，按文件路径 + 大小 + 修改时间索引，30 天未用删除），编辑器打开时先查内存、再查磁盘，都没有才边解码边汇总（不保留 PCM）；从响度找出比安静底噪高 12 dB 的声音段，供调时间吸附（是响度，不是语音模型）。`Spectrogram`：语谱图，每 20 ms 一列、32 ms Hann 窗 vDSP FFT，50 Hz–8 kHz 分成 128 个 mel 频带（与 Whisper 特征同一频率范围，低频的基频谐波和共振峰占大部分高度），每带一字节 dB（−100…0 dBFS，每小时约 23 MB）；只在第一次显示时计算（波形也缺时同一次解码一起算），可取消，写入同一磁盘缓存 | 新增 |
 | `AudioFeatures` | `LogMelSpectrogram` | vDSP 实现 Whisper 前端：VAD 用的 HF `WhisperFeatureExtractor` 版本，以及识别用的 faster-whisper `FeatureExtractor` 版本（填充与归一化范围不同） | `WhisperFeatureExtractor`, `feature_extractor.py` |
 | `SpeechDetection` | `VoiceActivityDetector` | Core ML 跑 ASMR VAD；`SpeechSegmenter` 是纯函数，实现带滞回的阈值分段 | `vad_manager.py` |
 | `WhisperDecoding` | `WhisperBackend`（协议）、`WindowTranscriber` | 与后端无关的解码：prompt、no_speech、逐步 logits 处理、采样、温度回退、时间戳分段、seek 循环、分词器（见 §5.1–5.3） | CTranslate2 `whisper.cc` / `decoding.cc` + faster-whisper `transcribe.py` |
@@ -295,6 +295,7 @@ queued → loadingModel → decodingAudio → detectingSpeech → transcribing(p
 **编辑器（参照 Aegisub）**：编辑面板自上而下是操作栏、编辑框、网格；调时间模式下波形取代视频画面显示在上半区（播放器继续放声音，可以只看波形调时间）。操作栏默认收起，从窗口工具栏右上角的 Editing Tools 按钮（View › Show Editing Tools ⌥⌘E）打开，和播放器开关一样全局记住。操作栏的按钮与菜单项发同一个 action，由 `MainWindowController.isCommandEnabled` 统一判断可用；分组：行（插入、删除、拆分▾、合并▾、交换）、时间（设起点/终点到播放头、平移到播放头、连续▾、Shift Times…、Adjust Timing…）、播放（Play Line、播放▾）、选择（Select Lines…、查找替换、Check Consistency…），右侧两个开关：调时间模式、原文列。焦点在网格上时（不论是否开调时间模式，只要有媒体）Space 播放/暂停，Q/E/D/W/S 同波形上的播放键，发的是菜单的同一个 action（`SubtitleEditorMenu.playbackKeyAction`）；网格关掉了按字母跳行（type select），↑↓ 仍是表格自己的换行；编辑框和时间字段里照常打字。
 - **识别置信度**：没通过 Whisper 自身检查的行在网格里行号标橙，悬停显示 avg log prob、no speech、压缩比；Select Lines 可按它筛选，再批量重新识别或重翻。
 - **调时间模式**（View › Timing Mode ⌥⌘A，默认关，全局记住）：关着时不显示波形也不读取。开着时上半区显示波形而不是视频（即使播放器被隐藏也照样载入声音）：拖活动行两端调时间（⇧ 带动相接的邻行，⌥ 关吸附；吸附到 6 pt 内的邻行边、播放头、语音边界：转写过的文件用识别时存下的 VAD 语音段，字幕文件用波形响度），拖行中间平移所选行，松手才写入、一步撤销；拖动时网格与时间字段实时跟随。单击定位，点行号条选行；⌥/⌘ 滚动或捏合缩放（10–2000 pt/s），播放时整页翻。焦点在波形上时 Space 播放/暂停，Q/E/D/W 播放起点前/后、终点前/后 500 ms，S 播放选区（网格有焦点时同样可用），↑↓ 换行，←→ 移播放头 0.1 s（⇧ 1 s）。播放头用 display link 每帧刷新。读不出波形时显示原因（文件不在了，或读不出声音）和 Try Again 按钮，重新载入（`WaveformViewModel.retry()`；`WaveformLoader` 只缓存读成功的波形，所以会重新解码），比如外接硬盘重新接上之后。
+- **语谱图**（View › Show Spectrogram ⌥⌘S，默认关，全局记住；参照 Aegisub 的频谱模式）：调时间模式里用语谱图代替波形峰值，行、选区、播放头、语音段照常画在上面；算好之前先显示峰值。配色是 magma（感知均匀），深色模式由暗到亮，浅色模式反过来由浅到深，最安静的部分渐隐成背景；显示范围 −100…−20 dB（Audacity 默认）。`SpectrogramRenderer` 两级缓存：每 512 列一张固定的 tile（任何缩放都复用），再按当前可见范围合成一张屏幕像素大小的图，只有播放头动时直接复用。
 - **Adjust Timing**（⇧⌘I，`TimingPostProcessing`）：lead-in 200 / lead-out 300 ms（只延伸到邻行，不制造重叠）→ 吸附到语音边界（起点 100、终点 150 ms 内；转写过的文件直接可用，字幕文件需先开调时间模式分析响度）→ 间隔 < 300 ms 的相邻行延长前一行接上。
 - **Shift Times**（⌘I）：按时间或帧（fps 可选），提前/推后，选中行 / 全部 / 活动行之后，两端 / 只起点 / 只终点。
 - **Select Lines**（⌘L）：CPS 超限、过短、过长、重叠、文本匹配（可正则）、空文本，可要求全部或任一条件，结果替换 / 加入 / 交集 / 减去当前选择；不进撤销栈。
@@ -316,7 +317,7 @@ Transcriber/
 │   ├─ JobQueue/       JobQueueViewController, JobQueueViewModel, JobRowView
 │   ├─ JobDetail/      JobDetailViewController, JobDetailViewModel（播放器 + 字幕列表同步高亮）
 │   ├─ SubtitleEditor/ 编辑面板：操作栏、编辑框、网格、菜单定义、Shift Times / Adjust Timing / Select Lines / 查找替换
-│   ├─ Waveform/       WaveformView, WaveformViewModel（调时间模式的波形）
+│   ├─ Waveform/       WaveformView, WaveformViewModel（调时间模式的波形）, SpectrogramRenderer, SpectrogramColormap（语谱图）
 │   ├─ Settings/       SettingsWindowController, SettingsViewModel（模式、语言、导出格式、VAD/解码高级参数）, ShortcutsViewModel（快捷键一览）
 │   ├─ ModelLibrary/   ModelLibraryViewController, ModelLibraryViewModel（模型目录、下载进度、磁盘占用）
 │   └─ LLMSettings/    LLMSettingsViewController, LLMSettingsViewModel（OpenRouter Key 存 Keychain、模型选择、术语表）
