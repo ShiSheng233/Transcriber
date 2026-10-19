@@ -5,11 +5,14 @@ import TranscriberCore
 /// Waveforms on disk, so a file transcribed once opens in timing mode at
 /// once, even after a relaunch. A waveform is found by the media file's
 /// path, size and modification date, so a changed file is analyzed again.
-/// About 3 MB per hour of audio.
+/// About 3 MB per hour of audio; spectrograms, kept beside them once shown
+/// (`WaveformCache+Spectrogram`), about 23 MB.
 public struct WaveformCache: Sendable {
     /// Waveforms not used for this long are deleted when the cache is opened.
     public static let defaultLifetime: Duration = .seconds(30 * 24 * 60 * 60)
     private static let fileExtension = "waveform"
+    /// Every kind of file the cache writes, for expiry.
+    private static let fileExtensions: Set<String> = [fileExtension, spectrogramFileExtension]
     /// Bumped when the file layout changes; older files are ignored.
     private static let formatVersion: UInt32 = 1
 
@@ -30,22 +33,31 @@ public struct WaveformCache: Sendable {
     }
 
     public func waveform(for mediaURL: URL) -> Waveform? {
-        guard let file = fileURL(for: mediaURL), let data = try? Data(contentsOf: file) else {
-            return nil
-        }
-        // Touched on use, so files in use do not expire.
-        try? FileManager.default.setAttributes([.modificationDate: Date.now], ofItemAtPath: file.path)
-        return Self.decode(data)
+        contents(for: mediaURL, fileExtension: Self.fileExtension).flatMap(Self.decode)
     }
 
     public func store(_ waveform: Waveform, for mediaURL: URL) {
-        guard let file = fileURL(for: mediaURL) else { return }
-        try? Self.encode(waveform).write(to: file, options: .atomic)
+        store(Self.encode(waveform), for: mediaURL, fileExtension: Self.fileExtension)
     }
 
     // MARK: Files
 
-    private func fileURL(for mediaURL: URL) -> URL? {
+    /// What is stored for `mediaURL` under `fileExtension`.
+    func contents(for mediaURL: URL, fileExtension: String) -> Data? {
+        guard let file = fileURL(for: mediaURL, fileExtension: fileExtension), let data = try? Data(contentsOf: file) else {
+            return nil
+        }
+        // Touched on use, so files in use do not expire.
+        try? FileManager.default.setAttributes([.modificationDate: Date.now], ofItemAtPath: file.path)
+        return data
+    }
+
+    func store(_ data: Data, for mediaURL: URL, fileExtension: String) {
+        guard let file = fileURL(for: mediaURL, fileExtension: fileExtension) else { return }
+        try? data.write(to: file, options: .atomic)
+    }
+
+    private func fileURL(for mediaURL: URL, fileExtension: String) -> URL? {
         // Read fresh each time: URL resource values are cached per URL.
         let attributes = try? FileManager.default.attributesOfItem(atPath: mediaURL.path)
         guard let size = attributes?[.size] as? Int, let modified = attributes?[.modificationDate] as? Date else {
@@ -53,14 +65,14 @@ public struct WaveformCache: Sendable {
         }
         let identity = "\(mediaURL.standardizedFileURL.path)\n\(size)\n\(modified.timeIntervalSinceReferenceDate)"
         let digest = SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
-        return directory.appendingPathComponent(digest).appendingPathExtension(Self.fileExtension)
+        return directory.appendingPathComponent(digest).appendingPathExtension(fileExtension)
     }
 
     private static func deleteFiles(in directory: URL, olderThan cutoff: Date) {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: [.contentModificationDateKey]
         )) ?? []
-        for file in files where file.pathExtension == fileExtension {
+        for file in files where fileExtensions.contains(file.pathExtension) {
             let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
             if let modified, modified < cutoff {
                 try? FileManager.default.removeItem(at: file)
