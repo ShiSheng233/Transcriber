@@ -34,6 +34,7 @@ final class JobDetailViewModelTests {
         #expect(!detail.isTimingModeOn)
         #expect(!detail.showsEditingTools)
         #expect(detail.editor.prefersSourceColumn)
+        #expect(detail.editor.checksSpellingWhileTyping)
         #expect(detail.playerVolume == 1)
         #expect(!detail.isPlayerMuted)
     }
@@ -44,11 +45,13 @@ final class JobDetailViewModelTests {
         detail.toggleTimingMode()
         detail.toggleEditingTools()
         detail.toggleSourceColumn()
+        detail.toggleSpellingWhileTyping()
         let relaunched = makeViewModel()
         #expect(!relaunched.showsPlayer)
         #expect(relaunched.isTimingModeOn)
         #expect(relaunched.showsEditingTools)
         #expect(!relaunched.editor.prefersSourceColumn)
+        #expect(!relaunched.editor.checksSpellingWhileTyping)
         relaunched.toggleTimingMode()
         #expect(!makeViewModel().isTimingModeOn)
     }
@@ -124,6 +127,14 @@ final class JobDetailViewModelTests {
         #expect(detail.currentSubtitle == "two")
         detail.playbackTimeChanged(to: 1.5)
         #expect(detail.currentSubtitle == nil)
+    }
+
+    @Test func theShownJobsLanguageIsTheSpellCheckers() {
+        let detail = makeViewModel()
+        detail.show(Self.editingJob(), subtitleLanguage: "en")
+        #expect(detail.editor.spellingLanguage == "en")
+        detail.show(nil)
+        #expect(detail.editor.spellingLanguage == nil)
     }
 
     @Test func showingNothingClearsTheEditor() {

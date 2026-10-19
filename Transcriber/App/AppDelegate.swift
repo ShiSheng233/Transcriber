@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             queueViewModel: queueViewModel,
             activityViewModel: environment.activityViewModel,
             waveformLoader: environment.waveformLoader,
+            spellChecker: environment.spellChecker,
             openSettings: { [weak self] in self?.showSettings(nil) },
             showActivity: { [weak self] in self?.showActivity(nil) }
         )

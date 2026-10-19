@@ -22,6 +22,9 @@ final class MainWindowController: NSWindowController {
     private lazy var consistencySheet = ConsistencySheet(editor: detailViewModel.editor) { [queueViewModel] in
         queueViewModel.glossaryTerms
     }
+    private lazy var spellingCheckSheet = SpellingCheckSheet(editor: detailViewModel.editor) { [detailViewController] index in
+        detailViewController.seekToLine(index)
+    }
     private let openSettings: () -> Void
     private var binder: ObservationBinder?
     private lazy var modelPopUp: NSPopUpButton = {
@@ -36,12 +39,13 @@ final class MainWindowController: NSWindowController {
         queueViewModel: JobQueueViewModel,
         activityViewModel: ActivityViewModel,
         waveformLoader: WaveformLoader,
+        spellChecker: any SpellChecking,
         openSettings: @escaping () -> Void,
         showActivity: @escaping () -> Void
     ) {
         self.queueViewModel = queueViewModel
         self.openSettings = openSettings
-        detailViewModel = JobDetailViewModel(waveformLoader: waveformLoader)
+        detailViewModel = JobDetailViewModel(waveformLoader: waveformLoader, spellChecker: spellChecker)
         detailViewController = JobDetailViewController(viewModel: detailViewModel)
         detailViewModel.onEdit = { [queueViewModel] jobID, lines in
             queueViewModel.updateSubtitles(of: jobID, to: lines)
@@ -86,7 +90,8 @@ final class MainWindowController: NSWindowController {
     }
 
     private func render() {
-        detailViewModel.show(queueViewModel.selectedJob)
+        let job = queueViewModel.selectedJob
+        detailViewModel.show(job, subtitleLanguage: job.flatMap(queueViewModel.subtitleLanguage(of:)))
         window?.title = queueViewModel.windowTitle
         window?.subtitle = queueViewModel.windowSubtitle
         window?.isDocumentEdited = !queueViewModel.unsavedJobIDs.isEmpty
@@ -326,6 +331,16 @@ extension MainWindowController: SubtitleEditorCommands {
         consistencySheet.begin(on: window)
     }
 
+    @objc func showSpellingCheck(_ sender: Any?) {
+        guard let window else { return }
+        detailViewController.editorView.commitPendingText()
+        spellingCheckSheet.begin(on: window)
+    }
+
+    @objc func toggleSpellingWhileTyping(_ sender: Any?) {
+        detailViewModel.toggleSpellingWhileTyping()
+    }
+
     @objc func playSelection(_ sender: Any?) {
         detailViewController.play(.selection)
     }
@@ -527,7 +542,8 @@ extension MainWindowController: NSMenuItemValidation {
             menuItem.title = detailViewModel.showsPlayer ? String(localized: "Hide Player") : String(localized: "Show Player")
         case #selector(toggleEditingTools(_:)):
             menuItem.title = detailViewModel.showsEditingTools ? String(localized: "Hide Editing Tools") : String(localized: "Show Editing Tools")
-        case #selector(toggleWaveform(_:)), #selector(toggleSourceColumn(_:)), #selector(toggleSpectrogram(_:)):
+        case #selector(toggleWaveform(_:)), #selector(toggleSourceColumn(_:)), #selector(toggleSpectrogram(_:)),
+             #selector(toggleSpellingWhileTyping(_:)):
             menuItem.state = isCommandOn(action) ? .on : .off
         default:
             break
@@ -541,6 +557,7 @@ extension MainWindowController: NSMenuItemValidation {
         case #selector(toggleWaveform(_:)): detailViewModel.isTimingModeOn
         case #selector(toggleSourceColumn(_:)): editor.showsSourceColumn
         case #selector(toggleSpectrogram(_:)): detailViewModel.waveform.showsSpectrogram
+        case #selector(toggleSpellingWhileTyping(_:)): editor.checksSpellingWhileTyping
         default: false
         }
     }
@@ -581,6 +598,10 @@ extension MainWindowController: NSMenuItemValidation {
             return detailViewModel.canUseTimingMode
         case #selector(toggleSourceColumn(_:)):
             return editor.hasSources
+        case #selector(showSpellingCheck(_:)):
+            return editor.canCheckSpelling
+        case #selector(toggleSpellingWhileTyping(_:)):
+            return editor.spellChecker != nil
         case #selector(toggleSpectrogram(_:)), #selector(zoomInWaveform(_:)), #selector(zoomOutWaveform(_:)):
             return detailViewModel.showsWaveform
         case #selector(fitWaveformToLine(_:)):

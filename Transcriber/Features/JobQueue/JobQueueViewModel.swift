@@ -196,6 +196,12 @@ final class JobQueueViewModel {
         return llm.isEnabled && !llm.model.isEmpty
     }
 
+    /// The language `job`'s subtitles are written in, for the spell checker;
+    /// a translation is taken to be in the current target language.
+    func subtitleLanguage(of job: Job) -> String? {
+        SpellingLanguage.of(job, targetLanguage: settingsStore.settings.llm.targetLanguage)
+    }
+
     /// Both sides of the glossary's entries: names and terms with a known
     /// spelling, for Check Consistency.
     var glossaryTerms: [String] {

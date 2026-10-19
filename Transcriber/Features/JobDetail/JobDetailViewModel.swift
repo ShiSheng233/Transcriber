@@ -12,12 +12,13 @@ final class JobDetailViewModel {
     private static let spectrogramKey = "ShowsSpectrogram"
     private static let editingToolsKey = "ShowsEditingTools"
     private static let sourceColumnKey = "ShowsSourceColumn"
+    private static let spellingWhileTypingKey = "ChecksSpellingWhileTyping"
     private static let playerVolumeKey = "PlayerVolume"
     private static let playerMutedKey = "PlayerMuted"
     private static let audioExtensions: Set<String> = ["mp3", "wav", "flac", "m4a", "aac", "ogg", "opus", "wma"]
     private let userDefaults: UserDefaults
 
-    let editor = SubtitleEditorViewModel()
+    let editor: SubtitleEditorViewModel
     let waveform: WaveformViewModel
     private(set) var mediaURL: URL?
     /// Off: only the subtitles; the media is not loaded at all.
@@ -41,8 +42,9 @@ final class JobDetailViewModel {
     /// Switches the shown subtitle file to the other mode, with the editor's lines.
     @ObservationIgnored var onSwitchMode: (UUID, JobQueueViewModel.SubtitleMode, [TimedText]) -> Void = { _, _, _ in }
 
-    init(userDefaults: UserDefaults = .standard, waveformLoader: WaveformLoader) {
+    init(userDefaults: UserDefaults = .standard, waveformLoader: WaveformLoader, spellChecker: (any SpellChecking)? = nil) {
         self.userDefaults = userDefaults
+        editor = SubtitleEditorViewModel(spellChecker: spellChecker)
         waveform = WaveformViewModel(loader: waveformLoader)
         showsPlayer = userDefaults.object(forKey: Self.showsPlayerKey) == nil || userDefaults.bool(forKey: Self.showsPlayerKey)
         isTimingModeOn = userDefaults.bool(forKey: Self.timingModeKey)
@@ -51,6 +53,9 @@ final class JobDetailViewModel {
         isPlayerMuted = userDefaults.bool(forKey: Self.playerMutedKey)
         editor.setPrefersSourceColumn(userDefaults.object(forKey: Self.sourceColumnKey) == nil || userDefaults.bool(forKey: Self.sourceColumnKey))
         waveform.setShowsSpectrogram(userDefaults.bool(forKey: Self.spectrogramKey))
+        editor.setChecksSpellingWhileTyping(
+            userDefaults.object(forKey: Self.spellingWhileTypingKey) == nil || userDefaults.bool(forKey: Self.spellingWhileTypingKey)
+        )
         editor.onChange = { [weak self] lines in
             if let self, let jobID = shownJobID {
                 onEdit(jobID, lines)
@@ -133,13 +138,22 @@ final class JobDetailViewModel {
         userDefaults.set(prefers, forKey: Self.sourceColumnKey)
     }
 
+    func toggleSpellingWhileTyping() {
+        let checks = !editor.checksSpellingWhileTyping
+        editor.setChecksSpellingWhileTyping(checks)
+        userDefaults.set(checks, forKey: Self.spellingWhileTypingKey)
+    }
+
     private func updateWaveform() {
         waveform.show(showsWaveform ? mediaURL : nil)
     }
 
     /// Shows `job`, or nothing. A finished job with written files can be edited.
-    func show(_ job: Job?) {
+    /// - Parameter subtitleLanguage: its subtitles' language code, for the
+    ///   spell checker (see `SpellingLanguage`); nil when unknown.
+    func show(_ job: Job?, subtitleLanguage: String? = nil) {
         hasSelection = job != nil
+        editor.setSpellingLanguage(subtitleLanguage)
         guard let job else {
             shownJobID = nil
             subtitleMode = nil

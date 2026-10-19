@@ -41,6 +41,8 @@ import AppKit
     func showTimingPostProcessor(_ sender: Any?)
     func showSelectLines(_ sender: Any?)
     func showConsistencyCheck(_ sender: Any?)
+    func showSpellingCheck(_ sender: Any?)
+    func toggleSpellingWhileTyping(_ sender: Any?)
     func toggleWaveform(_ sender: Any?)
     func toggleSourceColumn(_ sender: Any?)
     func toggleSpectrogram(_ sender: Any?)
@@ -208,6 +210,9 @@ enum SubtitleEditorMenu {
             Item(title: String(localized: "Find Next"), action: #selector(Commands.findNextSubtitle(_:)), key: "g"),
             Item(title: String(localized: "Select Lines…"), action: #selector(Commands.showSelectLines(_:)), key: "l"),
             Item(title: String(localized: "Check Consistency…"), action: #selector(Commands.showConsistencyCheck(_:)), key: "c", modifiers: [.command, .shift]),
+            // ⌘; is Check Document Now in other Mac apps.
+            Item(title: String(localized: "Check Spelling…"), action: #selector(Commands.showSpellingCheck(_:)), key: ";"),
+            Item(title: String(localized: "Check Spelling While Typing"), action: #selector(Commands.toggleSpellingWhileTyping(_:))),
             nil,
         ]
         add(top + lineItems + [nil], to: menu)

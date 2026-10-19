@@ -31,7 +31,7 @@ final class SubtitleEditorView: NSView {
     private let endField = NSTextField()
     private let durationLabel = NSTextField(labelWithString: "")
     private let characterCountLabel = NSTextField(labelWithString: "")
-    private let textView = NSTextView()
+    private let textView = SubtitleTextView()
     private var displayedRows: [SubtitleEditorViewModel.Row] = []
     private var displayedActiveIndex: Int?
     private var isApplyingSelection = false
@@ -179,7 +179,6 @@ final class SubtitleEditorView: NSView {
         // Undo is the editor's: typing in a line is one step, as in Aegisub.
         textView.allowsUndo = false
         textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.isContinuousSpellCheckingEnabled = true
         textView.textContainerInset = NSSize(width: 4, height: 6)
         textView.delegate = self
         textView.autoresizingMask = [.width]
@@ -266,6 +265,9 @@ final class SubtitleEditorView: NSView {
             field.isEnabled = line != nil
         }
         textView.isEditable = editable
+        if textView.isContinuousSpellCheckingEnabled != viewModel.checksSpellingWhileTyping {
+            textView.isContinuousSpellCheckingEnabled = viewModel.checksSpellingWhileTyping
+        }
         if startField.currentEditor() == nil {
             startField.stringValue = line.map { SubtitleTimeFormat.string($0.start) } ?? ""
         }
@@ -369,6 +371,25 @@ extension SubtitleEditorView: NSTextViewDelegate, NSTextFieldDelegate {
 
     func controlTextDidBeginEditing(_ notification: Notification) {
         viewModel.isEditingInEditBox = true
+    }
+
+    /// The marks as typed are the editor's checker's, in the subtitles'
+    /// language, so they agree with Check Spelling. The system's own check
+    /// skips Latin-script words in mostly Chinese or Japanese text; the
+    /// editor's still marks them (see `SystemSpellChecker`).
+    func textView(
+        _ view: NSTextView, didCheckTextIn range: NSRange, types checkingTypes: NSTextCheckingTypes,
+        options: [NSSpellChecker.OptionKey: Any] = [:], results: [NSTextCheckingResult], orthography: NSOrthography, wordCount: Int
+    ) -> [NSTextCheckingResult] {
+        guard checkingTypes & NSTextCheckingResult.CheckingType.spelling.rawValue != 0 else {
+            return results
+        }
+        let text = view.string
+        let misspellings = viewModel.misspelledWords(in: text)
+            .map { NSRange($0, in: text) }
+            .filter { $0.location >= range.location && NSMaxRange($0) <= NSMaxRange(range) }
+            .map(NSTextCheckingResult.spellCheckingResult(range:))
+        return results.filter { $0.resultType != .spelling } + misspellings
     }
 
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {

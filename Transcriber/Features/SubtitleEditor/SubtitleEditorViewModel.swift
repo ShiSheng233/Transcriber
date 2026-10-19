@@ -60,6 +60,17 @@ final class SubtitleEditorViewModel {
 
     @ObservationIgnored private var lastTyping: (index: Int, date: Date)?
 
+    /// Finds misspelled words; nil turns spell checking off.
+    @ObservationIgnored let spellChecker: (any SpellChecking)?
+    /// The subtitles' language code for the spell checker; nil when unknown.
+    private(set) var spellingLanguage: String?
+    /// The user's choice: the edit box marks misspelled words as they are typed.
+    private(set) var checksSpellingWhileTyping = true
+
+    init(spellChecker: (any SpellChecking)? = nil) {
+        self.spellChecker = spellChecker
+    }
+
     /// The lines as shown: with a drag in progress applied.
     var displayedLines: [TimedText] {
         timingPreview ?? lines
@@ -83,6 +94,17 @@ final class SubtitleEditorViewModel {
 
     func setPrefersSourceColumn(_ prefers: Bool) {
         prefersSourceColumn = prefers
+    }
+
+    func setChecksSpellingWhileTyping(_ checks: Bool) {
+        checksSpellingWhileTyping = checks
+    }
+
+    /// The shown job's language; see `SpellingLanguage`.
+    func setSpellingLanguage(_ language: String?) {
+        if language != spellingLanguage {
+            spellingLanguage = language
+        }
     }
 
     var activeSource: String? {
