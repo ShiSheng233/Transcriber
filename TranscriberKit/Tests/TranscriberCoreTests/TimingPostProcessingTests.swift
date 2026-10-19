@@ -49,4 +49,61 @@ struct TimingPostProcessingTests {
         #expect(result.lines[1] == line(4.8, 6.3))
         #expect(result.selection == [1])
     }
+
+    // MARK: Keyframes
+
+    /// 25 fps for four seconds, a keyframe at 2 s (frame 50).
+    private func video() throws -> VideoFrames {
+        try #require(VideoFrames(
+            frameTimes: (0..<100).map { AudioTime(milliseconds: $0 * 40) },
+            keyframeTimes: [.zero, AudioTime(milliseconds: 2_000)]
+        ))
+    }
+
+    private func keyframesOnly(_ snap: TimingPostProcessing.KeyframeSnap = .aegisub) -> TimingPostProcessing.Settings {
+        var settings = settings()
+        settings.keyframeSnap = snap
+        return settings
+    }
+
+    @Test func startsSnapToAKeyframeWithinTheThresholdForTheirSide() throws {
+        let video = try video()
+        let lines = [line(1.85, 2.5), line(1.7, 2.5), line(2.1, 3), line(2.2, 3)]
+        let result = TimingPostProcessing.processed([], in: lines, settings: keyframesOnly(), video: video)
+        // The keyframe's start is halfway from the frame before: 1.98 s.
+        #expect(result.lines.map(\.start) == [1.98, 1.7, 1.98, 2.2].map { AudioTime(seconds: $0) })
+    }
+
+    @Test func endsSnapToTheFrameBeforeAKeyframe() throws {
+        let video = try video()
+        let lines = [line(1, 1.9), line(1, 2.2), line(1, 2.3)]
+        let result = TimingPostProcessing.processed([], in: lines, settings: keyframesOnly(), video: video)
+        #expect(result.lines.map(\.end) == [1.98, 1.98, 2.3].map { AudioTime(seconds: $0) })
+        // Touching lines either side of the keyframe still touch.
+        let touching = TimingPostProcessing.processed([], in: [line(1, 1.95), line(1.95, 3)], settings: keyframesOnly(), video: video)
+        #expect(touching.lines == [line(1, 1.98), line(1.98, 3)])
+    }
+
+    @Test func theLastFrameCountsAsAKeyframeForEnds() throws {
+        let result = TimingPostProcessing.processed([], in: [line(3, 3.9)], settings: keyframesOnly(), video: try video())
+        #expect(result.lines == [line(3, 3.94)])
+    }
+
+    @Test func keyframeSnappingNeedsAVideoAndRunsAfterTheGapsClose() throws {
+        let lines = [line(1, 1.7), line(1.75, 3)]
+        #expect(TimingPostProcessing.processed([], in: lines, settings: keyframesOnly()).lines == lines)
+        var settings = keyframesOnly(TimingPostProcessing.KeyframeSnap(
+            beforeStart: .zero, afterStart: .zero, beforeEnd: AudioTime(milliseconds: 300), afterEnd: .zero
+        ))
+        settings.adjacentThreshold = AudioTime(milliseconds: 100)
+        settings.adjacentBias = 0
+        let result = TimingPostProcessing.processed([], in: lines, settings: settings, video: try video())
+        // Closing the gap leaves 1.7 s, which is close enough to snap.
+        #expect(result.lines == [line(1, 1.98), line(1.7, 3)])
+    }
+
+    @Test func aSnapNeverPassesTheOtherEdge() throws {
+        let result = TimingPostProcessing.processed([], in: [line(1.9, 1.95)], settings: keyframesOnly(), video: try video())
+        #expect(result.lines[0].start < result.lines[0].end)
+    }
 }
