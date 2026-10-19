@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             activityViewModel: environment.activityViewModel,
             waveformLoader: environment.waveformLoader,
             spellChecker: environment.spellChecker,
+            videoFramesLoader: environment.videoFramesLoader,
             openSettings: { [weak self] in self?.showSettings(nil) },
             showActivity: { [weak self] in self?.showActivity(nil) }
         )

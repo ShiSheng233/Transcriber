@@ -20,6 +20,7 @@ final class JobDetailViewModel {
 
     let editor: SubtitleEditorViewModel
     let waveform: WaveformViewModel
+    let videoFrames: VideoFramesViewModel
     private(set) var mediaURL: URL?
     /// Off: only the subtitles; the media is not loaded at all.
     private(set) var showsPlayer: Bool
@@ -42,10 +43,16 @@ final class JobDetailViewModel {
     /// Switches the shown subtitle file to the other mode, with the editor's lines.
     @ObservationIgnored var onSwitchMode: (UUID, JobQueueViewModel.SubtitleMode, [TimedText]) -> Void = { _, _, _ in }
 
-    init(userDefaults: UserDefaults = .standard, waveformLoader: WaveformLoader, spellChecker: (any SpellChecking)? = nil) {
+    init(
+        userDefaults: UserDefaults = .standard,
+        waveformLoader: WaveformLoader,
+        videoFramesLoader: VideoFramesLoader = VideoFramesLoader(),
+        spellChecker: (any SpellChecking)? = nil
+    ) {
         self.userDefaults = userDefaults
         editor = SubtitleEditorViewModel(spellChecker: spellChecker)
         waveform = WaveformViewModel(loader: waveformLoader)
+        videoFrames = VideoFramesViewModel(loader: videoFramesLoader)
         showsPlayer = userDefaults.object(forKey: Self.showsPlayerKey) == nil || userDefaults.bool(forKey: Self.showsPlayerKey)
         isTimingModeOn = userDefaults.bool(forKey: Self.timingModeKey)
         showsEditingTools = userDefaults.bool(forKey: Self.editingToolsKey)
@@ -111,7 +118,7 @@ final class JobDetailViewModel {
     func togglePlayer() {
         showsPlayer.toggle()
         userDefaults.set(showsPlayer, forKey: Self.showsPlayerKey)
-        updateWaveform()
+        updateLoadedMedia()
     }
 
     func toggleEditingTools() {
@@ -122,7 +129,7 @@ final class JobDetailViewModel {
     func toggleTimingMode() {
         isTimingModeOn.toggle()
         userDefaults.set(isTimingModeOn, forKey: Self.timingModeKey)
-        updateWaveform()
+        updateLoadedMedia()
     }
 
     /// Timing mode's audio as a spectrogram or as peaks; off by default.
@@ -144,8 +151,17 @@ final class JobDetailViewModel {
         userDefaults.set(checks, forKey: Self.spellingWhileTypingKey)
     }
 
-    private func updateWaveform() {
+    /// What timing reads from the media: the waveform in timing mode, the
+    /// video's frames whenever the video or the waveform is shown.
+    private func updateLoadedMedia() {
         waveform.show(showsWaveform ? mediaURL : nil)
+        videoFrames.show(showsPlayerArea ? mediaURL : nil)
+    }
+
+    /// Why keyframe snapping and frame alignment are unavailable; `nil` when
+    /// the video's frames are known.
+    var videoFramesUnavailableReason: String? {
+        mediaURL == nil ? String(localized: "These subtitles have no video.") : videoFrames.unavailableReason
     }
 
     /// Shows `job`, or nothing. A finished job with written files can be edited.
@@ -160,7 +176,7 @@ final class JobDetailViewModel {
             mediaURL = nil
             editor.load([], isEditable: false)
             waveform.setSpeechSpans([])
-            updateWaveform()
+            updateLoadedMedia()
             subtitlesPlaceholder = nil
             return
         }
@@ -170,7 +186,7 @@ final class JobDetailViewModel {
             shownJobID = job.id
             mediaURL = job.mediaURL
             editor.load(job.segments, originalLines: job.linesBeforeLanguageModel, isEditable: isEditable)
-            updateWaveform()
+            updateLoadedMedia()
         } else {
             editor.follow(job.segments, originalLines: job.linesBeforeLanguageModel, isEditable: isEditable)
         }

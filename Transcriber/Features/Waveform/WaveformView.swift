@@ -17,6 +17,7 @@ final class WaveformView: NSView {
         static let handleHitWidth: CGFloat = 5
         static let handleWidth: CGFloat = 2
         static let snappedHandleWidth: CGFloat = 3
+        static let keyframeLineWidth: CGFloat = 1
         static let grabTabSize = NSSize(width: 8, height: 6)
         static let snapDistance: CGFloat = 6
         /// The strip under the ruler where a click selects a line.
@@ -43,6 +44,8 @@ final class WaveformView: NSView {
 
     private let editor: SubtitleEditorViewModel
     private let waveform: WaveformViewModel
+    /// The video's keyframes, drawn as lines and snapped to.
+    private let videoFrames: VideoFramesViewModel
     /// Asked to move the playhead.
     var onSeek: (AudioTime) -> Void = { _ in }
     /// The user picked a line on the waveform (double-click).
@@ -73,9 +76,10 @@ final class WaveformView: NSView {
     /// Under the failure message.
     private let retryButton = NSButton(title: String(localized: "Try Again"), target: nil, action: nil)
 
-    init(editor: SubtitleEditorViewModel, waveform: WaveformViewModel) {
+    init(editor: SubtitleEditorViewModel, waveform: WaveformViewModel, videoFrames: VideoFramesViewModel) {
         self.editor = editor
         self.waveform = waveform
+        self.videoFrames = videoFrames
         super.init(frame: .zero)
         retryButton.target = self
         retryButton.action = #selector(retryClicked(_:))
@@ -107,6 +111,7 @@ final class WaveformView: NSView {
         _ = (editor.displayedLines, editor.selection, editor.isEditable, editor.playbackTime)
         _ = (waveform.waveform, waveform.snapSpans, waveform.isLoading, waveform.pointsPerSecond, waveform.visibleStart)
         _ = (waveform.showsSpectrogram, waveform.spectrogram, waveform.isLoadingSpectrogram)
+        _ = videoFrames.keyframeBoundaries
         if editor.activeIndex != displayedActiveIndex {
             displayedActiveIndex = editor.activeIndex
             if let line = editor.activeLine {
@@ -137,12 +142,14 @@ final class WaveformView: NSView {
         bounds.fill()
         let body = NSRect(x: 0, y: Metrics.rulerHeight, width: bounds.width, height: bounds.height - Metrics.rulerHeight)
         // The spectrogram fills the body, so the lines tint it from above;
-        // the thin peaks go over the lines.
+        // the thin keyframes and peaks go over the lines.
         if waveform.showsSpectrogram, let spectrogram = waveform.spectrogram {
             drawSpectrogram(spectrogram, in: body)
             drawLines(in: body)
+            drawKeyframes(in: body)
         } else {
             drawLines(in: body)
+            drawKeyframes(in: body)
             drawPeaks(in: body)
         }
         drawSoundBar(in: body)
@@ -286,6 +293,20 @@ final class WaveformView: NSView {
         context.scaleBy(x: 1, y: -1)
         context.draw(image, in: body)
         context.restoreGState()
+    }
+
+    /// A thin line where each keyframe's lines would start, as Aegisub's
+    /// audio display marks keyframes.
+    private func drawKeyframes(in body: NSRect) {
+        NSColor.systemPurple.withAlphaComponent(0.7).setFill()
+        for time in visibleKeyframeBoundaries() {
+            let x = CGFloat(waveform.x(of: time)).rounded(.down)
+            NSRect(x: x, y: body.minY, width: Metrics.keyframeLineWidth, height: body.height).fill()
+        }
+    }
+
+    private func visibleKeyframeBoundaries() -> ArraySlice<AudioTime> {
+        videoFrames.keyframeBoundaries(from: waveform.visibleStart, through: waveform.time(atX: width))
     }
 
     private func drawSoundBar(in body: NSRect) {
@@ -482,7 +503,7 @@ final class WaveformView: NSView {
         }
     }
 
-    /// The nearest line edge, playhead or speech boundary within 6 points.
+    /// The nearest line edge, playhead, speech boundary or keyframe within 6 points.
     private func snapTarget(near time: AudioTime, excluding index: Int) -> AudioTime? {
         let threshold = AudioTime(seconds: Double(Metrics.snapDistance) / waveform.pointsPerSecond)
         let visibleEnd = waveform.time(atX: width)
@@ -493,6 +514,7 @@ final class WaveformView: NSView {
         for span in waveform.snapSpans ?? [] where span.end >= waveform.visibleStart && span.start <= visibleEnd {
             candidates += [span.start, span.end]
         }
+        candidates += visibleKeyframeBoundaries()
         let nearest = candidates.min { abs(($0 - time).samples) < abs(($1 - time).samples) }
         return nearest.flatMap { abs(($0 - time).samples) <= threshold.samples ? $0 : nil }
     }

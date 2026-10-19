@@ -104,6 +104,24 @@ final class JobDetailViewModelTests {
         #expect(!detail.waveform.isLoading)
     }
 
+    @Test func theVideosFramesAreReadWhileTheVideoOrTheWaveformShows() {
+        let detail = makeViewModel()
+        detail.show(Self.editingJob())
+        #expect(detail.videoFrames.availability != .notRead)
+        detail.togglePlayer()
+        #expect(detail.videoFrames.availability == .notRead)
+        #expect(detail.videoFramesUnavailableReason == "Show the video or turn on Timing Mode to read its keyframes.")
+        detail.toggleTimingMode()
+        #expect(detail.videoFrames.availability != .notRead)
+    }
+
+    @Test func subtitlesWithoutMediaHaveNoFrames() {
+        let detail = makeViewModel()
+        detail.show(Self.editingJob(mediaURL: nil))
+        #expect(detail.videoFrames.availability == .notRead)
+        #expect(detail.videoFramesUnavailableReason == "These subtitles have no video.")
+    }
+
     @Test func editsToTheShownJobAreReportedWithItsID() {
         let detail = makeViewModel()
         let job = Self.editingJob()

@@ -1,8 +1,9 @@
 import Foundation
 import TranscriberCore
 
-/// Timing commands: the Shift Times and Timing Post-Processor sheets, the
-/// waveform's handles, and the playback ranges of the Playback menu.
+/// Timing commands: the Shift Times and Timing Post-Processor sheets,
+/// aligning to video frames, the waveform's handles, and the playback
+/// ranges of the Playback menu.
 extension SubtitleEditorViewModel {
     /// Which lines Shift Times moves (Aegisub's "Affect").
     enum ShiftScope: CaseIterable {
@@ -40,16 +41,30 @@ extension SubtitleEditorViewModel {
     }
 
     /// How many lines the post-processor would change, for the sheet's summary.
-    func postProcessingChangeCount(_ settings: TimingPostProcessing.Settings, allLines: Bool, sound: [SpeechSpan]) -> Int {
-        let outcome = TimingPostProcessing.processed(allLines ? [] : selection, in: lines, settings: settings, speech: sound)
+    /// - Parameter video: the frames to snap to keyframes of; `nil` skips that step.
+    func postProcessingChangeCount(_ settings: TimingPostProcessing.Settings, allLines: Bool, sound: [SpeechSpan], video: VideoFrames? = nil) -> Int {
+        let outcome = TimingPostProcessing.processed(allLines ? [] : selection, in: lines, settings: settings, speech: sound, video: video)
         return zip(outcome.lines, lines).filter { $0 != $1 }.count
     }
 
-    func postProcessTiming(_ settings: TimingPostProcessing.Settings, allLines: Bool, sound: [SpeechSpan]) {
+    func postProcessTiming(_ settings: TimingPostProcessing.Settings, allLines: Bool, sound: [SpeechSpan], video: VideoFrames? = nil) {
         guard isEditable, allLines || !selection.isEmpty else { return }
-        let outcome = TimingPostProcessing.processed(allLines ? [] : selection, in: lines, settings: settings, speech: sound)
+        let outcome = TimingPostProcessing.processed(allLines ? [] : selection, in: lines, settings: settings, speech: sound, video: video)
         guard outcome.lines != lines else { return }
         replace(lines: outcome.lines, selection: selection, actionName: String(localized: "Adjust Timing"))
+    }
+
+    var canAlignToFrames: Bool {
+        isEditable && !lines.isEmpty
+    }
+
+    /// Moves the selected lines' times (all lines' when none is selected)
+    /// onto the video's frame boundaries, as one undo step.
+    func alignTimesToFrames(_ frames: VideoFrames) {
+        guard canAlignToFrames else { return }
+        let outcome = SubtitleEditing.alignedToFrames(selection, in: lines, frames: frames)
+        guard outcome.lines != lines else { return }
+        replace(lines: outcome.lines, selection: selection, actionName: String(localized: "Align Times to Video Frames"))
     }
 
     var canSplitAtPlayback: Bool {

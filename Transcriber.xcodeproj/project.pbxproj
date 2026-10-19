@@ -35,6 +35,7 @@
 				App/SettingsStore.swift,
 				Features/Activity/ActivityViewModel.swift,
 				Features/JobDetail/JobDetailViewModel.swift,
+				Features/JobDetail/VideoFramesViewModel.swift,
 				Features/JobQueue/JobQueueViewModel.swift,
 				Features/Settings/SettingsViewModel.swift,
 				Features/Settings/ShortcutsViewModel.swift,

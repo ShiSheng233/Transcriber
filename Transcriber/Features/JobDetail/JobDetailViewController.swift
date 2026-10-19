@@ -52,7 +52,7 @@ final class JobDetailViewController: NSViewController {
     init(viewModel: JobDetailViewModel) {
         self.viewModel = viewModel
         editorView = SubtitleEditorView(viewModel: viewModel.editor)
-        waveformView = WaveformView(editor: viewModel.editor, waveform: viewModel.waveform)
+        waveformView = WaveformView(editor: viewModel.editor, waveform: viewModel.waveform, videoFrames: viewModel.videoFrames)
         super.init(nibName: nil, bundle: nil)
         editorView.onUserSelectedLine = { [weak self] index in
             self?.seekToLine(index)

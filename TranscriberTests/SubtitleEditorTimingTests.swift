@@ -117,4 +117,48 @@ struct SubtitleEditorTimingTests {
         editor.select([0])
         #expect(editor.rows.map(\.overlapsActiveLine) == [false, true, false])
     }
+
+    // MARK: Video frames
+
+    /// 25 fps for ten seconds, keyframes at 0 and 2 s.
+    private func video() throws -> VideoFrames {
+        try #require(VideoFrames(frameTimes: (0..<250).map { ms($0 * 40) }, keyframeTimes: [ms(0), ms(2_000)]))
+    }
+
+    @Test func aligningToFramesMovesTheSelectionOrEverythingAsOneUndoStep() throws {
+        let lines = [TestLines.line(41, 1_001, "a"), TestLines.line(2_001, 2_999, "b")]
+        let editor = TestLines.editor(lines, undoManager: undoManager)
+        let frames = try video()
+        editor.select([1])
+        undoManager.step { editor.alignTimesToFrames(frames) }
+        #expect(editor.lines[0] == lines[0])
+        #expect(editor.lines[1].start == ms(2_020) && editor.lines[1].end == ms(2_980))
+        #expect(editor.selection == [1])
+        #expect(undoManager.undoActionName == "Align Times to Video Frames")
+        editor.select([])
+        undoManager.step { editor.alignTimesToFrames(frames) }
+        #expect(editor.lines[0].start == ms(60) && editor.lines[0].end == ms(1_020))
+        undoManager.undo()
+        undoManager.undo()
+        #expect(editor.lines == lines)
+    }
+
+    @Test func aligningTimesAlreadyOnFramesAddsNoUndoStep() throws {
+        let editor = TestLines.editor([TestLines.line(20, 1_020, "a")], undoManager: undoManager)
+        let frames = try video()
+        undoManager.step { editor.alignTimesToFrames(frames) }
+        #expect(!undoManager.canUndo)
+    }
+
+    @Test func adjustTimingSnapsToKeyframesOnlyWithAVideo() throws {
+        let editor = TestLines.editor([TestLines.line(1_850, 3_000, "a")])
+        var settings = TimingPostProcessing.Settings(
+            leadIn: nil, leadOut: nil, adjacentThreshold: nil, adjacentBias: 1, startSnapDistance: nil, endSnapDistance: nil
+        )
+        settings.keyframeSnap = .aegisub
+        #expect(editor.postProcessingChangeCount(settings, allLines: true, sound: []) == 0)
+        #expect(editor.postProcessingChangeCount(settings, allLines: true, sound: [], video: try video()) == 1)
+        editor.postProcessTiming(settings, allLines: true, sound: [], video: try video())
+        #expect(editor.lines[0].start == ms(1_980))
+    }
 }

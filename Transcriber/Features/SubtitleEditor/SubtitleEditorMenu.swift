@@ -39,6 +39,7 @@ import AppKit
     func swapLines(_ sender: Any?)
     func sortLinesByStart(_ sender: Any?)
     func showTimingPostProcessor(_ sender: Any?)
+    func alignTimesToVideoFrames(_ sender: Any?)
     func showSelectLines(_ sender: Any?)
     func showConsistencyCheck(_ sender: Any?)
     func showSpellingCheck(_ sender: Any?)
@@ -125,6 +126,7 @@ enum SubtitleEditorMenu {
         nil,
         Item(title: String(localized: "Shift Times…"), action: #selector(Commands.shiftTimes(_:)), key: "i"),
         Item(title: String(localized: "Adjust Timing…"), action: #selector(Commands.showTimingPostProcessor(_:)), key: "i", modifiers: [.command, .shift]),
+        Item(title: String(localized: "Align Times to Video Frames"), action: #selector(Commands.alignTimesToVideoFrames(_:))),
     ]
 
     static let splitItems: Group = [

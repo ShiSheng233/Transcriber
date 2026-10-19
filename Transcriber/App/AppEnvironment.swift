@@ -16,6 +16,8 @@ final class AppEnvironment {
         waveformCache: waveformCache
     )
     private(set) lazy var waveformLoader = WaveformLoader(diskCache: waveformCache)
+    /// Video frames and keyframes, read once per file.
+    private(set) lazy var videoFramesLoader = VideoFramesLoader(diskCache: VideoFramesCache(directory: VideoFramesCache.standardDirectory))
     private(set) lazy var modelLibrary = ModelLibrary(settingsStore: settingsStore)
     private(set) lazy var activityViewModel = ActivityViewModel(queue: jobQueue)
 }

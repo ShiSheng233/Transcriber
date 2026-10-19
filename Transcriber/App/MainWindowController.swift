@@ -15,9 +15,12 @@ final class MainWindowController: NSWindowController {
     private let detailViewController: JobDetailViewController
     private lazy var findReplaceSheet = FindReplaceSheet(editor: detailViewModel.editor)
     private lazy var shiftTimesSheet = ShiftTimesSheet(editor: detailViewModel.editor)
-    private lazy var timingAdjustmentSheet = TimingAdjustmentSheet(editor: detailViewModel.editor) { [detailViewModel] in
-        detailViewModel.waveform.snapSpans
-    }
+    private lazy var timingAdjustmentSheet = TimingAdjustmentSheet(
+        editor: detailViewModel.editor,
+        soundSpans: { [detailViewModel] in detailViewModel.waveform.snapSpans },
+        videoFrames: { [detailViewModel] in detailViewModel.videoFrames.frames },
+        videoFramesNote: { [detailViewModel] in detailViewModel.videoFramesUnavailableReason }
+    )
     private lazy var selectLinesSheet = SelectLinesSheet(editor: detailViewModel.editor)
     private lazy var consistencySheet = ConsistencySheet(editor: detailViewModel.editor) { [queueViewModel] in
         queueViewModel.glossaryTerms
@@ -40,12 +43,13 @@ final class MainWindowController: NSWindowController {
         activityViewModel: ActivityViewModel,
         waveformLoader: WaveformLoader,
         spellChecker: any SpellChecking,
+        videoFramesLoader: VideoFramesLoader,
         openSettings: @escaping () -> Void,
         showActivity: @escaping () -> Void
     ) {
         self.queueViewModel = queueViewModel
         self.openSettings = openSettings
-        detailViewModel = JobDetailViewModel(waveformLoader: waveformLoader, spellChecker: spellChecker)
+        detailViewModel = JobDetailViewModel(waveformLoader: waveformLoader, videoFramesLoader: videoFramesLoader, spellChecker: spellChecker)
         detailViewController = JobDetailViewController(viewModel: detailViewModel)
         detailViewModel.onEdit = { [queueViewModel] jobID, lines in
             queueViewModel.updateSubtitles(of: jobID, to: lines)
@@ -318,6 +322,11 @@ extension MainWindowController: SubtitleEditorCommands {
         guard let window else { return }
         detailViewController.editorView.commitPendingText()
         timingAdjustmentSheet.begin(on: window)
+    }
+
+    @objc func alignTimesToVideoFrames(_ sender: Any?) {
+        guard let frames = detailViewModel.videoFrames.frames else { return }
+        editing { $0.alignTimesToFrames(frames) }
     }
 
     @objc func showSelectLines(_ sender: Any?) {
@@ -594,6 +603,8 @@ extension MainWindowController: NSMenuItemValidation {
             return editor.canSort
         case #selector(shiftTimes(_:)), #selector(showTimingPostProcessor(_:)), #selector(showConsistencyCheck(_:)):
             return editor.isEditable && !editor.lines.isEmpty
+        case #selector(alignTimesToVideoFrames(_:)):
+            return editor.canAlignToFrames && detailViewModel.videoFrames.frames != nil
         case #selector(toggleWaveform(_:)):
             return detailViewModel.canUseTimingMode
         case #selector(toggleSourceColumn(_:)):
