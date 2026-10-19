@@ -1,12 +1,11 @@
-import CryptoKit
 import Foundation
 import TranscriberCore
 
 /// Waveforms on disk, so a file transcribed once opens in timing mode at
 /// once, even after a relaunch. A waveform is found by the media file's
-/// path, size and modification date, so a changed file is analyzed again.
-/// About 3 MB per hour of audio; spectrograms, kept beside them once shown
-/// (`WaveformCache+Spectrogram`), about 23 MB.
+/// path, size and modification date (`MediaCacheFiles`), so a changed file
+/// is analyzed again. About 3 MB per hour of audio; spectrograms, kept
+/// beside them once shown (`WaveformCache+Spectrogram`), about 23 MB.
 public struct WaveformCache: Sendable {
     /// Waveforms not used for this long are deleted when the cache is opened.
     public static let defaultLifetime: Duration = .seconds(30 * 24 * 60 * 60)
@@ -21,15 +20,12 @@ public struct WaveformCache: Sendable {
     /// Creates the folder if needed and deletes expired waveforms.
     public init(directory: URL, lifetime: Duration = Self.defaultLifetime) {
         self.directory = directory
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        Self.deleteFiles(in: directory, olderThan: Date.now.addingTimeInterval(-Double(lifetime.components.seconds)))
+        MediaCacheFiles.prepare(directory, fileExtensions: Self.fileExtensions, lifetime: lifetime)
     }
 
     /// The app's own folder in the user's Caches.
     public static var standardDirectory: URL {
-        URL.cachesDirectory
-            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Transcriber", isDirectory: true)
-            .appendingPathComponent("Waveforms", isDirectory: true)
+        MediaCacheFiles.standardDirectory(named: "Waveforms")
     }
 
     public func waveform(for mediaURL: URL) -> Waveform? {
@@ -44,40 +40,12 @@ public struct WaveformCache: Sendable {
 
     /// What is stored for `mediaURL` under `fileExtension`.
     func contents(for mediaURL: URL, fileExtension: String) -> Data? {
-        guard let file = fileURL(for: mediaURL, fileExtension: fileExtension), let data = try? Data(contentsOf: file) else {
-            return nil
-        }
-        // Touched on use, so files in use do not expire.
-        try? FileManager.default.setAttributes([.modificationDate: Date.now], ofItemAtPath: file.path)
-        return data
+        MediaCacheFiles.url(for: mediaURL, in: directory, fileExtension: fileExtension).flatMap(MediaCacheFiles.read)
     }
 
     func store(_ data: Data, for mediaURL: URL, fileExtension: String) {
-        guard let file = fileURL(for: mediaURL, fileExtension: fileExtension) else { return }
+        guard let file = MediaCacheFiles.url(for: mediaURL, in: directory, fileExtension: fileExtension) else { return }
         try? data.write(to: file, options: .atomic)
-    }
-
-    private func fileURL(for mediaURL: URL, fileExtension: String) -> URL? {
-        // Read fresh each time: URL resource values are cached per URL.
-        let attributes = try? FileManager.default.attributesOfItem(atPath: mediaURL.path)
-        guard let size = attributes?[.size] as? Int, let modified = attributes?[.modificationDate] as? Date else {
-            return nil
-        }
-        let identity = "\(mediaURL.standardizedFileURL.path)\n\(size)\n\(modified.timeIntervalSinceReferenceDate)"
-        let digest = SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
-        return directory.appendingPathComponent(digest).appendingPathExtension(fileExtension)
-    }
-
-    private static func deleteFiles(in directory: URL, olderThan cutoff: Date) {
-        let files = (try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: [.contentModificationDateKey]
-        )) ?? []
-        for file in files where fileExtensions.contains(file.pathExtension) {
-            let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-            if let modified, modified < cutoff {
-                try? FileManager.default.removeItem(at: file)
-            }
-        }
     }
 
     // MARK: Layout: version, sample count, bin count, peaks, levels (little-endian)
