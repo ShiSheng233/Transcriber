@@ -125,6 +125,16 @@ public struct TranscriptionPipeline: Sendable {
         progress: @escaping @Sendable (Progress) -> Void = { _ in }
     ) async throws -> [TimedText] {
         let audio = try MediaDecoder(timestampHandling: options.timestampHandling).decodeAudio(at: url)
+        return try await transcribe(audio: audio, options: options, progress: progress)
+    }
+
+    /// Runs the same whole-file pipeline with audio decoded ahead of time.
+    package func transcribe(
+        audio: DecodedAudio,
+        options: Options,
+        progress: @escaping @Sendable (Progress) -> Void
+    ) async throws -> [TimedText] {
+        try Task.checkCancellation()
         progress(.decodedAudio(duration: audio.duration, timestampJumps: audio.timestampJumps))
         options.audioDecoded?(audio.samples)
         return try await transcribe(samples: audio.samples, filter: options.filter, progress: progress)
@@ -143,13 +153,12 @@ public struct TranscriptionPipeline: Sendable {
         to end: AudioTime,
         options: Options = Options()
     ) async throws -> [TimedText] {
-        let audio = try MediaDecoder(timestampHandling: options.timestampHandling).decodeAudio(at: url)
         let offset = max(start - Self.rangeContext, .zero)
-        let sliceEnd = min(end + Self.rangeContext, audio.duration)
-        guard sliceEnd > offset else {
-            return []
-        }
-        let slice = Array(audio.samples[offset.samples..<sliceEnd.samples])
+        let sliceEnd = end + Self.rangeContext
+        guard sliceEnd > offset else { return [] }
+        let decoder = MediaDecoder(timestampHandling: options.timestampHandling)
+        let slice = try decoder.decodeAudio(at: url, in: offset..<sliceEnd)
+        guard !slice.isEmpty else { return [] }
         let segments = try await transcribe(samples: slice, filter: options.filter)
         return segments.compactMap { segment in
             let segmentStart = segment.start + offset
