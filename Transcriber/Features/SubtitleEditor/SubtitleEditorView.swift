@@ -220,33 +220,33 @@ final class SubtitleEditorView: NSView {
     // MARK: Rendering
 
     private func render() {
-        let rowHeight = viewModel.showsSourceColumn ? Self.rowHeightWithSource : Self.rowHeight
-        if tableView.rowHeight != rowHeight {
-            tableView.rowHeight = rowHeight
-            displayedRows = []  // reload every row with or without its original
-        }
-        actionBar.validate()
+        // Reloading can change AppKit's selection. Keep the model's selection authoritative during rendering.
+        isApplyingSelection = true
+        defer { isApplyingSelection = false }
+
         let rows = viewModel.rows
-        if rows != displayedRows {
-            if rows.count == displayedRows.count {
-                // Reload only the rows that changed (typing, playhead): keeps editing smooth.
-                let changed = IndexSet(rows.indices.filter { rows[$0] != displayedRows[$0] })
-                displayedRows = rows
-                tableView.reloadData(forRowIndexes: changed, columnIndexes: IndexSet(integersIn: 0..<tableView.numberOfColumns))
-            } else {
-                displayedRows = rows
-                tableView.reloadData()
+        let rowHeight = viewModel.showsSourceColumn ? Self.rowHeightWithSource : Self.rowHeight
+        let rowHeightChanged = tableView.rowHeight != rowHeight
+        if rowHeightChanged || rows.count != displayedRows.count {
+            if rowHeightChanged {
+                tableView.rowHeight = rowHeight
             }
+            displayedRows = rows
+            tableView.reloadData()
+        } else if rows != displayedRows {
+            // Reload only the rows that changed (typing, playhead): keeps editing smooth.
+            let changed = IndexSet(rows.indices.filter { rows[$0] != displayedRows[$0] })
+            displayedRows = rows
+            tableView.reloadData(forRowIndexes: changed, columnIndexes: IndexSet(integersIn: 0..<tableView.numberOfColumns))
         }
         let selection = IndexSet(viewModel.selection)
         if tableView.selectedRowIndexes != selection {
-            isApplyingSelection = true
             tableView.selectRowIndexes(selection, byExtendingSelection: false)
-            isApplyingSelection = false
             if let first = selection.first {
                 scrollToShow(row: first)
             }
         }
+        actionBar.validate()
         renderEditBox()
     }
 
@@ -317,6 +317,8 @@ extension SubtitleEditorView: NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        // AppKit can request a row from a previous layout after the row count changes.
+        guard displayedRows.indices.contains(row) else { return nil }
         let rowData = displayedRows[row]
         let identifier = tableColumn?.identifier ?? Column.text
         let cell = (tableView.makeView(withIdentifier: identifier, owner: nil) as? SubtitleGridCellView)
