@@ -35,6 +35,17 @@ public struct MediaDecoder: Sendable {
         return DecodedAudio(samples: output.takeSamples(), timestampJumps: output.timestampJumps)
     }
 
+    /// Decodes speculatively only when the audio has a known duration under
+    /// the budget. The resampler also enforces the budget on actual output.
+    package func decodeAudio(at url: URL, upTo budget: AudioTime) throws -> DecodedAudio? {
+        do {
+            var output = try decode(at: url, deliveringEvery: nil, prefetchBudget: budget) { _ in }
+            return DecodedAudio(samples: output.takeSamples(), timestampJumps: output.timestampJumps)
+        } catch is AudioResampler.SampleLimitExceeded {
+            return nil
+        }
+    }
+
     /// The same samples as `decodeAudio(at:)`, handed over in pieces of
     /// about `chunkSize` as they are decoded, so a long film never has to fit
     /// in memory at once. Returns the timestamp jumps.
@@ -47,22 +58,142 @@ public struct MediaDecoder: Sendable {
         try decode(at: url, deliveringEvery: max(chunkSize, 1), consume: consume).timestampJumps
     }
 
+    /// The requested slice on the same timeline as a whole-file decode.
+    package func decodeAudio(at url: URL, in range: Range<AudioTime>) throws -> [Float] {
+        try Task.checkCancellation()
+        let start = max(range.lowerBound, .zero)
+        guard start < range.upperBound else { return [] }
+        let samples = start.samples..<range.upperBound.samples
+        let input = try MediaInput(url: url)
+        if timestampHandling == .followTimestamps, start > Self.seekPreroll {
+            if let slice = try? decodeAfterSeeking(input, range: samples), !slice.isEmpty {
+                try Task.checkCancellation()
+                return slice
+            }
+            try Task.checkCancellation()
+            // A failed seek may have moved the demuxer. Reopen at the start.
+            return try decodeRange(MediaInput(url: url), range: samples)
+        }
+        return try decodeRange(input, range: samples)
+    }
+
+    /// Start the codec and resampler before the requested audio, so neither
+    /// their startup delay nor the demuxer's seek granularity clips the slice.
+    private static let seekPreroll = AudioTime(seconds: 2)
+    private static let minimumSeekPreroll = AudioTime(seconds: 0.25)
+    /// Covers container rounding and the resampler's small delay, while a
+    /// hole or overlap in the seek window triggers the sequential path.
+    private static let seekClockTolerance = AudioTime(milliseconds: 20)
+    private static let sampleTimeBase = AVRational(num: 1, den: Int32(AudioTime.sampleRate))
+
+    private enum RangeSeekError: Error {
+        case unreliableTimestamps
+    }
+
+    private func decodeAfterSeeking(_ input: MediaInput, range: Range<Int>) throws -> [Float] {
+        // The full-file resampler starts at the first decoded frame's PTS.
+        // Container start times and packet timestamps may include codec priming.
+        var origin = AudioResampler.noTimestamp
+        try readFrames(from: input) { frame in
+            origin = frame.pointee.best_effort_timestamp
+            return false
+        }
+        guard origin != AudioResampler.noTimestamp else { throw RangeSeekError.unreliableTimestamps }
+        let prerollStart = Int64(range.lowerBound - Self.seekPreroll.samples)
+        let distance = av_rescale_q(prerollStart, Self.sampleTimeBase, input.timeBase)
+        let (target, overflow) = origin.addingReportingOverflow(distance)
+        guard !overflow, distance >= 0,
+              av_seek_frame(input.formatContext, input.audioStreamIndex, target, AVSEEK_FLAG_BACKWARD) >= 0 else {
+            throw RangeSeekError.unreliableTimestamps
+        }
+        avcodec_flush_buffers(input.codecContext)
+        return try decodeRange(input, range: range, seekOrigin: origin)
+    }
+
+    private func decodeRange(_ input: MediaInput, range: Range<Int>, seekOrigin: Int64? = nil) throws -> [Float] {
+        let resampler = AudioResampler(followsTimestamps: timestampHandling == .followTimestamps)
+        var output = Output(resampler: resampler, timeBase: input.timeBase)
+        var firstFrame = true
+        try readFrames(from: input) { frame in
+            if let seekOrigin {
+                let timestamp = frame.pointee.best_effort_timestamp
+                let (relative, overflow) = timestamp.subtractingReportingOverflow(seekOrigin)
+                guard timestamp != AudioResampler.noTimestamp, !overflow, relative >= 0 else {
+                    throw RangeSeekError.unreliableTimestamps
+                }
+                let position = Int(av_rescale_q(relative, input.timeBase, Self.sampleTimeBase))
+                if firstFrame {
+                    guard position >= 0, position <= range.lowerBound - Self.minimumSeekPreroll.samples else {
+                        throw RangeSeekError.unreliableTimestamps
+                    }
+                    output.deliveredSampleCount = position
+                    firstFrame = false
+                } else {
+                    let expected = output.deliveredSampleCount + output.samples.count
+                    let tolerance = Self.seekClockTolerance.samples
+                    guard position >= expected - tolerance, position <= expected + tolerance else {
+                        throw RangeSeekError.unreliableTimestamps
+                    }
+                }
+            }
+            try output.append(frame, recordsJumps: false)
+            output.discardSamples(before: range.lowerBound)
+            return output.samples.count < range.count
+        }
+        if output.samples.count < range.count {
+            try resampler.flush(into: &output.samples)
+            output.discardSamples(before: range.lowerBound)
+        }
+        if output.samples.count > range.count {
+            output.samples.removeLast(output.samples.count - range.count)
+        }
+        try Task.checkCancellation()
+        return output.samples
+    }
+
     /// One minute of audio.
     public static let defaultChunkSize = 60 * AudioTime.sampleRate
 
-    private func decode(at url: URL, deliveringEvery chunkSize: Int?, consume: ([Float]) throws -> Void) throws -> Output {
+    private func decode(
+        at url: URL, deliveringEvery chunkSize: Int?, prefetchBudget: AudioTime? = nil, consume: ([Float]) throws -> Void
+    ) throws -> Output {
+        try Task.checkCancellation()
         let input = try MediaInput(url: url)
-        var output = Output(resampler: AudioResampler(followsTimestamps: timestampHandling == .followTimestamps), timeBase: input.timeBase)
+        if let prefetchBudget, !input.hasKnownDuration(upTo: prefetchBudget) {
+            throw AudioResampler.SampleLimitExceeded.exceeded
+        }
+        let resampler = AudioResampler(followsTimestamps: timestampHandling == .followTimestamps, maximumSamples: prefetchBudget?.samples)
+        var output = Output(resampler: resampler, timeBase: input.timeBase)
+        try readFrames(from: input) { frame in
+            try output.append(frame)
+            if let chunkSize, output.samples.count >= chunkSize {
+                try consume(output.takeSamples())
+            }
+            return true
+        }
+        try output.resampler.flush(into: &output.samples)
+        if chunkSize != nil, !output.samples.isEmpty {
+            try consume(output.takeSamples())
+        }
+        return output
+    }
 
-        guard let packet = av_packet_alloc(), let frame = av_frame_alloc() else {
+    /// Visits decoded audio frames until EOF (including delayed frames) or
+    /// until the caller has enough samples.
+    private func readFrames(
+        from input: MediaInput, consume: (UnsafeMutablePointer<AVFrame>) throws -> Bool
+    ) throws {
+        try Task.checkCancellation()
+        guard let packet = av_packet_alloc() else {
             throw MediaDecodingError.decodingFailed(FFmpegError(code: -ENOMEM))
         }
         var packetPointer: UnsafeMutablePointer<AVPacket>? = packet
-        var framePointer: UnsafeMutablePointer<AVFrame>? = frame
-        defer {
-            av_packet_free(&packetPointer)
-            av_frame_free(&framePointer)
+        defer { av_packet_free(&packetPointer) }
+        guard let frame = av_frame_alloc() else {
+            throw MediaDecodingError.decodingFailed(FFmpegError(code: -ENOMEM))
         }
+        var framePointer: UnsafeMutablePointer<AVFrame>? = frame
+        defer { av_frame_free(&framePointer) }
 
         while av_read_frame(input.formatContext, packet) >= 0 {
             defer { av_packet_unref(packet) }
@@ -70,19 +201,13 @@ public struct MediaDecoder: Sendable {
             guard packet.pointee.stream_index == input.audioStreamIndex else {
                 continue
             }
-            try decode(packet, with: input.codecContext, frame: frame, into: &output)
-            if let chunkSize, output.samples.count >= chunkSize {
-                try consume(output.takeSamples())
+            if try !decode(packet, with: input.codecContext, frame: frame, consume: consume) {
+                return
             }
         }
 
         // A nil packet drains the decoder's delayed frames.
-        try decode(nil, with: input.codecContext, frame: frame, into: &output)
-        try output.resampler.flush(into: &output.samples)
-        if chunkSize != nil, !output.samples.isEmpty {
-            try consume(output.takeSamples())
-        }
-        return output
+        _ = try decode(nil, with: input.codecContext, frame: frame, consume: consume)
     }
 
     /// What decoding has produced so far.
@@ -101,12 +226,28 @@ public struct MediaDecoder: Sendable {
             return samples
         }
 
-        mutating func append(_ frame: UnsafeMutablePointer<AVFrame>) throws(MediaDecodingError) {
+        mutating func discardSamples(before position: Int) {
+            let count = min(position - deliveredSampleCount, samples.count)
+            guard count > 0 else { return }
+            if count == samples.count {
+                samples.removeAll(keepingCapacity: true)
+            } else {
+                samples.removeFirst(count)
+            }
+            deliveredSampleCount += count
+        }
+
+        mutating func append(_ frame: UnsafeMutablePointer<AVFrame>, recordsJumps: Bool = true) throws {
             let timestamp = frame.pointee.best_effort_timestamp
-            if timestamp != AudioResampler.noTimestamp, frame.pointee.sample_rate > 0 {
+            if recordsJumps, timestamp != AudioResampler.noTimestamp, frame.pointee.sample_rate > 0 {
                 let startSeconds = Double(timestamp) * av_q2d(timeBase)
                 let durationSeconds = Double(frame.pointee.nb_samples) / Double(frame.pointee.sample_rate)
                 if let jump = timestampTracker.jump(atFrameStartingAt: startSeconds, durationSeconds: durationSeconds) {
+                    // Reject oversized holes before libswresample injects silence.
+                    if let limit = resampler.maximumSamples,
+                       jump > AudioTime(samples: limit - samples.count).seconds {
+                        throw AudioResampler.SampleLimitExceeded.exceeded
+                    }
                     timestampJumps.append(AudioTimestampJump(
                         position: AudioTime(samples: deliveredSampleCount + samples.count),
                         offset: AudioTime(seconds: jump)
@@ -121,11 +262,11 @@ public struct MediaDecoder: Sendable {
         _ packet: UnsafeMutablePointer<AVPacket>?,
         with codecContext: UnsafeMutablePointer<AVCodecContext>,
         frame: UnsafeMutablePointer<AVFrame>,
-        into output: inout Output
-    ) throws {
+        consume: (UnsafeMutablePointer<AVFrame>) throws -> Bool
+    ) throws -> Bool {
         let sendStatus = avcodec_send_packet(codecContext, packet)
         if sendStatus == FFmpegError.invalidData.code {
-            return
+            return true
         }
         guard sendStatus >= 0 || sendStatus == FFmpegError.endOfFile.code else {
             throw MediaDecodingError.decodingFailed(FFmpegError(code: sendStatus))
@@ -134,7 +275,7 @@ public struct MediaDecoder: Sendable {
         while true {
             let receiveStatus = avcodec_receive_frame(codecContext, frame)
             if receiveStatus == FFmpegError.tryAgain.code || receiveStatus == FFmpegError.endOfFile.code {
-                return
+                return true
             }
             if receiveStatus == FFmpegError.invalidData.code {
                 continue
@@ -143,7 +284,7 @@ public struct MediaDecoder: Sendable {
                 throw MediaDecodingError.decodingFailed(FFmpegError(code: receiveStatus))
             }
             defer { av_frame_unref(frame) }
-            try output.append(frame)
+            if try !consume(frame) { return false }
         }
     }
 }
@@ -155,6 +296,7 @@ private final class MediaInput {
     let audioStreamIndex: Int32
     /// The unit of the stream's packet and frame timestamps.
     let timeBase: AVRational
+    private let streamDuration: Int64
 
     init(url: URL) throws(MediaDecodingError) {
         var formatContext: UnsafeMutablePointer<AVFormatContext>?
@@ -187,6 +329,15 @@ private final class MediaInput {
         self.formatContext = formatContext
         self.audioStreamIndex = audioStream.pointee.index
         self.timeBase = audioStream.pointee.time_base
+        self.streamDuration = audioStream.pointee.duration
+    }
+
+    func hasKnownDuration(upTo budget: AudioTime) -> Bool {
+        if streamDuration > 0 {
+            return Double(streamDuration) * av_q2d(timeBase) <= budget.seconds
+        }
+        let containerDuration = formatContext.pointee.duration
+        return containerDuration > 0 && Double(containerDuration) / Double(AV_TIME_BASE) <= budget.seconds
     }
 
     deinit {

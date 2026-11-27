@@ -17,11 +17,13 @@ final class AudioResampler {
     private static let fillAndTrimOnly = 1.0
 
     private let followsTimestamps: Bool
+    let maximumSamples: Int?
     private var context: OpaquePointer?
     private var inputFormat: InputFormat?
 
-    init(followsTimestamps: Bool) {
+    init(followsTimestamps: Bool, maximumSamples: Int? = nil) {
         self.followsTimestamps = followsTimestamps
+        self.maximumSamples = maximumSamples
     }
 
     deinit {
@@ -34,7 +36,7 @@ final class AudioResampler {
         _ frame: UnsafeMutablePointer<AVFrame>,
         timeBase: AVRational,
         into output: inout [Float]
-    ) throws(MediaDecodingError) {
+    ) throws {
         let format = InputFormat(frame)
         if format != inputFormat {
             // Mid-stream format change: drain the old converter, start a new one.
@@ -58,7 +60,7 @@ final class AudioResampler {
     }
 
     /// Emits the samples still buffered inside the converter.
-    func flush(into output: inout [Float]) throws(MediaDecodingError) {
+    func flush(into output: inout [Float]) throws {
         guard context != nil else {
             return
         }
@@ -99,16 +101,20 @@ final class AudioResampler {
         input: UnsafePointer<UnsafePointer<UInt8>?>?,
         inputSampleCount: Int32,
         into output: inout [Float]
-    ) throws(MediaDecodingError) {
+    ) throws {
         while true {
-            let capacity = max(swr_get_out_samples(context, inputSampleCount), 1)
+            let available = max(swr_get_out_samples(context, inputSampleCount), 1)
+            let capacity = maximumSamples.map { Int32(min(Int(available), $0 - output.count + 1)) } ?? available
             var samples = [Int16](repeating: 0, count: Int(capacity))
             let produced = samples.withUnsafeMutableBytes { buffer in
                 var planes: [UnsafeMutablePointer<UInt8>?] = [buffer.baseAddress?.assumingMemoryBound(to: UInt8.self)]
                 return swr_convert(context, &planes, capacity, input, inputSampleCount)
             }
             guard produced >= 0 else {
-                throw .decodingFailed(FFmpegError(code: produced))
+                throw MediaDecodingError.decodingFailed(FFmpegError(code: produced))
+            }
+            if let maximumSamples, Int(produced) > maximumSamples - output.count {
+                throw SampleLimitExceeded.exceeded
             }
             output.append(contentsOf: samples.prefix(Int(produced)).map { Float($0) / Self.int16Scale })
             // With input, one call converts everything; when flushing, repeat until drained.
@@ -116,6 +122,10 @@ final class AudioResampler {
                 return
             }
         }
+    }
+
+    enum SampleLimitExceeded: Error {
+        case exceeded
     }
 
     /// `AV_NOPTS_VALUE`, which Swift cannot import.

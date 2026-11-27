@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Testing
 import TranscriberCore
@@ -55,6 +56,55 @@ struct MediaDecoderTests {
         #expect(pieces.count > 1)
         #expect(pieces.flatMap { $0 } == whole.samples)
         #expect(jumps == whole.timestampJumps)  // positions count the samples already handed over
+    }
+
+    @Test func prefetchPreservesSamplesAndTimestampJumpsWithinItsBudget() throws {
+        let url = try Self.fixtureURL("timestamp-gap.m4a")
+        let decoder = MediaDecoder()
+        let expected = try decoder.decodeAudio(at: url)
+        #expect(try decoder.decodeAudio(at: url, upTo: AudioTime(seconds: 5)) == expected)
+        #expect(try decoder.decodeAudio(at: url, upTo: AudioTime(seconds: 3)) == nil)
+    }
+
+    @Test func decodesALatePCMSliceAtExactSampleBoundaries() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let duration = AudioTime(seconds: 8)
+        let format = try #require(AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(AudioTime.sampleRate), channels: 1, interleaved: true))
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(duration.samples)))
+        buffer.frameLength = buffer.frameCapacity
+        let samples = try #require(buffer.int16ChannelData?[0])
+        var value: UInt32 = 1
+        for index in 0..<duration.samples {
+            value = value &* 1_664_525 &+ 1_013_904_223
+            samples[index] = Int16(truncatingIfNeeded: value >> 16)
+        }
+        do {
+            let file = try AVAudioFile(forWriting: url, settings: format.settings, commonFormat: .pcmFormatInt16, interleaved: true)
+            try file.write(from: buffer)
+        }
+
+        let decoder = MediaDecoder()
+        let whole = try decoder.decodeAudio(at: url)
+        let start = AudioTime(samples: AudioTime(seconds: 6).samples + 37)
+        let end = start + AudioTime(milliseconds: 182)
+        #expect(try decoder.decodeAudio(at: url, in: start..<end) == Array(whole.samples[start.samples..<end.samples]))
+        let nearEnd = duration - AudioTime(milliseconds: 123)
+        let afterEnd = duration + AudioTime(seconds: 1)
+        #expect(try decoder.decodeAudio(at: url, in: nearEnd..<afterEnd) == Array(whole.samples[nearEnd.samples...]))
+        #expect(try decoder.decodeAudio(at: url, in: duration..<afterEnd) == [])
+    }
+
+    @Test func keepsGapsAndTheSelectedTimestampModeWhenDecodingARange() throws {
+        let url = try Self.fixtureURL("timestamp-gap.m4a")
+        let range = AudioTime(seconds: 2.5)..<AudioTime(seconds: 3.5)
+        for handling in [MediaDecoder.TimestampHandling.followTimestamps, .joinFrames] {
+            let decoder = MediaDecoder(timestampHandling: handling)
+            let whole = try decoder.decodeAudio(at: url)
+            let start = min(range.lowerBound, whole.duration).samples
+            let end = min(range.upperBound, whole.duration).samples
+            #expect(try decoder.decodeAudio(at: url, in: range) == Array(whole.samples[start..<end]))
+        }
     }
 
     @Test func joiningFramesReportsTheHoleButKeepsTheOriginalBehavior() throws {
