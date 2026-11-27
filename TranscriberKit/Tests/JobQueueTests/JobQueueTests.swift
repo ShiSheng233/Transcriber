@@ -232,6 +232,16 @@ struct JobQueueStopTests {
         let finished = await waitUntilIdle(queue)
         await queue.shutDown()
         #expect(finished.map(\.status) == [.cancelled, .completed])
+
+        // The queued successor can use the audio started during the first job.
+        let entries = await queue.logs()
+        for await entry in entries where entry.jobID == jobs[1].id {
+            if entry.message == "Using prefetched audio" { return }
+            if entry.message.hasPrefix("Audio:") {
+                Issue.record("The second file reached speech detection without using its prefetched audio")
+                return
+            }
+        }
     }
 }
 }

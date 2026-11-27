@@ -58,6 +58,10 @@ public actor JobQueue {
     private var languageModelLane: Task<Void, Never>?
     /// Steps handed to the lane that have not ended.
     private var pendingLanguageModelStepCount = 0
+    /// One queued file's audio can be decoded while the previous file is recognized.
+    private var prefetchedAudio: (jobID: UUID, task: Task<PrefetchedAudio?, Never>)?
+    // Half an hour of 16 kHz mono Float PCM, about 110 MiB of samples.
+    private static let audioPrefetchBudget = AudioTime(seconds: 30 * 60)
     /// When each running job started, for the "done in" figure.
     private var jobStarts: [UUID: ContinuousClock.Instant] = [:]
     /// The idle queue waiting for a language model step to end or a job to arrive.
@@ -120,6 +124,7 @@ public actor JobQueue {
         jobs += newJobs
         publish()
         wakeDriver()
+        prefetchNextAudioIfRecognizing()
         for job in newJobs {
             log(.detail, job.id, "\(job.sourceURL.lastPathComponent): queued with \(model.displayName)")
         }
@@ -192,6 +197,7 @@ public actor JobQueue {
         publish()
         log(.detail, jobID, "\(job.sourceURL.lastPathComponent): queued with \(model.displayName)")
         wakeDriver()
+        prefetchNextAudioIfRecognizing()
     }
 
     public struct Retranscription: Sendable {
@@ -426,6 +432,7 @@ public actor JobQueue {
 
     public func remove(_ jobID: UUID) {
         jobTasks[jobID]?.cancel()
+        cancelAudioPrefetch(for: jobID)
         jobs.removeAll { $0.id == jobID }
         publish()
     }
@@ -437,6 +444,7 @@ public actor JobQueue {
 
     /// Cancels one job, in whichever stage it is; the queue goes on.
     public func cancel(_ jobID: UUID) {
+        cancelAudioPrefetch(for: jobID)
         if let task = jobTasks[jobID] {
             task.cancel()
         } else {
@@ -454,6 +462,7 @@ public actor JobQueue {
         for task in jobTasks.values {
             task.cancel()
         }
+        prefetchedAudio?.task.cancel()
         runningTask.cancel()
         wakeDriver()
     }
@@ -463,6 +472,7 @@ public actor JobQueue {
         for task in jobTasks.values {
             task.cancel()
         }
+        prefetchedAudio?.task.cancel()
         runningTask?.cancel()
         wakeDriver()
         await runningTask?.value
@@ -511,6 +521,11 @@ public actor JobQueue {
         while let task = jobTasks.values.first {
             await task.value
             jobTasks = jobTasks.filter { $0.value != task }
+        }
+        if let prefetch = prefetchedAudio {
+            prefetch.task.cancel()
+            prefetchedAudio = nil
+            _ = await prefetch.task.value
         }
         await unloadModel()
         runningTask = nil
@@ -570,6 +585,70 @@ public actor JobQueue {
         } else {
             recognitionWaiters.removeFirst().resume()
         }
+    }
+
+    private struct PrefetchedAudio: Sendable {
+        let audio: DecodedAudio
+        let version: FileVersion
+    }
+
+    private struct FileVersion: Equatable, Sendable {
+        let size: Int
+        let modified: Date
+        let fileNumber: Int
+
+        init?(of url: URL) {
+            guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+                  attributes[.type] as? FileAttributeType == .typeRegular,
+                  let size = attributes[.size] as? Int,
+                  let modified = attributes[.modificationDate] as? Date,
+                  let fileNumber = attributes[.systemFileNumber] as? Int else { return nil }
+            self.size = size
+            self.modified = modified
+            self.fileNumber = fileNumber
+        }
+    }
+
+    private func prefetchNextAudioIfRecognizing() {
+        guard prefetchedAudio == nil, runningTask?.isCancelled == false,
+              jobs.contains(where: { job in
+                  guard jobTasks[job.id]?.isCancelled == false else { return false }
+                  switch job.status {
+                  case .detectingSpeech, .transcribing: return true
+                  default: return false
+                  }
+              }),
+              let next = jobs.first(where: { $0.status == .queued && $0.model != nil && jobTasks[$0.id] == nil }) else { return }
+        let url = next.sourceURL
+        prefetchedAudio = (next.id, Task.detached(priority: .utility) {
+            guard let version = FileVersion(of: url),
+                  let audio = try? MediaDecoder().decodeAudio(at: url, upTo: Self.audioPrefetchBudget) else { return nil }
+            return PrefetchedAudio(audio: audio, version: version)
+        })
+    }
+
+    private func cancelAudioPrefetch(for jobID: UUID) {
+        if let prefetch = prefetchedAudio, prefetch.jobID == jobID {
+            prefetch.task.cancel()
+        }
+    }
+
+    private func takePrefetchedAudio(for job: Job) async throws -> DecodedAudio? {
+        guard let prefetch = prefetchedAudio else { return nil }
+        prefetchedAudio = nil
+        if prefetch.jobID != job.id {
+            prefetch.task.cancel()
+        }
+        let result = await withTaskCancellationHandler {
+            await prefetch.task.value
+        } onCancel: {
+            prefetch.task.cancel()
+        }
+        try Task.checkCancellation()
+        guard prefetch.jobID == job.id, !prefetch.task.isCancelled, let result,
+              FileVersion(of: job.sourceURL) == result.version else { return nil }
+        log(.detail, job.id, "Using prefetched audio")
+        return result.audio
     }
 
     /// Subtitles ready to be written, and what goes before the extension.
@@ -735,6 +814,9 @@ public actor JobQueue {
             queue.record(progress, for: jobID)
         } work: { report in
             let options = TranscriptionPipeline.Options(filter: filter, audioDecoded: waveformKeeper(for: job.sourceURL))
+            if let audio = try await takePrefetchedAudio(for: job) {
+                return try await pipeline.transcribe(audio: audio, options: options, progress: report)
+            }
             return try await pipeline.transcribe(fileAt: job.sourceURL, options: options, progress: report)
         }
         try Task.checkCancellation()
@@ -896,6 +978,7 @@ public actor JobQueue {
             }
             update(jobID) { $0.status = .detectingSpeech }
             log(.info, jobID, "Detecting speech…")
+            prefetchNextAudioIfRecognizing()
         case .detectedSpeech(let spans, let padding):
             let speechSamples = spans.reduce(0) { $0 + max($1.duration.samples, 0) }
             log(.detail, jobID, "Speech: \(spans.count) span(s), \(ActivityFormatting.clock(AudioTime(samples: speechSamples).seconds)) in total")
