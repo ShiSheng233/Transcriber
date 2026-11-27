@@ -223,8 +223,9 @@ struct TranscribeCommand: AsyncParsableCommand {
         let result = try await refiner.refine(segments, job: job) { batch in
             print("  LLM batch \(batch.completed)/\(batch.total)")
         }
-        if result.failedBatchCount > 0 {
-            print("  warning: \(result.failedBatchCount) of \(result.batchCount) batches failed: \(result.firstFailure ?? "")")
+        let unanswered = segments.count - result.answeredLines.count - result.droppedLines.count
+        if unanswered > 0 {
+            print("  warning: \(unanswered) of \(segments.count) lines kept their original text (\(result.firstFailure ?? "incomplete reply"))")
         }
         let corrected = result.correctedSources.filter { segments[$0.key].text != $0.value }
         for (index, source) in corrected.sorted(by: { $0.key < $1.key }) {

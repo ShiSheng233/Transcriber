@@ -858,8 +858,9 @@ public actor JobQueue {
         if result.reusedBatchCount > 0 {
             log(.detail, jobID, "\(result.reusedBatchCount) of \(result.batchCount) LLM batches reused from an earlier run")
         }
-        if result.failedBatchCount > 0 {
-            let warning = "\(result.failedBatchCount) of \(result.batchCount) LLM batches failed; those lines kept their original text (\(result.firstFailure ?? "unknown error"))"
+        let unanswered = segments.count - result.answeredLines.count - result.droppedLines.count
+        if unanswered > 0 {
+            let warning = "\(unanswered) of \(segments.count) lines kept their original text after the LLM step (\(result.firstFailure ?? "incomplete reply"))"
             update(jobID) { $0.warning = warning }
             log(.warning, jobID, warning)
         }

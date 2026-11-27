@@ -19,12 +19,14 @@ struct RefinementPlan: Equatable {
     ///   - sceneGap: a pause this long between two lines starts a new scene.
     ///   - maximumBatchesPerScene: longer scenes are split so that a film
     ///     without long pauses still runs several requests at once.
+    ///   - minimumSceneCount: split the longest scenes further to fill idle request slots.
     init(
         lineIndices: [Int],
         of segments: [TimedText],
         batchSize: Int,
         sceneGap: AudioTime,
-        maximumBatchesPerScene: Int
+        maximumBatchesPerScene: Int,
+        minimumSceneCount: Int = 1
     ) {
         var runs: [[Int]] = []
         for index in lineIndices {
@@ -38,9 +40,17 @@ struct RefinementPlan: Equatable {
         }
         let batchLimit = max(batchSize, 1)
         let sceneLimit = max(maximumBatchesPerScene, 1)
-        scenes = runs.flatMap { run in
+        var scenes = runs.flatMap { run in
             let batches = stride(from: 0, to: run.count, by: batchLimit).map { Array(run[$0..<min($0 + batchLimit, run.count)]) }
             return stride(from: 0, to: batches.count, by: sceneLimit).map { Array(batches[$0..<min($0 + sceneLimit, batches.count)]) }
         }
+        while scenes.count < minimumSceneCount {
+            guard let index = scenes.indices.max(by: { scenes[$0].count < scenes[$1].count }),
+                  scenes[index].count > 1 else { break }
+            let scene = scenes[index]
+            let midpoint = (scene.count + 1) / 2
+            scenes.replaceSubrange(index...index, with: [Array(scene[..<midpoint]), Array(scene[midpoint...])])
+        }
+        self.scenes = scenes
     }
 }

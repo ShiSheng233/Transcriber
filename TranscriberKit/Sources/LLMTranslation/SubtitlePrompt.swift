@@ -9,6 +9,13 @@ enum SubtitlePrompt {
         case polishChinese
         case translate(targetLanguage: String)
         case translateSubtitles(targetLanguage: String)
+
+        var translationTarget: String? {
+            switch self {
+            case .translate(let language), .translateSubtitles(let language): language
+            case .polishChinese, .proofreadJapanese: nil
+            }
+        }
     }
 
     static let schemaName = "subtitle_lines"
@@ -96,6 +103,14 @@ enum SubtitlePrompt {
                 yourself. Write natural spoken subtitles, keep names and terms consistent, and keep \
                 the speaker's tone. Lines already in \(targetLanguage) are kept, only corrected if \
                 clearly wrong.
+                """
+        }
+        if let language = job.translationTarget {
+            instructions += """
+
+                Return only the \(language) translation in each "text" field. Do not include the original, \
+                language labels or literal backslash-n separators. If a translation needs a line break, \
+                encode it as a normal JSON newline. When returning "source", keep it separate from "text".
                 """
         }
         instructions += """
@@ -240,6 +255,49 @@ enum SubtitlePrompt {
         return leadingTime.stringByReplacingMatches(in: text, range: range, withTemplate: "")
     }
 
+    /// Some replies put the original on its own line next to the translation.
+    /// Match the full original at a line boundary so real multiline text survives.
+    static func translationText(_ text: String, original: String, correctedSource: String?, target: String) -> String? {
+        func normalized(_ text: String) -> String {
+            text.replacingOccurrences(of: #"\r\n"#, with: "\n")
+                .replacingOccurrences(of: #"\n"#, with: "\n")
+                .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+                .joined(separator: "\n").pythonStripped
+        }
+        func removingSource(_ source: String, from text: String) -> String {
+            guard !source.isEmpty else { return text }
+            var result = text
+            if result.hasPrefix(source + "\n") {
+                result = String(result.dropFirst(source.count + 1)).pythonStripped
+            }
+            if result.hasSuffix("\n" + source) {
+                result = String(result.dropLast(source.count + 1)).pythonStripped
+            }
+            return result
+        }
+        let original = normalized(original)
+        let corrected = correctedSource.map(normalized) ?? original
+        var translation = removingSource(original, from: normalized(text))
+        if corrected != original {
+            translation = removingSource(corrected, from: translation)
+        }
+        if translation == original || translation == corrected {
+            let language = target.lowercased()
+            let isChinese = language.contains("中文") || language.contains("chinese") || language.contains("汉语")
+                || language.contains("漢語") || language == "zh" || language.hasPrefix("zh-")
+            // Shared kanji and proper names may legitimately stay the same.
+            if isChinese, translation.unicodeScalars.contains(where: { scalar in
+                switch scalar.value {
+                case 0x3041...0x3096, 0x30A1...0x30FA, 0xFF66...0xFF9D: true // hiragana and katakana
+                default: false
+                }
+            }) {
+                return nil
+            }
+        }
+        return translation.isEmpty ? nil : translation
+    }
+
     /// What the model returns.
     struct Reply: Decodable, Sendable {
         struct Line: Decodable, Sendable {
@@ -260,21 +318,6 @@ enum SubtitlePrompt {
             case lines
             case batchSummary = "batch_summary"
             case sceneSummary = "scene_summary"
-        }
-
-        /// The text per id; a repeated id keeps its first text.
-        var textByID: [Int: String] {
-            Dictionary(lines.map { ($0.id, $0.text) }, uniquingKeysWith: { first, _ in first })
-        }
-
-        /// The corrected original per id, when asked for; a repeated id keeps its first.
-        var sourceByID: [Int: String] {
-            Dictionary(lines.compactMap { line in line.source.map { (line.id, $0) } }, uniquingKeysWith: { first, _ in first })
-        }
-
-        /// Ids the model marked as not speech.
-        var droppedIDs: Set<Int> {
-            Set(lines.filter { $0.drop == true }.map(\.id))
         }
     }
 }

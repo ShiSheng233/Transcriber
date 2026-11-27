@@ -94,6 +94,31 @@ struct SubtitleRefinerTests {
         #expect(refined.map(\.text) == ["line 0", "line 1"])
     }
 
+    @Test func retriesEchoedJapaneseAndKeepsOnlyTheTranslation() async throws {
+        var segments = Self.segments(4)
+        segments[0].text = "こんにちは"
+        segments[1].text = "またね\n元気で"
+        segments[2].text = "ありがとう"
+        segments[3].text = "東京"
+        let model = StubModel { lines, attempt in
+            lines.map { line in
+                let text = switch line.id {
+                case 0: attempt == 1 ? line.text : line.text + #"\n你好"#
+                case 1: "再见\n保重\r\n" + line.text
+                case 2: "谢谢你，不用客气"
+                default: line.text
+                }
+                return (line.id, text)
+            }
+        }
+        let result = try await SubtitleRefiner(client: model, configuration: Self.configuration(batchSize: 10))
+            .refine(segments, job: .translate(targetLanguage: "简体中文"))
+
+        #expect(model.recordedRequests.count == 2)
+        #expect(result.answeredLines == [0: "你好", 1: "再见\n保重", 2: "谢谢你，不用客气", 3: "東京"])
+        #expect(result.segments.map(\.text) == ["你好", "再见\n保重", "谢谢你，不用客气", "東京"])
+    }
+
     @Test func glossaryReachesTheInstructions() async throws {
         let model = StubModel { lines, _ in lines }
         var settings = LLMSettings.defaults

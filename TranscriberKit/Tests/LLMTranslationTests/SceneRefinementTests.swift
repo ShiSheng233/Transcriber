@@ -57,7 +57,9 @@ struct SceneRefinementTests {
 
     @Test func laterBatchesCarryTheSceneSoFar() async throws {
         let model = SummarizingModel()
-        let result = try await SubtitleRefiner(client: model, configuration: Self.configuration())
+        var configuration = Self.configuration()
+        configuration.concurrentSceneCount = 1
+        let result = try await SubtitleRefiner(client: model, configuration: configuration)
             .refine(Self.lines(starts: [0, 2, 4, 6]), job: .translate(targetLanguage: "English"))
 
         #expect(result.segments.map(\.text) == ["T0", "T1", "T2", "T3"])
@@ -66,6 +68,17 @@ struct SceneRefinementTests {
         #expect(second["earlier_batches"] as? [String] == ["batch 0"])
         let first = try #require(model.payloads.first { ($0["lines"] as? [[String: Any]])?.first?["id"] as? Int == 0 })
         #expect(first["scene_so_far"] == nil)
+    }
+
+    @Test func translationSplitsContinuousDialogueAcrossAvailableRequestSlots() async throws {
+        let model = SummarizingModel()
+        let segments = Self.lines(starts: [0, 2, 4, 6, 8, 10])
+        let result = try await SubtitleRefiner(client: model, configuration: Self.configuration())
+            .refine(segments, job: .translate(targetLanguage: "English"))
+
+        #expect(result.segments.map(\.text) == ["T0", "T1", "T2", "T3", "T4", "T5"])
+        #expect(model.payloads.count == 3)
+        #expect(model.payloads.allSatisfy { $0["scene_so_far"] == nil })
     }
 
     @Test func retranslatesOnlyChosenLinesWithTheirNeighborsAsContext() async throws {

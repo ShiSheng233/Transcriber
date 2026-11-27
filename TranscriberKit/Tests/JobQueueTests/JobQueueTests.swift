@@ -9,13 +9,16 @@ import TranscriberCore
 /// Answers every batch by prefixing each line, or fails.
 struct StubChat: StructuredChatCompleting {
     let fails: Bool
+    var translate: @Sendable (String) -> String = { "EN: \($0)" }
 
     func completeJSON(model: String, messages: [ChatMessage], schemaName: String, schema: [String: any Sendable], temperature: Double) async throws -> Data {
         if fails {
             throw LLMServiceError.insufficientCredits
         }
         let payload = try JSONSerialization.jsonObject(with: Data(messages[1].content.utf8)) as? [String: Any]
-        let lines = (payload?["lines"] as? [[String: Any]] ?? []).map { ["id": $0["id"] ?? 0, "text": "EN: \($0["text"] ?? "")"] }
+        let lines = (payload?["lines"] as? [[String: Any]] ?? []).map {
+            ["id": $0["id"] ?? 0, "text": translate($0["text"] as? String ?? "")]
+        }
         return try JSONSerialization.data(withJSONObject: ["lines": lines])
     }
 }
@@ -280,14 +283,14 @@ struct JobQueueMemoryTests {
 }
 
 struct SubtitleTranslationJobTests {
-    private func run(llm: JobQueue.LLMConfiguration?) async throws -> (Job, original: String, folder: URL) {
+    private func run(llm: JobQueue.LLMConfiguration?, chat: StubChat = StubChat(fails: false)) async throws -> (Job, original: String, folder: URL) {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let original = "1\n00:00:01,000 --> 00:00:02,000\nこんにちは\n\n2\n00:00:03,000 --> 00:00:04,000\nさようなら\n"
         let subtitleURL = folder.appendingPathComponent("movie.srt")
         try original.write(to: subtitleURL, atomically: true, encoding: .utf8)
 
-        let queue = JobQueue(makeChatClient: { _, _ in StubChat(fails: false) })
+        let queue = JobQueue(makeChatClient: { _, _ in chat })
         await queue.addSubtitleTranslations([(subtitleURL, nil)])
         await queue.start(configuration: JobQueue.Configuration(
             engine: EngineSettings(modelsDirectory: URL(fileURLWithPath: "/nonexistent"), backend: .whisperCpp, concurrentChunkCount: 1),
@@ -306,14 +309,20 @@ struct SubtitleTranslationJobTests {
         var settings = LLMSettings.defaults
         settings.isEnabled = true
         settings.model = "test/model"
-        let (job, original, folder) = try await run(llm: .init(settings: settings, apiKey: "sk-test"))
+        settings.keepsOriginalLine = true
+        let chat = StubChat(fails: false) { $0 == "こんにちは" ? $0 + #"\n你好"# : $0 }
+        let (job, original, folder) = try await run(llm: .init(settings: settings, apiKey: "sk-test"), chat: chat)
         defer { try? FileManager.default.removeItem(at: folder) }
 
         #expect(job.status == .completed)
         #expect(job.outputURLs.map(\.lastPathComponent) == ["movie.简体中文.srt"])
-        #expect(job.segments.map(\.text) == ["EN: こんにちは", "EN: さようなら"])
+        #expect(job.segments.map(\.text) == ["你好", "さようなら"])
+        #expect(job.warning?.contains("1 of 2 lines kept their original text") == true)
         #expect(job.segments.map(\.start.milliseconds) == [1_000, 3_000])  // timing kept
         #expect(try String(contentsOf: folder.appendingPathComponent("movie.srt"), encoding: .utf8) == original)
+        let output = try String(contentsOf: #require(job.outputURLs.first), encoding: .utf8)
+        #expect(output.contains("你好\nこんにちは\n\n"))
+        #expect(output.components(separatedBy: "さようなら").count == 2)
     }
 
     @Test func savesEditedSubtitlesOverTheWrittenFile() async throws {
@@ -359,7 +368,15 @@ struct SubtitleTranslationJobTests {
         try "1\n00:00:01,000 --> 00:00:02,000\nこんにちは\n\n2\n00:00:03,000 --> 00:00:04,000\nさようなら\n"
             .write(to: subtitleURL, atomically: true, encoding: .utf8)
 
-        let queue = JobQueue(makeChatClient: { _, _ in StubChat(fails: false) })
+        let queue = JobQueue(makeChatClient: { _, _ in
+            StubChat(fails: false) { original in
+                switch original {
+                case "こんにちは": original
+                case "さようなら": original + #"\n再见"#
+                default: "谢谢\n" + original
+                }
+            }
+        })
         await queue.addSubtitleTranslations([(subtitleURL, nil)])
         await queue.start(configuration: JobQueue.Configuration(
             engine: EngineSettings(modelsDirectory: URL(fileURLWithPath: "/nonexistent"), backend: .whisperCpp, concurrentChunkCount: 1),
@@ -373,14 +390,15 @@ struct SubtitleTranslationJobTests {
         }
         let job = try #require(finished)
 
-        // The user broke line 2 and added a line of their own.
+        // An unanswered line keeps the editor's text, and a new line uses its own source.
         var edited = job.segments
+        edited[0].text = "手动译文"
         edited[1].text = "wrong"
         edited.append(TimedText(start: AudioTime(seconds: 5), end: AudioTime(seconds: 6), text: "ありがとう"))
-        let result = try await queue.retranslate([1, 2], of: edited, in: job.id, with: llm)
+        let result = try await queue.retranslate([0, 1, 2], of: edited, in: job.id, with: llm)
 
-        #expect(result.lines.map(\.text) == ["EN: こんにちは", "EN: さようなら", "EN: ありがとう"])
-        #expect(result.unansweredCount == 0)
+        #expect(result.lines.map(\.text) == ["手动译文", "再见", "谢谢"])
+        #expect(result.unansweredCount == 1)
     }
 
     @Test func failsClearlyWithoutTheLanguageModel() async throws {
