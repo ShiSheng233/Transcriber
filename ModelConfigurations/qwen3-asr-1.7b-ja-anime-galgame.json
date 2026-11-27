@@ -1,0 +1,25 @@
+{
+  "id": "qwen3-asr-1.7b-ja-anime-galgame",
+  "name": "Qwen3-ASR 1.7B JA Anime Galgame",
+  "summary": "Japanese speech → Japanese subtitles (anime and game dialogue, MLX)",
+  "source": "https://huggingface.co/jaykwok/Qwen3-ASR-1.7B-JA-Anime-Galgame",
+  "license": "See the model card and Galgame_Speech_ASR_16kHz dataset terms",
+  "language": "ja",
+  "llm_mode": "translate",
+  "files": { "qwen3_asr": "qwen3-asr" },
+  "decoding": { "max_new_tokens": 128 },
+  "vad": {
+    "threshold": 0.30,
+    "max_speech_duration_s": 4.0,
+    "speech_pad_ms": 50,
+    "split_at_dip": true
+  },
+  "segmentation": {
+    "mode": "vad_groups",
+    "group_gap_ms": 250,
+    "group_max_ms": 4000,
+    "leading_silence_ms": 0
+  },
+  "merge": { "enabled": false },
+  "cleanup": { "drop_ellipsis_only": true }
+}

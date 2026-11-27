@@ -845,23 +845,29 @@ public actor JobQueue {
     }
 
     private func loadPipeline(_ model: RecognitionModel, for jobID: UUID, settings: EngineSettings) async throws -> TranscriptionPipeline {
-        let engineName = settings.backend.displayName
+        let qwenDirectory = model.qwen3ASR?.directory
+        let engineName = qwenDirectory == nil ? settings.backend.displayName : "Qwen3-ASR (MLX)"
         if await engine.isLoaded(model, settings: settings) {
             log(.detail, jobID, "\(model.displayName) is already loaded (\(engineName))")
             return try await engine.pipeline(for: model, settings: settings)
         }
-        let weights = settings.backend.weights(of: model)
+        let weights = qwenDirectory?.appendingPathComponent("model.safetensors") ?? settings.backend.weights(of: model)
         let size = weights.flatMap(ActivityFormatting.fileSize(of:)).map { ", \($0)" } ?? ""
         log(.info, jobID, "Loading \(model.displayName) with \(engineName)…")
         log(.detail, jobID, "Weights: \(weights?.path ?? "none")\(size)")
-        if settings.backend == .whisperCpp, settings.usesNeuralEngineEncoder, model.whisperCppEncoder == .coreML {
+        if qwenDirectory == nil, settings.backend == .whisperCpp, settings.usesNeuralEngineEncoder, model.whisperCppEncoder == .coreML {
             log(.detail, jobID, TranscriptionEngine.whisperCppEncoder(for: model, settings: settings) == .coreML
                 ? "Encoder: Core ML (Neural Engine); the first load after converting or updating takes a few seconds longer"
                 : "Encoder: Metal (no ggml-encoder.mlmodelc next to the weights; make coreml-encoders)")
         }
-        log(.detail, jobID, "Decoding: task \(model.decoding.task.rawValue), language \(model.decoding.languageCode), "
-            + "temperatures \(model.decoding.temperatures.map { String(format: "%.1f", $0) }.joined(separator: "/")), "
-            + "\(settings.concurrentChunkCount) chunk(s) at once")
+        switch model.decoding {
+        case .qwen3ASR(let decoding):
+            log(.detail, jobID, "Decoding: transcript language \(decoding.languageCode), one VAD group at a time")
+        case .whisper(let decoding):
+            log(.detail, jobID, "Decoding: task \(decoding.task.rawValue), audio language \(decoding.languageCode), "
+                + "temperatures \(decoding.temperatures.map { String(format: "%.1f", $0) }.joined(separator: "/")), "
+                + "\(settings.concurrentChunkCount) chunk(s) at once")
+        }
         let start = ContinuousClock.now
         let pipeline = try await engine.pipeline(for: model, settings: settings)
         log(.info, jobID, "\(model.displayName) loaded in \(ActivityFormatting.seconds(ContinuousClock.now - start))")

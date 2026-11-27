@@ -1,5 +1,6 @@
 import ArgumentParser
 import Foundation
+import JobQueue
 import LLMTranslation
 import SpeechDetection
 import Synchronization
@@ -28,7 +29,7 @@ struct TranscribeCommand: AsyncParsableCommand {
     @Option(help: "Write subtitles here instead of next to each input.")
     var outputDirectory: String?
 
-    @Option(help: "whispercpp or mlx.")
+    @Option(help: "Whisper backend: whispercpp or mlx. Qwen3-ASR uses MLX automatically.")
     var backend: String = "whispercpp"
 
     @Flag(help: "Enable whisper.cpp flash attention (faster, less faithful timestamps).")
@@ -111,43 +112,7 @@ struct TranscribeCommand: AsyncParsableCommand {
             return format
         }
 
-        let tokenizer = try WhisperTokenizer(contentsOf: recognitionModel.files.tokenizer)
-        let whisperBackend: any WhisperBackend
-        switch backend {
-        case "whispercpp":
-            let weights = ggmlFile.map { recognitionModel.directory.appendingPathComponent($0) } ?? recognitionModel.files.whisperCpp
-            guard let weights else {
-                throw ValidationError("\(model) has no whisper.cpp weights")
-            }
-            let encoderBackend: WhisperEncoderBackend
-            switch encoder {
-            case "model":
-                // As the app does: Core ML when asked for and converted, else Metal.
-                let hasCoreMLEncoder = FileManager.default.fileExists(atPath: WhisperModel.coreMLEncoderURL(forModelAt: weights).path)
-                encoderBackend = recognitionModel.whisperCppEncoder == .coreML && hasCoreMLEncoder ? .coreML : .metal
-            case "metal": encoderBackend = .metal
-            case "coreml": encoderBackend = .coreML
-            default: throw ValidationError("encoder must be model, metal or coreml")
-            }
-            print("whisper.cpp encoder: \(encoderBackend == .coreML ? "Core ML" : "Metal")")
-            whisperBackend = WhisperCppBackend(model: try WhisperModel(
-                contentsOf: weights, encoderBackend: encoderBackend, usesGPU: !cpu, usesFlashAttention: flashAttention
-            ))
-        case "mlx":
-            guard let weights = recognitionModel.files.mlx else {
-                throw ValidationError("\(model) has no MLX weights")
-            }
-            whisperBackend = try WhisperMLXBackend(modelDirectory: weights)
-        default:
-            throw ValidationError("backend must be whispercpp or mlx")
-        }
-        let vadModel = try WhisperVADModel(compiledModelAt: models.appendingPathComponent("vad/\(recognitionModel.vadModelName).mlmodelc"))
-        let segmentGenerator = SegmentGenerator(
-            backend: whisperBackend,
-            decoder: FallbackDecoder(windowDecoder: WindowDecoder(tokenizer: tokenizer, settings: recognitionModel.decoding))
-        )
-        let settings = TranscriptionPipeline.Settings(model: recognitionModel, concurrentChunkCount: concurrency)
-        let pipeline = TranscriptionPipeline(vadModel: vadModel, segmentGenerator: segmentGenerator, settings: settings)
+        let pipeline = try await makePipeline(for: recognitionModel, modelsDirectory: models)
 
         let options = TranscriptionPipeline.Options(
             timestampHandling: joinAudioFrames ? .joinFrames : .followTimestamps,
@@ -201,6 +166,52 @@ struct TranscribeCommand: AsyncParsableCommand {
                 print("  wrote \(outputURL.path)")
             }
         }
+    }
+
+    private func makePipeline(for recognitionModel: RecognitionModel, modelsDirectory models: URL) async throws -> TranscriptionPipeline {
+        guard case .whisper(let decoding) = recognitionModel.decoding else {
+            return try await TranscriptionEngine().pipeline(
+                for: recognitionModel,
+                settings: .init(modelsDirectory: models, backend: .mlx, concurrentChunkCount: 1)
+            )
+        }
+        let tokenizer = try WhisperTokenizer(contentsOf: recognitionModel.files.tokenizer)
+        let whisperBackend: any WhisperBackend
+        switch backend {
+        case "whispercpp":
+            let weights = ggmlFile.map { recognitionModel.directory.appendingPathComponent($0) } ?? recognitionModel.files.whisperCpp
+            guard let weights else {
+                throw ValidationError("\(model) has no whisper.cpp weights")
+            }
+            let encoderBackend: WhisperEncoderBackend
+            switch encoder {
+            case "model":
+                // As the app does: Core ML when asked for and converted, else Metal.
+                let hasCoreMLEncoder = FileManager.default.fileExists(atPath: WhisperModel.coreMLEncoderURL(forModelAt: weights).path)
+                encoderBackend = recognitionModel.whisperCppEncoder == .coreML && hasCoreMLEncoder ? .coreML : .metal
+            case "metal": encoderBackend = .metal
+            case "coreml": encoderBackend = .coreML
+            default: throw ValidationError("encoder must be model, metal or coreml")
+            }
+            print("whisper.cpp encoder: \(encoderBackend == .coreML ? "Core ML" : "Metal")")
+            whisperBackend = WhisperCppBackend(model: try WhisperModel(
+                contentsOf: weights, encoderBackend: encoderBackend, usesGPU: !cpu, usesFlashAttention: flashAttention
+            ))
+        case "mlx":
+            guard let weights = recognitionModel.files.mlx else {
+                throw ValidationError("\(model) has no MLX weights")
+            }
+            whisperBackend = try WhisperMLXBackend(modelDirectory: weights)
+        default:
+            throw ValidationError("backend must be whispercpp or mlx")
+        }
+        let vadModel = try WhisperVADModel(compiledModelAt: models.appendingPathComponent("vad/\(recognitionModel.vadModelName).mlmodelc"))
+        let segmentGenerator = SegmentGenerator(
+            backend: whisperBackend,
+            decoder: FallbackDecoder(windowDecoder: WindowDecoder(tokenizer: tokenizer, settings: decoding))
+        )
+        let settings = TranscriptionPipeline.Settings(model: recognitionModel, concurrentChunkCount: concurrency)
+        return TranscriptionPipeline(vadModel: vadModel, segmentGenerator: segmentGenerator, settings: settings)
     }
 
     /// The refined lines, and with `--llm-bilingual` each translation's

@@ -15,10 +15,13 @@ struct ModelsCommand: ParsableCommand {
         let catalog = ModelCatalog.scan(URL(fileURLWithPath: modelsDirectory))
         for model in catalog.models {
             let fileManager = FileManager.default
-            let engines = [
-                model.files.whisperCpp.map { fileManager.fileExists(atPath: $0.path) ? "whisper.cpp" : nil } ?? nil,
-                model.files.mlx.map { fileManager.fileExists(atPath: $0.path) ? "MLX" : nil } ?? nil,
-            ].compactMap { $0 }
+            let hasQwenWeights = model.qwen3ASR.map { $0.firstMissingFile == nil } ?? false
+            let installedEngines: [String?] = [
+                model.files.whisperCpp.flatMap { fileManager.fileExists(atPath: $0.path) ? "whisper.cpp" : nil },
+                model.files.mlx.flatMap { fileManager.fileExists(atPath: $0.path) ? "MLX" : nil },
+                hasQwenWeights ? "Qwen3-ASR (MLX)" : nil,
+            ]
+            let engines = installedEngines.compactMap { $0 }
             let engineList = engines.isEmpty ? "no weights" : engines.joined(separator: ", ")
             print("\(model.id)\t\(model.displayName) — \(model.summary) [\(engineList)]")
         }

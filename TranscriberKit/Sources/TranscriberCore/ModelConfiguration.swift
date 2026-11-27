@@ -7,6 +7,7 @@ struct ModelConfiguration: Decodable {
         var tokenizer: String?
         var whisperCpp: String?
         var mlx: String?
+        var qwen3Asr: String?
     }
 
     struct WhisperCpp: Decodable {
@@ -70,7 +71,7 @@ struct ModelConfiguration: Decodable {
     var source: String?
     var license: String?
     var language: String
-    var task: TranscriptionTask
+    var task: TranscriptionTask?
     var llmMode: RecognitionModel.LLMMode
     var files: Files?
     var whisperCpp: WhisperCpp?
@@ -81,15 +82,27 @@ struct ModelConfiguration: Decodable {
     var merge: Merge?
     var cleanup: Cleanup?
 
-    func model(in directory: URL) -> RecognitionModel {
+    func model(in directory: URL) throws -> RecognitionModel {
         let files = files ?? Files()
-        let decodingDefaults = ChickenRiceDefaults.decoding(task: task)
+        let qwen3ASR = files.qwen3Asr.map { directory.appendingPathComponent($0, isDirectory: true) }
+        let ggmlName = files.whisperCpp ?? "ggml.bin"
+        let mlxName = files.mlx ?? "mlx"
+        let modelDecoding: RecognitionModel.Decoding
+        if let qwen3ASR {
+            modelDecoding = .qwen3ASR(.init(
+                directory: qwen3ASR, languageCode: language, maximumGeneratedTokenCount: decoding?.maxNewTokens ?? 128
+            ))
+        } else {
+            guard let task else {
+                throw DecodingError.keyNotFound(CodingKeys.task, .init(codingPath: [], debugDescription: "A Whisper model requires a task token"))
+            }
+            modelDecoding = .whisper(whisperDecoding(task: task))
+        }
         let vadDefaults = ChickenRiceDefaults.vad
         let chunkingDefaults = ChickenRiceDefaults.chunking
         let mergeDefaults = ChickenRiceDefaults.merge
         let segmentationDefaults = SegmentationSettings.chunks
         let cleanupDefaults = TextCleanupSettings.none
-        let decoding = decoding
 
         return RecognitionModel(
             id: id,
@@ -101,25 +114,11 @@ struct ModelConfiguration: Decodable {
             directory: directory,
             files: .init(
                 tokenizer: directory.appendingPathComponent(files.tokenizer ?? "tokenizer.json"),
-                whisperCpp: (files.whisperCpp ?? "ggml.bin").isEmpty ? nil : directory.appendingPathComponent(files.whisperCpp ?? "ggml.bin"),
-                mlx: (files.mlx ?? "mlx").isEmpty ? nil : directory.appendingPathComponent(files.mlx ?? "mlx", isDirectory: true)
+                whisperCpp: qwen3ASR != nil || ggmlName.isEmpty ? nil : directory.appendingPathComponent(ggmlName),
+                mlx: qwen3ASR != nil || mlxName.isEmpty ? nil : directory.appendingPathComponent(mlxName, isDirectory: true)
             ),
             whisperCppEncoder: whisperCpp?.encoder ?? .metal,
-            decoding: DecodingSettings(
-                task: task,
-                languageCode: language,
-                temperatures: decoding?.temperatures ?? decodingDefaults.temperatures,
-                compressionRatioThreshold: decoding?.compressionRatioThreshold ?? decodingDefaults.compressionRatioThreshold,
-                logProbabilityThreshold: decoding?.logProbThreshold ?? decodingDefaults.logProbabilityThreshold,
-                noSpeechThreshold: decoding?.noSpeechThreshold ?? decodingDefaults.noSpeechThreshold,
-                bestOf: decoding?.bestOf ?? decodingDefaults.bestOf,
-                repetitionPenalty: decoding?.repetitionPenalty ?? decodingDefaults.repetitionPenalty,
-                suppressesBlankStart: decoding?.suppressBlank ?? decodingDefaults.suppressesBlankStart,
-                maximumInitialTimestampSeconds: decoding?.maxInitialTimestamp ?? decodingDefaults.maximumInitialTimestampSeconds,
-                maximumGeneratedTokenCount: decoding?.maxNewTokens ?? decodingDefaults.maximumGeneratedTokenCount,
-                usesTimestamps: decoding?.timestamps ?? decodingDefaults.usesTimestamps,
-                noRepeatNgramSize: decoding?.noRepeatNgramSize ?? decodingDefaults.noRepeatNgramSize
-            ),
+            decoding: modelDecoding,
             vadModelName: vad?.model ?? "whisper-vad-asmr",
             vad: VADSettings(
                 threshold: vad?.threshold ?? vadDefaults.threshold,
@@ -136,7 +135,7 @@ struct ModelConfiguration: Decodable {
                 splitWindowFactor: chunking?.splitWindowFactor ?? chunkingDefaults.splitWindowFactor
             ),
             segmentation: SegmentationSettings(
-                mode: segmentation?.mode ?? segmentationDefaults.mode,
+                mode: qwen3ASR != nil ? .vadGroups : (segmentation?.mode ?? segmentationDefaults.mode),
                 groupGap: segmentation?.groupGapMs.map { AudioTime(milliseconds: $0) } ?? segmentationDefaults.groupGap,
                 groupMaximumDuration: segmentation?.groupMaxMs.map { AudioTime(milliseconds: $0) } ?? segmentationDefaults.groupMaximumDuration,
                 leadingSilence: segmentation?.leadingSilenceMs.map { AudioTime(milliseconds: $0) } ?? segmentationDefaults.leadingSilence
@@ -151,6 +150,26 @@ struct ModelConfiguration: Decodable {
                 collapsesRepeats: cleanup?.collapseRepeats ?? cleanupDefaults.collapsesRepeats,
                 appendsPeriod: cleanup?.appendPeriod ?? cleanupDefaults.appendsPeriod
             )
+        )
+    }
+
+    private func whisperDecoding(task: TranscriptionTask) -> DecodingSettings {
+        let defaults = ChickenRiceDefaults.decoding(task: task)
+        let decoding = decoding
+        return DecodingSettings(
+            task: task,
+            languageCode: language,
+            temperatures: decoding?.temperatures ?? defaults.temperatures,
+            compressionRatioThreshold: decoding?.compressionRatioThreshold ?? defaults.compressionRatioThreshold,
+            logProbabilityThreshold: decoding?.logProbThreshold ?? defaults.logProbabilityThreshold,
+            noSpeechThreshold: decoding?.noSpeechThreshold ?? defaults.noSpeechThreshold,
+            bestOf: decoding?.bestOf ?? defaults.bestOf,
+            repetitionPenalty: decoding?.repetitionPenalty ?? defaults.repetitionPenalty,
+            suppressesBlankStart: decoding?.suppressBlank ?? defaults.suppressesBlankStart,
+            maximumInitialTimestampSeconds: decoding?.maxInitialTimestamp ?? defaults.maximumInitialTimestampSeconds,
+            maximumGeneratedTokenCount: decoding?.maxNewTokens ?? defaults.maximumGeneratedTokenCount,
+            usesTimestamps: decoding?.timestamps ?? defaults.usesTimestamps,
+            noRepeatNgramSize: decoding?.noRepeatNgramSize ?? defaults.noRepeatNgramSize
         )
     }
 }

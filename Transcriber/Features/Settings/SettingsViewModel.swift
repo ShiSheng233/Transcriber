@@ -51,6 +51,11 @@ final class SettingsViewModel {
         let fileManager = FileManager.default
         let catalog = library.catalog
         var statuses = catalog.models.map { model in
+            if let qwen = model.qwen3ASR {
+                let missingFile = qwen.firstMissingFile
+                let detail = missingFile.map { String(localized: "Missing Qwen3-ASR file: \($0.lastPathComponent)") } ?? model.summary
+                return ModelStatus(title: model.displayName, detail: detail, isReady: missingFile == nil)
+            }
             let weights = settings.backend == .whisperCpp ? model.files.whisperCpp : model.files.mlx
             let isReady = weights.map { fileManager.fileExists(atPath: $0.path) } == true
                 && fileManager.fileExists(atPath: model.files.tokenizer.path)

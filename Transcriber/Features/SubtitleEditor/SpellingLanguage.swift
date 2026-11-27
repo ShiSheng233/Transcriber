@@ -15,10 +15,18 @@ enum SpellingLanguage {
         let wentThroughLanguageModel = !job.linesBeforeLanguageModel.isEmpty
         switch job.kind {
         case .transcription(let model):
-            return ofTranscript(
-                task: model.decoding.task, languageCode: model.decoding.languageCode, llmMode: model.llmMode,
-                translatedInto: wentThroughLanguageModel ? targetLanguage : nil
-            )
+            switch model.decoding {
+            case .qwen3ASR(let decoding):
+                if model.llmMode == .translate, wentThroughLanguageModel {
+                    return code(forLanguageName: targetLanguage)
+                }
+                return decoding.languageCode
+            case .whisper(let decoding):
+                return ofTranscript(
+                    task: decoding.task, languageCode: decoding.languageCode, llmMode: model.llmMode,
+                    translatedInto: wentThroughLanguageModel ? targetLanguage : nil
+                )
+            }
         case .subtitleTranslation:
             return wentThroughLanguageModel ? code(forLanguageName: targetLanguage) : nil
         case .subtitleEditing:

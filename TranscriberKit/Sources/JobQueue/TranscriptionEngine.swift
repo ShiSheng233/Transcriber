@@ -28,18 +28,18 @@ public actor TranscriptionEngine {
     }
 
     private var loaded: (key: PipelineKey, pipeline: TranscriptionPipeline)?
+    private var loadGeneration = 0
 
     public init() {}
 
     /// Frees the loaded model. ggml's Metal device checks at process exit
     /// that every buffer was freed, so call this before quitting.
     public func unload() {
-        guard let unloaded = loaded else {
-            return
-        }
+        loadGeneration += 1
+        let usesMLX = loaded.map { $0.key.model.qwen3ASR != nil || $0.key.settings.backend == .mlx } ?? false
         loaded = nil
         // Only after MLX ran: touching MLX otherwise would start it up.
-        if unloaded.key.settings.backend == .mlx {
+        if usesMLX {
             WhisperMLXMemory.releaseCachedBuffers()
         }
     }
@@ -54,19 +54,29 @@ public actor TranscriptionEngine {
         loaded?.key == PipelineKey(settings: settings, model: model)
     }
 
-    public func pipeline(for model: RecognitionModel, settings: EngineSettings) throws -> TranscriptionPipeline {
+    public func pipeline(for model: RecognitionModel, settings: EngineSettings) async throws -> TranscriptionPipeline {
         let key = PipelineKey(settings: settings, model: model)
         if let loaded, loaded.key == key {
             return loaded.pipeline
         }
-        loaded = nil  // release the previous model before loading the next
-        let pipeline = try Self.makePipeline(for: model, settings: settings)
-        loaded = (key, pipeline)
+        unload()  // release the previous model before loading the next
+        let generation = loadGeneration
+        let pipeline = try await Self.makePipeline(for: model, settings: settings)
+        if generation == loadGeneration {
+            loaded = (key, pipeline)
+        }
         return pipeline
     }
 
-    private static func makePipeline(for model: RecognitionModel, settings: EngineSettings) throws -> TranscriptionPipeline {
+    private static func makePipeline(for model: RecognitionModel, settings: EngineSettings) async throws -> TranscriptionPipeline {
         let vadURL = try existing(settings.modelsDirectory.appendingPathComponent("vad/\(model.vadModelName).mlmodelc"))
+        let decoding: DecodingSettings
+        switch model.decoding {
+        case .qwen3ASR(let qwen):
+            return try await makeQwenPipeline(decoding: qwen, model: model, vadURL: vadURL)
+        case .whisper(let whisper):
+            decoding = whisper
+        }
 
         let backend: any WhisperBackend
         switch settings.backend {
@@ -86,13 +96,28 @@ public actor TranscriptionEngine {
 
         let tokenizer = try WhisperTokenizer(contentsOf: try existing(model.files.tokenizer))
         let decoder = FallbackDecoder(windowDecoder: WindowDecoder(
-            tokenizer: tokenizer, settings: model.decoding
+            tokenizer: tokenizer, settings: decoding
         ))
         let pipelineSettings = TranscriptionPipeline.Settings(model: model, concurrentChunkCount: settings.concurrentChunkCount)
         return TranscriptionPipeline(
             vadModel: try WhisperVADModel(compiledModelAt: vadURL),
             segmentGenerator: SegmentGenerator(backend: backend, decoder: decoder),
             settings: pipelineSettings
+        )
+    }
+
+    private static func makeQwenPipeline(
+        decoding: RecognitionModel.Qwen3ASR, model: RecognitionModel, vadURL: URL
+    ) async throws -> TranscriptionPipeline {
+        if let missingFile = decoding.firstMissingFile {
+            throw TranscriptionEngineError.missingModel(missingFile)
+        }
+        let vadModel = try WhisperVADModel(compiledModelAt: vadURL)
+        let recognizer = try await QwenASRRecognizer.load(settings: decoding)
+        return TranscriptionPipeline(
+            vadModel: vadModel,
+            settings: .init(model: model, concurrentChunkCount: 1),
+            recognizeGroup: { samples in try await recognizer.transcribe(samples) }
         )
     }
 

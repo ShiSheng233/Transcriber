@@ -9,7 +9,7 @@ macOS 原生字幕生成工具。把 [Faster-Whisper-TransWithAI-ChickenRice](ht
 | UI 框架 | AppKit（NSViewController / NSView），MVVM |
 | 最低系统 | macOS 15 |
 | 分发 | Developer ID 签名 + 公证，直接下载，Sparkle 更新，**不开沙盒** |
-| 识别引擎 | **两个后端：whisper.cpp（Metal）与 MLX（参考 mlx-whisper）**。后端只负责编码和单步解码；与 CTranslate2 / faster-whisper 等价的解码逻辑在 Swift 中只写一份，两个后端共用（见 §5.1）。默认后端由 Phase 0 的实测决定 |
+| 识别引擎 | Whisper 使用 whisper.cpp 或 MLX，共用 Swift 解码逻辑（见 §5.1）。Qwen3-ASR 使用 MLX Audio Swift，语音分组和字幕时间由管线的 VAD 提供 |
 | VAD | **TransWithAI ASMR VAD 转 Core ML**；不使用 whisper.cpp 自带的 Silero VAD |
 | 链路 | 媒体解码、VAD、智能切块、语音拼接、时间戳映射、逐步 logits 处理、温度回退、分段、后处理全部在 Swift 中实现；后端只做张量计算 |
 | 模型 | **App 不内置模型**。我们自己转换（ggml、MLX、Core ML）并单独分发；App 下载到用户指定的模型目录。现阶段不公开，转换产物放在本仓库的 `Models/`（已 gitignore） |
@@ -255,6 +255,11 @@ whisper.cpp 以 `WHISPER_COREML=ON` + `WHISPER_COREML_ALLOW_FALLBACK=ON` 自行�
 - **许可**：模型 MIT，但训练数据集条款禁止商用基于它训练的模型——商业发行前要处理。
 
 未照搬：WhisperJAV 的场景切分（只为限制内存与对齐器）、按 CPS 调整起点。非语言行过滤见 §6.5（可选，所有模型通用）。
+
+Qwen3-ASR 也使用这条 VAD 分组路径。`make qwen-asr-models` 下载
+`jaykwok/Qwen3-ASR-1.7B-JA-Anime-Galgame` 固定版本的 BF16 推理文件。
+`files.qwen3_asr` 指向模型目录，App 和 CLI 通过 MLX Audio Swift 逐组转写。
+每组文本按 VAD 分组的起止时间对齐，日文原文可接现有的 LLM 翻译步骤。
 
 ### 6.5 可选的字幕过滤（参照 WhisperJAV 的 sanitizer）
 

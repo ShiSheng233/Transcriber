@@ -24,7 +24,7 @@ struct ModelCatalogTests {
         let model = try #require(catalog.model(withID: "minimal"))
 
         #expect(catalog.models.count == 1)  // vad/ has no model.json
-        #expect(model.decoding == ChickenRiceDefaults.decoding(task: .transcribe))
+        #expect(model.decoding == .whisper(ChickenRiceDefaults.decoding(task: .transcribe)))
         #expect(model.vad == ChickenRiceDefaults.vad)
         #expect(model.chunking == ChickenRiceDefaults.chunking)
         #expect(model.merge == ChickenRiceDefaults.merge)
@@ -52,11 +52,15 @@ struct ModelCatalogTests {
 
         let model = try #require(ModelCatalog.scan(folder).model(withID: "custom"))
 
-        #expect(model.decoding.languageCode == "en")
-        #expect(model.decoding.temperatures == [0.0])
-        #expect(model.decoding.repetitionPenalty == 1.1)
-        #expect(model.decoding.maximumInitialTimestampSeconds == 0.5)
-        #expect(model.decoding.bestOf == ChickenRiceDefaults.decoding(task: .transcribe).bestOf)
+        guard case .whisper(let decoding) = model.decoding else {
+            Issue.record("Expected Whisper decoding for custom")
+            return
+        }
+        #expect(decoding.languageCode == "en")
+        #expect(decoding.temperatures == [0.0])
+        #expect(decoding.repetitionPenalty == 1.1)
+        #expect(decoding.maximumInitialTimestampSeconds == 0.5)
+        #expect(decoding.bestOf == ChickenRiceDefaults.decoding(task: .transcribe).bestOf)
         #expect(model.vad.threshold == 0.4)
         #expect(model.vad.speechPadding == AudioTime(milliseconds: 100))
         #expect(!model.chunking.isEnabled)
@@ -67,13 +71,16 @@ struct ModelCatalogTests {
     }
 
     @Test func reportsUnreadableConfigurations() throws {
-        let folder = try makeModelsFolder(["broken": #"{"id": "broken"}"#])
+        let folder = try makeModelsFolder([
+            "broken": #"{"id": "broken"}"#,
+            "whisper-without-task": #"{"id": "whisper-without-task", "name": "Whisper without task", "language": "ja", "llm_mode": "translate"}"#,
+        ])
         defer { try? FileManager.default.removeItem(at: folder) }
 
         let catalog = ModelCatalog.scan(folder)
 
         #expect(catalog.models.isEmpty)
-        #expect(catalog.problems.map(\.configurationURL.lastPathComponent) == ["model.json"])
+        #expect(catalog.problems.map { $0.configurationURL.deletingLastPathComponent().lastPathComponent } == ["broken", "whisper-without-task"])
     }
 
     @Test func theRepositoryConfigurationsAreValid() throws {
@@ -93,7 +100,17 @@ struct ModelCatalogTests {
 
         #expect(catalog.problems.isEmpty)
         #expect(Set(catalog.models.map(\.id)) == Set(installed.keys))  // folder name == id
-        #expect(catalog.model(withID: "chickenrice-v0.2")?.decoding == ChickenRiceDefaults.decoding(task: .translate))
-        #expect(catalog.model(withID: "whisper-ja-1.5b")?.decoding == ChickenRiceDefaults.decoding(task: .transcribe))
+        let chickenRice = try #require(catalog.model(withID: "chickenrice-v0.2"))
+        #expect(chickenRice.decoding == .whisper(ChickenRiceDefaults.decoding(task: .translate)))
+        #expect(chickenRice.llmMode == .polish)
+        #expect(catalog.model(withID: "whisper-ja-1.5b")?.decoding == .whisper(ChickenRiceDefaults.decoding(task: .transcribe)))
+        let qwen = try #require(catalog.model(withID: "qwen3-asr-1.7b-ja-anime-galgame"))
+        let qwenDecoding = try #require(qwen.qwen3ASR)
+        #expect(qwenDecoding.directory.lastPathComponent == "qwen3-asr")
+        #expect(qwenDecoding.languageCode == "ja")
+        #expect(qwenDecoding.maximumGeneratedTokenCount == 128)
+        #expect(qwen.llmMode == .translate)
+        #expect(qwen.files.whisperCpp == nil && qwen.files.mlx == nil)
+        #expect(qwen.segmentation.mode == .vadGroups)
     }
 }

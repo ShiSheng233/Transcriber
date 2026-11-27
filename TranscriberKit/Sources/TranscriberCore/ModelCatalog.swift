@@ -33,7 +33,7 @@ public struct ModelCatalog: Sendable {
             }
             do {
                 let configuration = try decoder.decode(ModelConfiguration.self, from: data)
-                models.append(configuration.model(in: folder))
+                models.append(try configuration.model(in: folder))
             } catch {
                 problems.append(Problem(configurationURL: configurationURL, message: String(describing: error)))
             }

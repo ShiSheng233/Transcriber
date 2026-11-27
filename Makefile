@@ -48,6 +48,7 @@ WHISPER_CMAKE_FLAGS := \
 	-DGGML_OPENMP=OFF
 
 .PHONY: FORCE help whisper-xcframework ffmpeg-xcframeworks whisper-models whisper-models-q8_0 mlx-models coreml-encoders vad-model parity-fixtures baseline-a ours parity-report build test test-app clean-tools release release-archive release-export release-notarize release-cask release-publish
+.PHONY: qwen-asr-models
 
 help:
 	@echo "make whisper-xcframework  Build whisper.cpp $(WHISPER_VERSION) into $(WHISPER_XCFRAMEWORK)"
@@ -55,6 +56,7 @@ help:
 	@echo "make whisper-models       Download and convert the Whisper models into $(MODELS_DIR)/<model>"
 	@echo "make whisper-models-q8_0  Optional: q8_0 variants (not built by default)"
 	@echo "make mlx-models           Convert the Whisper models to MLX (original precision) into $(MODELS_DIR)/<model>/mlx"
+	@echo "make qwen-asr-models      Download the Qwen3-ASR Japanese anime and galgame model (BF16)"
 	@echo "make coreml-encoders      Convert $(COREML_ENCODER_MODELS)'s encoder to Core ML (Neural Engine) next to its ggml.bin"
 	@echo "make vad-model            Convert the ASMR VAD to Core ML into $(MODELS_DIR)/vad"
 	@echo "make parity-fixtures      Regenerate test fixtures from the original Python pipeline"
@@ -320,6 +322,26 @@ $(eval $(call mlx_model,whisper-ja-1.5b,float16))
 $(eval $(call mlx_model,anime-whisper,float16))
 
 mlx-models: $(call MODEL_FILES,model.json tokenizer.json mlx/model.safetensors)
+
+# Qwen3-ASR models --------------------------------------------------------------
+# The Swift MLX loader accepts the original Hugging Face safetensors.
+QWEN_ASR_MODEL := qwen3-asr-1.7b-ja-anime-galgame
+QWEN_ASR_REPO := jaykwok/Qwen3-ASR-1.7B-JA-Anime-Galgame
+QWEN_ASR_REVISION := 6db0efecd56d4a7e0003190a6bd4cac056d0f390
+QWEN_ASR_SHA256 := 11e6833181be3107ad4384464ba656d3f2c8b773806fe6b7fc615e3eb01bd661
+QWEN_ASR_DIRECTORY := $(MODELS_DIR)/$(QWEN_ASR_MODEL)
+QWEN_ASR_FILES := $(addprefix $(QWEN_ASR_DIRECTORY)/qwen3-asr/,config.json tokenizer_config.json tokenizer.json model.safetensors)
+
+$(QWEN_ASR_FILES): $(QWEN_ASR_DIRECTORY)/qwen3-asr/%:
+	mkdir -p $(@D)
+	$(DOWNLOAD) -o $@.partial $(HUGGING_FACE)/$(QWEN_ASR_REPO)/resolve/$(QWEN_ASR_REVISION)/$*
+	$(if $(filter model.safetensors,$*),$(call verify_sha256,$(QWEN_ASR_SHA256),$@.partial),:)
+	mv $@.partial $@
+
+$(QWEN_ASR_DIRECTORY)/model.json: $(MODEL_CONFIGURATIONS)/$(QWEN_ASR_MODEL).json | $(QWEN_ASR_FILES)
+	cp $< $@
+
+qwen-asr-models: $(QWEN_ASR_DIRECTORY)/model.json
 
 # VAD model --------------------------------------------------------------------
 #

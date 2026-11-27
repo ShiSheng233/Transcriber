@@ -15,12 +15,23 @@ Models/
 `make whisper-models mlx-models` copies `<id>.json` here to `Models/<id>/model.json`.
 The app lists every folder with a `model.json`; nothing about a model is built in.
 
-Required keys: `id`, `name`, `language` (Whisper language code), `task`
-(`translate` or `transcribe`: the Whisper task token the model was trained
-with) and `llm_mode` (`polish` the output, or `translate` it to the user's
-language). Optional: `summary`, `source`, `license`, `files`, and the sections
-below. Anything left out takes the original ChickenRice pipeline's value
-(`ChickenRiceDefaults.swift`).
+`make qwen-asr-models` installs Qwen3-ASR 1.7B JA Anime Galgame with its
+original BF16 weights (about 4.08 GB). `files.qwen3_asr` points to the local
+directory containing `config.json`, `model.safetensors`, `tokenizer.json`,
+and `tokenizer_config.json`. Models with this field use Qwen3-ASR on MLX
+automatically. Each VAD group supplies the timing for one subtitle.
+`language` requests the language of the Qwen transcript, and
+`decoding.max_new_tokens` sets the generation limit per group (default 128).
+The shared VAD comes from `make vad-model`.
+
+All models require `id`, `name`, `language` and `llm_mode`. `llm_mode` is
+`polish` to polish the transcript or `translate` to translate it into the
+user's target language. For Whisper, `language` is the spoken language code
+and `task` is the required `translate` or `transcribe` prompt token.
+ChickenRice uses `ja` and `translate` for Japanese audio and directly outputs
+Chinese. Qwen3-ASR transcribes audio and needs only `language` for its prompt.
+Optional keys include `summary`, `source`, `license`, `files` and the sections
+below. Shared pipeline and Whisper decoding defaults come from `ChickenRiceDefaults`.
 
 ```json
 "files":    { "whisper_cpp": "ggml.bin", "mlx": "mlx", "tokenizer": "tokenizer.json" },

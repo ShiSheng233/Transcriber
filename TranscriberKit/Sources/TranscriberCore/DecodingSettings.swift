@@ -1,6 +1,7 @@
 /// Whisper decoding parameters, named after faster-whisper's `transcribe()` options.
 public struct DecodingSettings: Hashable, Sendable, Codable {
     public var task: TranscriptionTask
+    /// The language spoken in the audio, used for the Whisper language token.
     public var languageCode: String
     /// Tried in order until a result passes the quality checks.
     public var temperatures: [Float]

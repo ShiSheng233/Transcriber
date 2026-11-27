@@ -2,9 +2,8 @@ import Foundation
 
 /// A speech model the app can run, as described by its `model.json`.
 ///
-/// Users pick a model, not a Whisper task: the configuration says which
-/// language and task tokens it needs, how to decode, segment and post-process,
-/// and what the language-model step should do with its output.
+/// The configuration selects the recognizer, decoding and segmentation settings,
+/// and the language-model step for the transcript.
 public struct RecognitionModel: Hashable, Sendable, Identifiable {
     public enum LLMMode: String, Hashable, Sendable, Codable {
         /// Improve the model's own output language (e.g. ChickenRice's Chinese).
@@ -31,6 +30,26 @@ public struct RecognitionModel: Hashable, Sendable, Identifiable {
         public let mlx: URL?
     }
 
+    public enum Decoding: Hashable, Sendable {
+        case whisper(DecodingSettings)
+        case qwen3ASR(Qwen3ASR)
+    }
+
+    public struct Qwen3ASR: Hashable, Sendable {
+        public let directory: URL
+        /// Language of the transcript requested in the Qwen prompt.
+        public let languageCode: String
+        public let maximumGeneratedTokenCount: Int
+
+        public var firstMissingFile: URL? {
+            for name in ["model.safetensors", "config.json", "tokenizer.json", "tokenizer_config.json"] {
+                let file = directory.appendingPathComponent(name)
+                if !FileManager.default.fileExists(atPath: file.path) { return file }
+            }
+            return nil
+        }
+    }
+
     public let id: String
     public let displayName: String
     /// One line for menus and settings.
@@ -41,7 +60,13 @@ public struct RecognitionModel: Hashable, Sendable, Identifiable {
     public let directory: URL
     public let files: Files
     public let whisperCppEncoder: WhisperCppEncoder
-    public let decoding: DecodingSettings
+    public let decoding: Decoding
+
+    public var qwen3ASR: Qwen3ASR? {
+        guard case .qwen3ASR(let settings) = decoding else { return nil }
+        return settings
+    }
+
     /// The VAD model's name: `vad/<name>.mlmodelc` in the models folder.
     public let vadModelName: String
     public let vad: VADSettings

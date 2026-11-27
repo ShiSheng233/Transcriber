@@ -96,27 +96,48 @@ public struct TranscriptionPipeline: Sendable {
         case postProcessed(segmentCount: Int)
     }
 
+    private enum Recognizer: Sendable {
+        case chunks(ChunkTranscriber)
+        case vadGroups(GroupTranscriber)
+    }
+
     private let voiceActivityDetector: VoiceActivityDetector
-    private let chunkTranscriber: ChunkTranscriber
-    private let groupTranscriber: GroupTranscriber
+    private let recognizer: Recognizer
     private let settings: Settings
 
     public init(vadModel: WhisperVADModel, segmentGenerator: SegmentGenerator, settings: Settings = .chickenRice) {
         self.settings = settings
         self.voiceActivityDetector = VoiceActivityDetector(model: vadModel, settings: settings.vad)
         let spectrogram = LogMelSpectrogram(melBandCount: segmentGenerator.backend.melBandCount, framing: .wholeSignal)
-        self.chunkTranscriber = ChunkTranscriber(
-            voiceActivityDetector: voiceActivityDetector,
-            segmentGenerator: segmentGenerator,
-            spectrogram: spectrogram,
-            samplingSeed: settings.samplingSeed
-        )
-        self.groupTranscriber = GroupTranscriber(
-            segmentGenerator: segmentGenerator,
-            spectrogram: spectrogram,
-            leadingSilence: settings.segmentation.leadingSilence,
-            samplingSeed: settings.samplingSeed
-        )
+        switch settings.segmentation.mode {
+        case .chunks:
+            recognizer = .chunks(ChunkTranscriber(
+                voiceActivityDetector: voiceActivityDetector,
+                segmentGenerator: segmentGenerator,
+                spectrogram: spectrogram,
+                samplingSeed: settings.samplingSeed
+            ))
+        case .vadGroups:
+            recognizer = .vadGroups(GroupTranscriber(
+                segmentGenerator: segmentGenerator,
+                spectrogram: spectrogram,
+                leadingSilence: settings.segmentation.leadingSilence,
+                samplingSeed: settings.samplingSeed
+            ))
+        }
+    }
+
+    package init(
+        vadModel: WhisperVADModel,
+        settings: Settings,
+        recognizeGroup: @escaping @Sendable ([Float]) async throws -> String
+    ) {
+        self.settings = settings
+        self.voiceActivityDetector = VoiceActivityDetector(model: vadModel, settings: settings.vad)
+        recognizer = .vadGroups(GroupTranscriber(recognize: { signal, _, _ in
+            let text = try await recognizeGroup(signal)
+            return text.isEmpty ? nil : (text, nil)
+        }, leadingSilence: settings.segmentation.leadingSilence))
     }
 
     public func transcribe(
@@ -184,17 +205,16 @@ public struct TranscriptionPipeline: Sendable {
         }
 
         let segments: [TimedText]
-        switch settings.segmentation.mode {
-        case .chunks:
+        switch recognizer {
+        case .chunks(let chunkTranscriber):
             segments = try await transcribeInChunks(
-                samples: samples, speech: speech, dropsRepetitionLoops: filter.dropsRepetitionLoops, progress: progress
+                chunkTranscriber, samples: samples, speech: speech, dropsRepetitionLoops: filter.dropsRepetitionLoops, progress: progress
             )
-        case .vadGroups:
+        case .vadGroups(let groupTranscriber):
             let groups = SpeechGrouper.groups(speech, settings: settings.segmentation)
             progress(.plannedChunks(count: groups.count))
-            let groupTranscriber = groupTranscriber
             segments = try await transcribeConcurrently(groups, progress: progress) { group in
-                try groupTranscriber.transcribe(group, of: samples, dropsRepetitionLoops: filter.dropsRepetitionLoops)
+                try await groupTranscriber.transcribe(group, of: samples, dropsRepetitionLoops: filter.dropsRepetitionLoops)
             }
         }
         let cleaned = SubtitleTextCleanup.apply(
@@ -209,6 +229,7 @@ public struct TranscriptionPipeline: Sendable {
     /// ChickenRice: up to 30 s chunks cut at silences, each transcribed with
     /// its own inner VAD and timestamps.
     private func transcribeInChunks(
+        _ chunkTranscriber: ChunkTranscriber,
         samples: [Float],
         speech: [SpeechSpan],
         dropsRepetitionLoops: Bool,
@@ -227,7 +248,6 @@ public struct TranscriptionPipeline: Sendable {
         }
         progress(.plannedChunks(count: chunks.count))
 
-        let chunkTranscriber = chunkTranscriber
         return try await transcribeConcurrently(chunks, progress: progress) { chunk in
             try chunkTranscriber.transcribe(chunk, of: samples, dropsRepetitionLoops: dropsRepetitionLoops)
         }
@@ -238,7 +258,7 @@ public struct TranscriptionPipeline: Sendable {
     private func transcribeConcurrently(
         _ chunks: [AudioChunk],
         progress: @escaping @Sendable (Progress) -> Void,
-        transcribe: @escaping @Sendable (AudioChunk) throws -> [TimedText]
+        transcribe: @escaping @Sendable (AudioChunk) async throws -> [TimedText]
     ) async throws -> [TimedText] {
         return try await withThrowingTaskGroup(of: (Int, [TimedText]).self) { group in
             var segmentsByChunk = [[TimedText]](repeating: [], count: chunks.count)
@@ -246,7 +266,7 @@ public struct TranscriptionPipeline: Sendable {
             func startNextChunk() {
                 let chunk = chunks[nextChunk]
                 group.addTask {
-                    (chunk.index, try transcribe(chunk))
+                    (chunk.index, try await transcribe(chunk))
                 }
                 nextChunk += 1
             }
