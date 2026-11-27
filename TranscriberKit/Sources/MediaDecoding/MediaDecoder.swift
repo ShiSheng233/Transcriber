@@ -319,6 +319,10 @@ private final class MediaInput {
             avformat_close_input(&openedFormatContext)
             throw .noAudioStream(url)
         }
+        // Let the demuxer skip non-target packets before reading their payloads when it can.
+        for case let stream? in streams where stream != audioStream {
+            stream.pointee.discard = AVDISCARD_ALL
+        }
 
         do {
             self.codecContext = try Self.openDecoder(for: audioStream.pointee.codecpar)

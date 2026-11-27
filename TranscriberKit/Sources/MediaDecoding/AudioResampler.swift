@@ -1,3 +1,4 @@
+import Accelerate
 import libavutil
 import libswresample
 
@@ -12,7 +13,7 @@ import libswresample
 /// without holes comes out sample for sample the same.
 final class AudioResampler {
     static let outputSampleRate: Int32 = 16_000
-    private static let int16Scale: Float = 32_768
+    private static let int16ToFloatScale: Float = 1 / 32_768
     /// `aresample`'s `async=1`: fill and trim only, never stretch.
     private static let fillAndTrimOnly = 1.0
 
@@ -20,6 +21,8 @@ final class AudioResampler {
     let maximumSamples: Int?
     private var context: OpaquePointer?
     private var inputFormat: InputFormat?
+    private var resampledInt16: [Int16] = []
+    private var resampledFloat: [Float] = []
 
     init(followsTimestamps: Bool, maximumSamples: Int? = nil) {
         self.followsTimestamps = followsTimestamps
@@ -105,10 +108,12 @@ final class AudioResampler {
         while true {
             let available = max(swr_get_out_samples(context, inputSampleCount), 1)
             let capacity = maximumSamples.map { Int32(min(Int(available), $0 - output.count + 1)) } ?? available
-            var samples = [Int16](repeating: 0, count: Int(capacity))
-            let produced = samples.withUnsafeMutableBytes { buffer in
-                var planes: [UnsafeMutablePointer<UInt8>?] = [buffer.baseAddress?.assumingMemoryBound(to: UInt8.self)]
-                return swr_convert(context, &planes, capacity, input, inputSampleCount)
+            if resampledInt16.count < Int(capacity) {
+                resampledInt16.append(contentsOf: repeatElement(0, count: Int(capacity) - resampledInt16.count))
+            }
+            let produced = resampledInt16.withUnsafeMutableBytes { buffer in
+                var plane = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self)
+                return swr_convert(context, &plane, capacity, input, inputSampleCount)
             }
             guard produced >= 0 else {
                 throw MediaDecodingError.decodingFailed(FFmpegError(code: produced))
@@ -116,11 +121,29 @@ final class AudioResampler {
             if let maximumSamples, Int(produced) > maximumSamples - output.count {
                 throw SampleLimitExceeded.exceeded
             }
-            output.append(contentsOf: samples.prefix(Int(produced)).map { Float($0) / Self.int16Scale })
+            if produced > 0 {
+                appendConvertedSamples(Int(produced), to: &output)
+            }
             // With input, one call converts everything; when flushing, repeat until drained.
             if input != nil || produced == 0 {
                 return
             }
+        }
+    }
+
+    private func appendConvertedSamples(_ count: Int, to output: inout [Float]) {
+        if resampledFloat.count < count {
+            resampledFloat.append(contentsOf: repeatElement(0, count: count - resampledFloat.count))
+        }
+        resampledFloat.withUnsafeMutableBufferPointer { buffer in
+            guard let destination = buffer.baseAddress else {
+                preconditionFailure("The conversion buffer has space for \(count) samples")
+            }
+            let length = vDSP_Length(count)
+            var scale = Self.int16ToFloatScale
+            vDSP_vflt16(resampledInt16, 1, destination, 1, length)
+            vDSP_vsmul(destination, 1, &scale, destination, 1, length)
+            output.append(contentsOf: UnsafeBufferPointer(start: destination, count: count))
         }
     }
 

@@ -202,6 +202,8 @@ whisper.cpp 以 `WHISPER_COREML=ON` + `WHISPER_COREML_ALLOW_FALLBACK=ON` 自行�
 
 **全部格式都用 FFmpeg**（不再优先 AVFoundation）：原项目通过 PyAV 用 FFmpeg 解码，用 libswresample 默认参数转成 16 kHz mono s16。用同一套库可以得到逐样本相同的结果（PCM 已验证完全一致；AAC 只有末尾填充的裁剪不同，FFmpeg 9 会裁掉，PyAV 自带的 FFmpeg 7.1 不裁）。FFmpeg 9.0.2 以 LGPL 配置自行构建（`make ffmpeg-xcframeworks`），只含 file 协议、常用 demuxer 和音频 decoder，动态 framework 随 App 分发；关于窗口附 LGPL 声明与源码获取方式。
 
+音频解码选定第一条音轨后，把其余流标记为丢弃，让支持的 demuxer 跳过非目标包的读取或处理。重采样复用 s16 和 Float 缓冲，用 Accelerate 批量转换样本。
+
 **时间戳空洞**（参照 WhisperJAV v1.9.4 实测）：有些文件的 AAC 包声称几秒时长、实际只有 64 ms 声音，原版把帧首尾相接，空洞之后的字幕全部提前（WhisperJAV 在一部 2 小时的片子上测到末尾偏 10 s，40 部里有 4 部）。默认按时间戳解码，等价于 FFmpeg 的 `aresample=async=1`：前后帧时间差超过 0.1 s（swresample 的 `min_hard_comp`）时补静音或裁掉重叠，小于它不动，所以没有空洞的文件逐样本不变（对拍 fixture 与 6 个 MOV/AAC 实测一致）。每处跳变写进活动日志。`--join-frames`（CLI）恢复原版行为。
 
 ## 6. 模型
