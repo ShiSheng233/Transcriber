@@ -23,8 +23,8 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
-        .package(url: "https://github.com/ml-explore/mlx-swift", exact: "0.32.3"),
-        .package(url: "https://github.com/Neywa-Labs/mlx-audio-swift", exact: "0.1.7"),
+        .package(url: "https://github.com/ml-explore/mlx-swift", exact: "0.33.0"),
+        .package(url: "https://github.com/Neywa-Labs/mlx-audio-swift", exact: "0.1.8"),
     ],
     targets: [
         .target(name: "TranscriberCore"),

@@ -260,6 +260,8 @@ Qwen3-ASR 也使用这条 VAD 分组路径。`make qwen-asr-models` 下载
 `jaykwok/Qwen3-ASR-1.7B-JA-Anime-Galgame` 固定版本的 BF16 推理文件。
 `files.qwen3_asr` 指向模型目录，App 和 CLI 通过 MLX Audio Swift 逐组转写。
 每组文本按 VAD 分组的起止时间对齐，日文原文可接现有的 LLM 翻译步骤。
+MLX Swift 0.33.0 包含 [MLX #4622](https://github.com/ml-explore/mlx/pull/4622)，
+修复标量索引的 `Gather` 将空形状或步幅元数据传给 Metal `setBytes` 时触发的 API Validation 断言。
 
 ### 6.5 可选的字幕过滤（参照 WhisperJAV 的 sanitizer）
 
